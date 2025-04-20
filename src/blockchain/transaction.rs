@@ -1,7 +1,5 @@
 use ed25519::signature::Signer;
-use sha3::{Digest, Sha3_256};
-
-use crate::crypto::hashing::{HashFunction, Sha3_256Hash};
+use crate::crypto::hashing::HashFunction;
 
 pub struct Transaction{
     // header is the header of the transaction
@@ -22,17 +20,23 @@ pub struct TransactionHeader{
     // timestamp is the time the transaction was created
     pub timestamp: u64,
     // the nonce is a random number used to prevent replay attacks
-    pub nonce: u64,
+    pub nonce: u64
 }
 
 impl TransactionHeader {
-    pub fn new(sender: [u8; 32], receiver: [u8; 32], amount: u64, timestamp: u64, nonce: u64) -> Self {
+    pub fn new(
+        sender: [u8; 32], 
+        receiver: [u8; 32], 
+        amount: u64, 
+        timestamp: u64, 
+        nonce: u64
+    ) -> Self {
         TransactionHeader {
             sender,
             receiver,
             amount,
             timestamp,
-            nonce,
+            nonce
         }
     }
 
@@ -45,7 +49,7 @@ impl TransactionHeader {
     /// # Returns
     ///
     /// * The hash of the transaction header as a [u8; 32] array
-    pub fn hash(&self, mut hasher: impl HashFunction) -> [u8; 32] {
+    pub fn hash(&self, hasher: &mut impl HashFunction) -> [u8; 32] {
         hasher.update(self.sender);
         hasher.update(self.receiver);
         hasher.update(self.amount.to_le_bytes());
@@ -71,9 +75,10 @@ impl Transaction {
         amount: u64,
         timestamp: u64,
         nonce: u64,
+        hash_function: &mut impl HashFunction
     ) -> Self {
         let header = TransactionHeader::new(sender, receiver, amount, timestamp, nonce);
-        let hash = header.hash(Sha3_256Hash::new());
+        let hash = header.hash(hash_function);
         Transaction {
             header,
             hash,
