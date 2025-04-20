@@ -1,10 +1,9 @@
 pub mod transaction;
 pub mod block;
 
-
 #[cfg(test)]
 mod tests{
-    use crate::{blockchain::{block::BlockHeader, transaction::{Transaction, TransactionHeader}}, crypto::hashing::{HashFunction, Sha3_256Hash}};
+    use crate::{blockchain::{block::BlockHeader, transaction::{Transaction, TransactionHeader}}, crypto::hashing::{HashFunction, Hashable, Sha3_256Hash}};
     use ed25519_dalek::{Verifier, Signature, SigningKey};
     use rand_core::OsRng;
     // use rand::rngs::OsRng;

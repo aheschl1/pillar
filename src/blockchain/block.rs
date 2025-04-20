@@ -1,4 +1,4 @@
-use crate::crypto::hashing::HashFunction;
+use crate::crypto::hashing::{HashFunction, Hashable};
 use super::transaction::Transaction;
 
 pub struct Block{
@@ -42,12 +42,15 @@ impl BlockHeader {
             miner_address,
         }
     }
+}
+
+impl Hashable for BlockHeader {
     /// Hash the block header using SHA3-256
     /// 
     /// # Returns
     /// 
     /// * The SHA3-256 hash of the block header
-    pub fn hash(&self, hash_function: &mut impl HashFunction) -> [u8; 32]{
+    fn hash(&self, hash_function: &mut impl HashFunction) -> [u8; 32]{
         hash_function.update(self.previous_hash);
         hash_function.update(self.merkle_root);
         hash_function.update(self.miner_address);

@@ -1,5 +1,5 @@
 use ed25519::signature::Signer;
-use crate::crypto::hashing::HashFunction;
+use crate::crypto::hashing::{HashFunction, Hashable};
 
 pub struct Transaction{
     // header is the header of the transaction
@@ -39,7 +39,9 @@ impl TransactionHeader {
             nonce
         }
     }
+}
 
+impl Hashable for TransactionHeader {
     /// Hash the transaction header using the provided HashFunction
     ///
     /// # Arguments
@@ -49,7 +51,7 @@ impl TransactionHeader {
     /// # Returns
     ///
     /// * The hash of the transaction header as a [u8; 32] array
-    pub fn hash(&self, hasher: &mut impl HashFunction) -> [u8; 32] {
+    fn hash(&self, hasher: &mut impl HashFunction) -> [u8; 32] {
         hasher.update(self.sender);
         hasher.update(self.receiver);
         hasher.update(self.amount.to_le_bytes());

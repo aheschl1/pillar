@@ -1,5 +1,10 @@
 use sha3::{Digest, Sha3_256};
 
+
+pub trait Hashable {
+    fn hash(&self, hasher: &mut impl HashFunction) -> [u8; 32];
+}
+
 pub trait HashFunction {
     fn update(&mut self, data: impl AsRef<[u8]>);
     fn digest(&mut self) -> Result<[u8; 32], std::io::Error>;
