@@ -1,12 +1,17 @@
+use core::hash;
+use std::sync::{Arc, Mutex};
+
 use crate::blockchain::transaction::Transaction;
 
-use super::hashing::{HashFunction, Hashable, Sha3_256Hash};
+use super::hashing::{HashFunction, Sha3_256Hash};
 
 pub struct TreeNode{
     // left is the left child of the node
-    pub left: Option<Box<TreeNode>>,
+    pub left: Option<Arc<Mutex<Box<TreeNode>>>>,
     // right is the right child of the node
-    pub right: Option<Box<TreeNode>>,
+    pub right: Option<Arc<Mutex<Box<TreeNode>>>>,
+    // parent is the parent of the node
+    pub parent: Option<Arc<Mutex<Box<TreeNode>>>>,
     // hash is the sha3_256 hash of the node
     pub hash: [u8; 32],
 }
@@ -17,68 +22,401 @@ impl Clone for TreeNode {
         TreeNode {
             left: self.left.clone(),
             right: self.right.clone(),
-            hash: self.hash,
+            parent: self.parent.clone(),
+            hash: self.hash.clone(),
         }
     }
 }
 
-pub trait ZKProof<T: Hashable, F: HashFunction> {
-    /// Generate a Merkle tree from the given data
-    fn generate_tree(&self, data: Vec<&T>, hash_function: &mut F) -> TreeNode;
-    /// Generate a proof of inclusion for the given data in the Merkle tree
-    fn generate_proof_of_inclusion(&self, data: &T, tree: &TreeNode, hash_function: &mut F) -> Vec<[u8; 32]>;
-    /// Verify the proof of inclusion for the given data in the Merkle tree
-    fn verify_proof_of_inclusion(&self, data: &T, proof: Vec<[u8; 32]>, root: [u8; 32], hash_function: &mut F) -> bool;
+pub enum HashDirection {
+    Left,
+    Right,
 }
 
 pub struct MerkleTree{
     // root is the root of the Merkle tree
-    pub root: TreeNode,
+    pub root: Option<Arc<Mutex<Box<TreeNode>>>>,
+    // store the leaves for logn proof generation
+    pub leaves: Option<Vec<Arc<Mutex<Box<TreeNode>>>>>,
 }
 
-// zkproof impl for merkle
-impl ZKProof<Transaction, Sha3_256Hash> for MerkleTree {
-    /// Generate a Merkle tree from the given data
-    /// 
-    /// # Arguments
-    /// 
-    /// * `data` - A vector of references to Transaction objects
-    /// * `hash_function` - A mutable instance of a type implementing the HashFunction trait
-    /// 
-    /// TODO: This is inneficient, as it clones the data twice 
-    fn generate_tree(&self, data: Vec<&Transaction>, hash_function: &mut Sha3_256Hash) -> TreeNode {
-        // list of transactions to list of leaves
-        let mut data: Vec<TreeNode> = data.clone().into_iter().map(|transaction|{
-            hash_function.update(transaction.hash);
-            TreeNode { left: None, right: None, hash: hash_function.digest().expect("Hashing failed") }
-        }).collect();
-
-        // work up levels, adding references to the previous level
-        // until we reach the root
-        while data.len() > 1 {
-            if data.len() % 2 != 0 {
-                data.push(data.last().unwrap().clone());
-            }
-            data = data.chunks(2)
-                .map(|nodes|{
-                    // nodes is a slice of two TreeNode
-                    hash_function.update(nodes[0].hash);
-                    hash_function.update(nodes[1].hash);
-                    TreeNode { 
-                        left: Some(Box::new(nodes[0].clone())), 
-                        right: Some(Box::new(nodes[1].clone())), 
-                        hash: hash_function.digest().expect("Hashing failed")
-                    }
-                }).collect();
+impl MerkleTree {
+    pub fn new() -> Self {
+        MerkleTree {
+            root: None,
+            leaves: None,
         }
-        data[0].clone()
+    }
+}
+
+/// Generate a Merkle tree from the given data
+/// 
+/// # Arguments
+/// 
+/// * `data` - A vector of references to Transaction objects
+/// * `hash_function` - A mutable instance of a type implementing the HashFunction trait
+/// 
+/// TODO: This is inneficient, as it clones the data twice 
+pub fn generate_tree(data: Vec<&Transaction>, hash_function: &mut Sha3_256Hash) -> Result<MerkleTree, std::io::Error> {
+    if data.is_empty() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Data is empty"));
+    }
+    // list of transactions to list of leaves
+    let mut data: Vec<Arc<Mutex<Box<TreeNode>>>> = data.into_iter().map(|transaction|{
+        hash_function.update(transaction.hash);
+        let node = TreeNode { left: None, right: None, parent:None, hash: hash_function.digest().expect("Hashing failed") };
+        // add to leaves
+        Arc::new(Mutex::new(Box::new(node)))
+    }).collect();
+    let leaves = Some(data.clone());
+
+    // work up levels, adding references to the previous level
+    // until we reach the root
+    while data.len() > 1 {
+        if data.len() % 2 != 0 {
+            data.push(data.last().unwrap().clone());
+        }
+        data = data.chunks(2)
+            .map(|nodes|{
+                // nodes is a slice of two TreeNode
+                hash_function.update(nodes[0].lock().unwrap().hash);
+                hash_function.update(nodes[1].lock().unwrap().hash);
+                // new node
+                let new_node = TreeNode { 
+                    left: Some(nodes[0].clone()), 
+                    right: Some(nodes[1].clone()), 
+                    parent: None,
+                    hash: hash_function.digest().expect("Hashing failed")
+                };
+                let new_node = Arc::new(Mutex::new(Box::new(new_node)));
+                // parent pointer
+                if let Ok(mut left_lock) = nodes[0].lock() {
+                    left_lock.parent = Some(new_node.clone());
+                }
+                if let Ok(mut right_lock) = nodes[1].lock() {
+                    right_lock.parent = Some(new_node.clone());
+                }
+                
+                return new_node;
+            }).collect();
+    }
+    let merkle = MerkleTree {
+        root: Some(data[0].clone()),
+        leaves: leaves,
+    };
+    Ok(merkle)
+}
+
+/// Generate a Merkle tree from the given data
+/// 
+/// # Arguments
+/// 
+/// * `data` - A reference to the Transaction object for which to generate the proof
+/// * `hash_function` - A mutable instance of a type implementing the HashFunction trait
+/// 
+/// # Returns
+/// 
+/// * `Ok(())` if the tree was generated successfully
+/// * `Err(std::io::Error)` if the tree could not be generated
+pub fn generate_proof_of_inclusion(merkle_tree: &mut MerkleTree, data: &Transaction, hash_function: &mut Sha3_256Hash) -> Option<Vec<([u8; 32], HashDirection)>> {
+    if merkle_tree.leaves.is_none() {
+        return None;
+    }
+    if merkle_tree.root.is_none() {
+        return None;
+    }
+    // hash of hash is leaf
+    hash_function.update(data.hash);
+    let leaf_hash = hash_function.digest().expect("Hashing failed");
+    let leaves = merkle_tree.leaves.as_ref().unwrap();
+    // find the leaf
+    let current_node = leaves.iter().find(|node| node.lock().unwrap().hash == leaf_hash);
+    if current_node.is_none() {
+        return None;
+    }
+    // proof
+    let mut proof = Vec::new();
+    let mut current_node = current_node.unwrap().clone();
+
+    loop{ 
+        let node = current_node.lock().unwrap();
+        let hash = node.hash;
+        let parent = node.parent.clone();
+        drop(node);
+        // if not root
+        if let Some(parent_node) = parent {
+            let parent = parent_node.lock().unwrap();
+            if parent.left.as_ref().map(|node| node.lock().unwrap().hash) == Some(hash) {
+                proof.push((parent.right.as_ref().unwrap().lock().unwrap().hash, HashDirection::Right));
+            } else {
+                proof.push((parent.left.as_ref().unwrap().lock().unwrap().hash, HashDirection::Left));
+            }
+            current_node = parent_node.clone();
+        } else {
+            break;
+        }
+    }
+    
+    Some(proof)
+    
+}
+
+pub fn verify_proof_of_inclusion(data: &Transaction, proof: &Vec<([u8; 32], HashDirection)>, root: [u8; 32], hash_function: &mut Sha3_256Hash) -> bool {
+    hash_function.update(data.hash);
+    let mut current_hash = hash_function.digest().expect("Hashing failed");
+    for (hash, direction) in proof {
+        match direction {
+            HashDirection::Left => {
+                hash_function.update(hash);
+                hash_function.update(current_hash);
+            }
+            HashDirection::Right => {
+                hash_function.update(current_hash);
+                hash_function.update(hash);
+            }
+        }
+        current_hash = hash_function.digest().expect("Hashing failed");
+    }
+    current_hash == root
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::blockchain::transaction::Transaction;
+    use crate::crypto::hashing::Sha3_256Hash;
+
+    #[test]
+    fn test_generate_tree() {
+        let mut hash_function = Sha3_256Hash::new();
+        let transaction1 = Transaction::new(
+            [0; 32],
+            [0; 32],
+            0,
+            0,
+            0,
+            &mut hash_function
+        );
+        let transaction2 = Transaction::new(
+            [0; 32],
+            [0; 32],
+            0,
+            0,
+            1,
+            &mut hash_function
+        );
+        let transaction3 = Transaction::new(
+            [0; 32],
+            [0; 32],
+            0,
+            0,
+            2,
+            &mut hash_function
+        );
+        let transaction4 = Transaction::new(
+            [0; 32],
+            [0; 32],
+            0,
+            0,
+            3,
+            &mut hash_function
+        );
+
+        let data = vec![&transaction1, &transaction2, &transaction3, &transaction4];
+        let merkle_tree = generate_tree(data, &mut hash_function).unwrap();
+        assert!(merkle_tree.root.is_some());
+        assert!(merkle_tree.leaves.is_some());
+
+        let mut height = 0;
+        let mut current_node = merkle_tree.root.clone();
+        while let Some(node) = current_node {
+            let node = node.lock().unwrap();
+            if node.left.is_some() {
+                height += 1;
+                current_node = node.left.clone();
+            } else {
+                break;
+            }
+        }
+        assert_eq!(height, 2);
+        // verify each parent has two children or 0 children
+        let mut current_node = merkle_tree.root.clone();
+        while let Some(node) = current_node {
+            let node = node.lock().unwrap();
+            if node.left.is_some() {
+                assert!(node.right.is_some());
+                current_node = node.left.clone();
+            } else {
+                break;
+            }
+        }
+
     }
 
-    fn generate_proof_of_inclusion(&self, data: &Transaction, tree: &TreeNode, hash_function: &mut Sha3_256Hash) -> Vec<[u8; 32]> {
-        todo!()
+    #[test]
+    fn test_generate_proof_of_inclusion() {
+        let mut hash_function = Sha3_256Hash::new();
+        let transaction1 = Transaction::new(
+            [0; 32],
+            [0; 32],
+            0,
+            0,
+            0,
+            &mut hash_function
+        );
+        let transaction2 = Transaction::new(
+            [0; 32],
+            [0; 32],
+            0,
+            0,
+            1,
+            &mut hash_function
+        );
+        let transaction3 = Transaction::new(
+            [0; 32],
+            [0; 32],
+            0,
+            0,
+            2,
+            &mut hash_function
+        );
+        let transaction4 = Transaction::new(
+            [0; 32],
+            [0; 32],
+            0,
+            0,
+            3,
+            &mut hash_function
+        );
+
+        let data = vec![&transaction1, &transaction2, &transaction3, &transaction4];
+        let mut merkle_tree = generate_tree(data, &mut hash_function).unwrap();
+        let proof = generate_proof_of_inclusion(&mut merkle_tree, &transaction1, &mut hash_function).unwrap();
+        assert_eq!(proof.len(), 2);
     }
 
-    fn verify_proof_of_inclusion(&self, data: &Transaction, proof: Vec<[u8; 32]>, root: [u8; 32], hash_function: &mut Sha3_256Hash) -> bool {
-        todo!()
+    #[test]
+    fn test_verification_of_proof(){
+        let mut hash_function = Sha3_256Hash::new();
+        let transaction1 = Transaction::new(
+            [0; 32],
+            [0; 32],
+            0,
+            0,
+            0,
+            &mut hash_function
+        );
+        let transaction2 = Transaction::new(
+            [0; 32],
+            [0; 32],
+            0,
+            0,
+            1,
+            &mut hash_function
+        );
+        let transaction3 = Transaction::new(
+            [0; 32],
+            [0; 32],
+            0,
+            0,
+            2,
+            &mut hash_function
+        );
+        let transaction4 = Transaction::new(
+            [0; 32],
+            [0; 32],
+            0,
+            0,
+            3,
+            &mut hash_function
+        );
+
+        let data = vec![&transaction1, &transaction2, &transaction3, &transaction4];
+        let mut merkle_tree = generate_tree(data, &mut hash_function).unwrap();
+        let proof = generate_proof_of_inclusion(&mut merkle_tree, &transaction3, &mut hash_function).unwrap();
+        assert_eq!(proof.len(), 2);
+        // pass
+        assert!(verify_proof_of_inclusion(&transaction3, &proof, merkle_tree.root.as_ref().unwrap().lock().unwrap().hash, &mut hash_function));
+        // fail
+        assert!(!verify_proof_of_inclusion(&transaction1, &proof, merkle_tree.root.as_ref().unwrap().lock().unwrap().hash, &mut hash_function));
+    }
+    #[test]
+    fn test_empty_tree() {
+        let mut hash_function = Sha3_256Hash::new();
+        let data: Vec<&Transaction> = vec![];
+        let merkle_tree = generate_tree(data, &mut hash_function);
+        assert!(merkle_tree.is_err());
+    }
+
+    #[test]
+    fn test_odd_tree() {
+        let mut hash_function = Sha3_256Hash::new();
+        let transaction1 = Transaction::new(
+            [0; 32],
+            [0; 32],
+            0,
+            0,
+            0,
+            &mut hash_function
+        );
+        let transaction2 = Transaction::new(
+            [0; 32],
+            [0; 32],
+            0,
+            0,
+            1,
+            &mut hash_function
+        );
+        let transaction3 = Transaction::new(
+            [0; 32],
+            [0; 32],
+            0,
+            0,
+            2,
+            &mut hash_function
+        );
+
+        let data = vec![&transaction1, &transaction2, &transaction3];
+        let merkle_tree = generate_tree(data, &mut hash_function).unwrap();
+        assert!(merkle_tree.root.is_some());
+        assert!(merkle_tree.leaves.is_some());
+    }
+
+    #[test]
+    fn test_odd_tree_proof(){
+        let mut hash_function = Sha3_256Hash::new();
+        let transaction1 = Transaction::new(
+            [0; 32],
+            [0; 32],
+            0,
+            0,
+            0,
+            &mut hash_function
+        );
+        let transaction2 = Transaction::new(
+            [0; 32],
+            [0; 32],
+            0,
+            0,
+            1,
+            &mut hash_function
+        );
+        let transaction3 = Transaction::new(
+            [0; 32],
+            [0; 32],
+            0,
+            0,
+            2,
+            &mut hash_function
+        );
+
+        let data = vec![&transaction1, &transaction2, &transaction3];
+        let mut merkle_tree = generate_tree(data, &mut hash_function).unwrap();
+        let proof = generate_proof_of_inclusion(&mut merkle_tree, &transaction1, &mut hash_function).unwrap();
+        assert_eq!(proof.len(), 2);
+        // test verification
+        assert!(verify_proof_of_inclusion(&transaction1, &proof, merkle_tree.root.as_ref().unwrap().lock().unwrap().hash, &mut hash_function));
+        // test failure
+        assert!(!verify_proof_of_inclusion(&transaction2, &proof, merkle_tree.root.as_ref().unwrap().lock().unwrap().hash, &mut hash_function));
     }
 }
