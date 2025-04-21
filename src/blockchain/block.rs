@@ -1,4 +1,5 @@
-use crate::crypto::hashing::{HashFunction, Hashable};
+use crate::crypto::hashing::{HashFunction, Hashable, Sha3_256Hash};
+use crate::crypto::merkle::{generate_proof_of_inclusion, generate_tree, verify_proof_of_inclusion, MerkleProof, MerkleTree};
 use super::transaction::Transaction;
 
 pub struct Block{
@@ -7,7 +8,9 @@ pub struct Block{
     // transactions is a vector of transactions in this block
     pub transactions: Vec<Transaction>,
     // hash is the sha3_256 hash of the block header
-    pub hash: [u8; 32]
+    pub hash: [u8; 32],
+    // the merkle tree
+    pub merkle_tree: MerkleTree,
 }
 
 pub struct BlockHeader{
@@ -66,7 +69,6 @@ impl Block {
     /// Create a new block
     pub fn new(
         previous_hash: [u8; 32],
-        merkle_root: [u8; 32],
         nonce: u64,
         timestamp: u64,
         transactions: Vec<Transaction>,
@@ -74,9 +76,10 @@ impl Block {
         miner_address: [u8; 32],
         hasher: &mut impl HashFunction
     ) -> Self {
+        let merkle_tree = generate_tree(transactions.iter().collect(), hasher).unwrap();
         let header = BlockHeader::new(
             previous_hash, 
-            merkle_root, 
+            merkle_tree.root.clone().unwrap().lock().unwrap().hash,
             nonce, 
             timestamp,
             difficulty,
@@ -86,7 +89,32 @@ impl Block {
         Block {
             header,
             transactions,
-            hash
+            hash,
+            merkle_tree
+        }
+    }
+
+    /// Creates the proof of inclusion for a transaction in the block
+    pub fn get_proof_for_transaction(&self, transaction: &Transaction) -> Option<MerkleProof> {
+        generate_proof_of_inclusion(
+            &self.merkle_tree,
+            &transaction,
+            &mut Sha3_256Hash::new()
+        )
+    }
+
+    /// Veerifies a transaction is in the block
+    pub fn validate_transaction(&self, transaction: &Transaction) -> bool{
+        let proof = self.get_proof_for_transaction(transaction);
+        if let Some(proof) = proof {
+            verify_proof_of_inclusion(
+                &transaction,
+                &proof,
+                self.header.merkle_root,
+                &mut Sha3_256Hash::new()
+            )
+        } else {
+            false
         }
     }
 }

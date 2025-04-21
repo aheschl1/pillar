@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::{hash::Hash, iter::Zip, sync::{Arc, Mutex}};
 
 use crate::blockchain::transaction::Transaction;
 
@@ -32,6 +32,15 @@ pub enum HashDirection {
     Right,
 }
 
+pub struct MerkleProof{
+    // hash is the hash of the node
+    pub hashes: Vec<[u8; 32]>,
+    // direction is the direction of the node
+    pub directions: Vec<HashDirection>,
+    // root is the root of the tree
+    pub root: [u8; 32]
+}
+
 /// Merkle tree struct
 pub struct MerkleTree{
     // root is the root of the Merkle tree
@@ -57,7 +66,7 @@ impl MerkleTree {
 /// * `hash_function` - A mutable instance of a type implementing the HashFunction trait
 /// 
 /// TODO: This is inneficient, as it clones the data twice 
-pub fn generate_tree(data: Vec<&Transaction>, hash_function: &mut Sha3_256Hash) -> Result<MerkleTree, std::io::Error> {
+pub fn generate_tree(data: Vec<&Transaction>, hash_function: &mut impl HashFunction) -> Result<MerkleTree, std::io::Error> {
     if data.is_empty() {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Data is empty"));
     }
@@ -118,7 +127,7 @@ pub fn generate_tree(data: Vec<&Transaction>, hash_function: &mut Sha3_256Hash) 
 /// 
 /// * `Ok(())` if the tree was generated successfully
 /// * `Err(std::io::Error)` if the tree could not be generated
-pub fn generate_proof_of_inclusion(merkle_tree: &mut MerkleTree, data: &Transaction, hash_function: &mut Sha3_256Hash) -> Option<Vec<([u8; 32], HashDirection)>> {
+pub fn generate_proof_of_inclusion(merkle_tree: &MerkleTree, data: &Transaction, hash_function:  &mut impl HashFunction) -> Option<MerkleProof> {
     if merkle_tree.leaves.is_none() {
         return None;
     }
@@ -135,7 +144,10 @@ pub fn generate_proof_of_inclusion(merkle_tree: &mut MerkleTree, data: &Transact
         return None;
     }
     // proof
-    let mut proof = Vec::new();
+    // let mut proof = Vec::new();
+    let mut directions = Vec::new();
+    let mut hashes = Vec::new();
+
     let mut current_node = current_node.unwrap().clone();
 
     loop{ 
@@ -147,17 +159,25 @@ pub fn generate_proof_of_inclusion(merkle_tree: &mut MerkleTree, data: &Transact
         if let Some(parent_node) = parent {
             let parent = parent_node.lock().unwrap();
             if parent.left.as_ref().map(|node| node.lock().unwrap().hash) == Some(hash) {
-                proof.push((parent.right.as_ref().unwrap().lock().unwrap().hash, HashDirection::Right));
+                // proof.push((parent.right.as_ref().unwrap().lock().unwrap().hash, HashDirection::Right));
+                hashes.push(parent.right.as_ref().unwrap().lock().unwrap().hash);
+                directions.push(HashDirection::Right);
             } else {
-                proof.push((parent.left.as_ref().unwrap().lock().unwrap().hash, HashDirection::Left));
+                // proof.push((parent.left.as_ref().unwrap().lock().unwrap().hash, HashDirection::Left));
+                hashes.push(parent.left.as_ref().unwrap().lock().unwrap().hash);
+                directions.push(HashDirection::Left);
             }
             current_node = parent_node.clone();
         } else {
             break;
         }
     }
-    
-    Some(proof)
+
+    Some(MerkleProof {
+        hashes,
+        directions,
+        root: merkle_tree.root.as_ref().unwrap().lock().unwrap().hash,
+    })
     
 }
 
@@ -174,10 +194,10 @@ pub fn generate_proof_of_inclusion(merkle_tree: &mut MerkleTree, data: &Transact
 /// 
 /// * `true` if the proof is valid
 /// * `false` if the proof is invalid
-pub fn verify_proof_of_inclusion(data: &Transaction, proof: &Vec<([u8; 32], HashDirection)>, root: [u8; 32], hash_function: &mut Sha3_256Hash) -> bool {
+pub fn verify_proof_of_inclusion(data: &Transaction, proof: &MerkleProof, root: [u8; 32], hash_function:  &mut impl HashFunction) -> bool {
     hash_function.update(data.hash);
     let mut current_hash = hash_function.digest().expect("Hashing failed");
-    for (hash, direction) in proof {
+    for (hash, direction) in proof.hashes.iter().zip(proof.directions.iter()) {
         match direction {
             HashDirection::Left => {
                 hash_function.update(hash);
@@ -305,7 +325,7 @@ mod tests {
         let data = vec![&transaction1, &transaction2, &transaction3, &transaction4];
         let mut merkle_tree = generate_tree(data, &mut hash_function).unwrap();
         let proof = generate_proof_of_inclusion(&mut merkle_tree, &transaction1, &mut hash_function).unwrap();
-        assert_eq!(proof.len(), 2);
+        assert_eq!(proof.hashes.len(), 2);
     }
 
     #[test]
@@ -347,7 +367,7 @@ mod tests {
         let data = vec![&transaction1, &transaction2, &transaction3, &transaction4];
         let mut merkle_tree = generate_tree(data, &mut hash_function).unwrap();
         let proof = generate_proof_of_inclusion(&mut merkle_tree, &transaction3, &mut hash_function).unwrap();
-        assert_eq!(proof.len(), 2);
+        assert_eq!(proof.hashes.len(), 2);
         // pass
         assert!(verify_proof_of_inclusion(&transaction3, &proof, merkle_tree.root.as_ref().unwrap().lock().unwrap().hash, &mut hash_function));
         // fail
@@ -426,7 +446,7 @@ mod tests {
         let data = vec![&transaction1, &transaction2, &transaction3];
         let mut merkle_tree = generate_tree(data, &mut hash_function).unwrap();
         let proof = generate_proof_of_inclusion(&mut merkle_tree, &transaction1, &mut hash_function).unwrap();
-        assert_eq!(proof.len(), 2);
+        assert_eq!(proof.hashes.len(), 2);
         // test verification
         assert!(verify_proof_of_inclusion(&transaction1, &proof, merkle_tree.root.as_ref().unwrap().lock().unwrap().hash, &mut hash_function));
         // test failure
