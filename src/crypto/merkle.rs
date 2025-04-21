@@ -1,4 +1,3 @@
-use core::hash;
 use std::sync::{Arc, Mutex};
 
 use crate::blockchain::transaction::Transaction;
@@ -33,6 +32,7 @@ pub enum HashDirection {
     Right,
 }
 
+/// Merkle tree struct
 pub struct MerkleTree{
     // root is the root of the Merkle tree
     pub root: Option<Arc<Mutex<Box<TreeNode>>>>,
@@ -161,6 +161,19 @@ pub fn generate_proof_of_inclusion(merkle_tree: &mut MerkleTree, data: &Transact
     
 }
 
+/// Verify the proof of inclusion for a given transaction
+/// 
+/// # Arguments
+/// 
+/// * `data` - A reference to the Transaction object for which to verify the proof
+/// * `proof` - A vector of tuples containing the hash and direction of each node in the proof
+/// * `root` - The root hash of the Merkle tree
+/// * `hash_function` - A mutable instance of a type implementing the HashFunction trait
+/// 
+/// # Returns
+/// 
+/// * `true` if the proof is valid
+/// * `false` if the proof is invalid
 pub fn verify_proof_of_inclusion(data: &Transaction, proof: &Vec<([u8; 32], HashDirection)>, root: [u8; 32], hash_function: &mut Sha3_256Hash) -> bool {
     hash_function.update(data.hash);
     let mut current_hash = hash_function.digest().expect("Hashing failed");
