@@ -39,9 +39,7 @@ impl TransactionHeader {
             nonce
         }
     }
-}
 
-impl Hashable for TransactionHeader {
     /// Hash the transaction header using the provided HashFunction
     ///
     /// # Arguments
@@ -51,7 +49,7 @@ impl Hashable for TransactionHeader {
     /// # Returns
     ///
     /// * The hash of the transaction header as a [u8; 32] array
-    fn hash(&self, hasher: &mut impl HashFunction) -> [u8; 32] {
+    pub fn hash(&self, hasher: &mut impl HashFunction) -> [u8; 32] {
         hasher.update(self.sender);
         hasher.update(self.receiver);
         hasher.update(self.amount.to_le_bytes());
@@ -107,5 +105,11 @@ impl Transaction {
         let signature = signer.sign(&self.hash);
         self.signature = Some(signature.to_bytes());
         Ok(())
+    }
+}
+
+impl Hashable for Transaction {
+    fn hash(&self, hasher: &mut impl HashFunction) -> [u8; 32] {
+        self.header.hash(hasher)
     }
 }

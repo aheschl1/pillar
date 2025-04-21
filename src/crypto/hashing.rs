@@ -44,3 +44,12 @@ impl HashFunction for Sha3_256Hash {
     }
 }
 
+// clonable
+impl Clone for Sha3_256Hash {
+    fn clone(&self) -> Self {
+        Sha3_256Hash {
+            hasher: self.hasher.clone(),
+            n_parameters: self.n_parameters,
+        }
+    }
+}
