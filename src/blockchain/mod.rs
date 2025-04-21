@@ -16,10 +16,10 @@ mod tests{
         let nonce = 12345;
         let timestamp = 1622547800;
 
-        let block_header = BlockHeader::new(previous_hash, merkle_root, nonce, timestamp, 1, miner_address);
+        let block_header = BlockHeader::new(previous_hash, merkle_root, nonce, timestamp, 1, Some(miner_address));
         let hash = block_header.hash(&mut Sha3_256Hash::new());
 
-        assert_eq!(hash.len(), 32);
+        assert_eq!(hash.unwrap().len(), 32);
     }
 
     #[test]

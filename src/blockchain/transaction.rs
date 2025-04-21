@@ -109,7 +109,7 @@ impl Transaction {
 }
 
 impl Hashable for Transaction {
-    fn hash(&self, hasher: &mut impl HashFunction) -> [u8; 32] {
-        self.header.hash(hasher)
+    fn hash(&self, hasher: &mut impl HashFunction) -> Result<[u8; 32], std::io::Error> {
+        Ok(self.header.hash(hasher))
     }
 }

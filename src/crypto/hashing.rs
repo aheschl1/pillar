@@ -2,7 +2,7 @@ use sha3::{Digest, Sha3_256};
 
 
 pub trait Hashable {
-    fn hash(&self, hasher: &mut impl HashFunction) -> [u8; 32];
+    fn hash(&self, hasher: &mut impl HashFunction) -> Result<[u8; 32], std::io::Error>;
 }
 
 pub trait HashFunction {

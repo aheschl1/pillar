@@ -7,8 +7,8 @@ pub struct Block{
     pub header: BlockHeader,
     // transactions is a vector of transactions in this block
     pub transactions: Vec<Transaction>,
-    // hash is the sha3_256 hash of the block header
-    pub hash: [u8; 32],
+    // hash is the sha3_256 hash of the block header - is none if it hasnt been mined
+    pub hash: Option<[u8; 32]>,
     // the merkle tree
     pub merkle_tree: MerkleTree,
 }
@@ -25,7 +25,20 @@ pub struct BlockHeader{
     // difficulty is the difficulty of the block
     pub difficulty: u64,
     // the address of the miner is the sha3_256 hash of the miner address
-    pub miner_address: [u8; 32],
+    pub miner_address: Option<[u8; 32]>,
+}
+
+impl Clone for BlockHeader {
+    fn clone(&self) -> Self {
+        BlockHeader {
+            previous_hash: self.previous_hash,
+            merkle_root: self.merkle_root,
+            nonce: self.nonce,
+            timestamp: self.timestamp,
+            difficulty: self.difficulty,
+            miner_address: self.miner_address,
+        }
+    }
 }
 
 impl BlockHeader {
@@ -34,7 +47,7 @@ impl BlockHeader {
         merkle_root: [u8; 32], 
         nonce: u64, timestamp: u64,
         difficulty: u64,
-        miner_address: [u8; 32]
+        miner_address: Option<[u8; 32]>
     ) -> Self {
         BlockHeader {
             previous_hash,
@@ -53,15 +66,21 @@ impl Hashable for BlockHeader {
     /// # Returns
     /// 
     /// * The SHA3-256 hash of the block header
-    fn hash(&self, hash_function: &mut impl HashFunction) -> [u8; 32]{
+    fn hash(&self, hash_function: &mut impl HashFunction) -> Result<[u8; 32], std::io::Error>{
+        if let None = self.miner_address {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Miner address is not set"
+            ));
+        }
         hash_function.update(self.previous_hash);
         hash_function.update(self.merkle_root);
-        hash_function.update(self.miner_address);
+        hash_function.update(self.miner_address.unwrap());
         hash_function.update(self.nonce.to_le_bytes());
         hash_function.update(self.timestamp.to_le_bytes());
         hash_function.update(self.difficulty.to_le_bytes());
 
-        hash_function.digest().unwrap()
+        Ok(hash_function.digest().unwrap())
     }
 }
 
@@ -73,7 +92,7 @@ impl Block {
         timestamp: u64,
         transactions: Vec<Transaction>,
         difficulty: u64,
-        miner_address: [u8; 32],
+        miner_address: Option<[u8; 32]>,
         hasher: &mut impl HashFunction
     ) -> Self {
         let merkle_tree = generate_tree(transactions.iter().collect(), hasher).unwrap();
@@ -89,7 +108,7 @@ impl Block {
         Block {
             header,
             transactions,
-            hash,
+            hash: if hash.is_ok() {Some(hash.unwrap())} else {None}, 
             merkle_tree
         }
     }
