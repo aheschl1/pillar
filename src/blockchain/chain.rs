@@ -1,4 +1,7 @@
-use crate::{crypto::hashing::{HashFunction, Sha3_256Hash}, primitives::block::Block};
+use ed25519::{signature, Signature};
+use ed25519_dalek::VerifyingKey;
+
+use crate::{crypto::hashing::{HashFunction, Sha3_256Hash}, primitives::{block::Block, transaction::Transaction}};
 
 
 /// For representing and storing the state of the a blockchain
@@ -30,8 +33,50 @@ impl Chain{
         }
     }
 
+
+    fn validate_block_header(block: &Block) -> bool {
+        // Check if the block header is valid
+        // This includes checking the previous hash, timestamp, and nonce
+        // For now, we will just return true
+        true
+    }
+
+    fn validate_block_basic(block: &Block) -> bool {
+        // Check if the block is valid
+        // This includes checking the transactions and the block size
+        // For now, we will just return true
+        true
+    }
+
+    /// Verifies a block. Checks the following conditions:
     pub fn verify_block(&self, block: &Block) -> bool {
+        true
+    }
+
+    fn validate_transaction(transaction: &Transaction) -> bool {
+        let sender = transaction.header.sender;
+        let signature = transaction.signature;
+        // check for signature
+        let validating_key: VerifyingKey = VerifyingKey::from_bytes(&sender).unwrap();
+        let signing_validity = match signature {
+            Some(sig) => {
+                let signature = Signature::from_bytes(&sig);
+                validating_key.verify_strict(&transaction.hash, &signature).is_ok()
+            },
+            None => false,
+        };
+        if !signing_validity {
+            return false;
+        }
+        // check the hash
+        if transaction.hash != transaction.header.hash(&mut Sha3_256Hash::new()) {
+            return false;
+        }
+        // verify balance
         
+
+
+        return true;
     }
 
     /// Adds a new block to the chain
