@@ -197,6 +197,12 @@ impl Chain {
         true
     }
 
+    /// Call this only after a block has been verified
+    fn settle_new_block(&mut self, block: Block){
+        self.account_manager.update_from_block(&block);
+        self.blocks.push(block);
+    }
+
     /// Adds a new block to the chain if it is valid.
     ///
     /// # Arguments
@@ -209,8 +215,7 @@ impl Chain {
     /// * `Err(std::io::Error)` if the block is invalid.
     pub fn add_new_block(&mut self, block: Block) -> Result<(), std::io::Error> {
         if self.verify_block(&block) {
-            self.blocks.push(block);
-            self.depth += 1;
+            self.settle_new_block(block);
             Ok(())
         } else {
             Err(std::io::Error::new(

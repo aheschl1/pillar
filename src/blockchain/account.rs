@@ -40,9 +40,11 @@ impl AccountManager{
     }
 
     // Adds a new account to the account manager
-    pub fn add_account(&mut self, account: Rc<Mutex<Account>>) {
+    pub fn add_account(&mut self, account: Account) -> Rc<Mutex<Account>>{
+        let account = Rc::new(Mutex::new(account));
         self.accounts.push(account.clone());
-        self.address_to_account.insert(account.clone().lock().unwrap().address, account);
+        self.address_to_account.insert(account.clone().lock().unwrap().address, account.clone());
+        account
     }
 
     // Gets an account by its address
@@ -58,7 +60,12 @@ impl AccountManager{
         // Update the accounts from the block
         for transaction in &block.transactions {
             let sender = self.get_account(&transaction.header.sender).unwrap();
-            let receiver = self.get_account(&transaction.header.receiver).unwrap();
+            // may need to make a new public account for the receiver under the established public key
+            let receiver = match self.get_account(&transaction.header.receiver){
+                Some(account) => account,
+                None => self.add_account(Account::new(transaction.header.receiver, 0)),
+            };
+            // sender always needs to exist, or the block would not pass verification
             sender.lock().unwrap().balance -= transaction.header.amount;
             receiver.lock().unwrap().balance += transaction.header.amount;
             sender.lock().unwrap().nonce += 1;
