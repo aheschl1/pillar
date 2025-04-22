@@ -1,4 +1,4 @@
-use crate::{blockchain::block::{Block, BlockHeader}, crypto::hashing::{HashFunction, Hashable}};
+use crate::{primitives::block::{Block, BlockHeader}, crypto::hashing::{HashFunction, Hashable}};
 
 use super::Node;
 

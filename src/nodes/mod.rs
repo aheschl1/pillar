@@ -29,7 +29,7 @@ impl Node {
 
 #[cfg(test)]
 mod test{
-    use crate::{blockchain::{block::Block, transaction::Transaction}, crypto::hashing::{HashFunction, Sha3_256Hash}};
+    use crate::{primitives::{block::Block, transaction::Transaction}, crypto::hashing::{HashFunction, Sha3_256Hash}};
     use crate::nodes::miner::Miner;
     use super::Node;
 

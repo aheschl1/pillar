@@ -1,6 +1,6 @@
 use std::{hash::Hash, iter::Zip, sync::{Arc, Mutex}};
 
-use crate::blockchain::transaction::Transaction;
+use crate::primitives::transaction::Transaction;
 
 use super::hashing::{HashFunction, Sha3_256Hash};
 
@@ -216,7 +216,7 @@ pub fn verify_proof_of_inclusion(data: &Transaction, proof: &MerkleProof, root: 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blockchain::transaction::Transaction;
+    use crate::primitives::transaction::Transaction;
     use crate::crypto::hashing::Sha3_256Hash;
 
     #[test]
