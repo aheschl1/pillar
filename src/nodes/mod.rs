@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use messages::Message;
 use serde::{Serialize, Deserialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -32,7 +34,7 @@ impl Peer{
     }
 
     /// Send a message to the peer
-    pub async fn send(&mut self, message: Message) -> Result<(), std::io::Error> {
+    pub async fn send(&mut self, message: &Message) -> Result<(), std::io::Error> {
         if self.stream.is_none(){
             let stream = tokio::net::TcpStream::connect(format!("{}:{}", self.ip_address, self.port)).await?;
             self.stream = Some(stream);
@@ -98,8 +100,47 @@ impl Node {
         }
     }
 
-    fn broadcast(message: Message){
-        
+    /// Broadcast a message to all peers
+    async fn broadcast(&mut self, message: Message){
+        for peer in self.peers.iter_mut(){
+            peer.send(&message).await.unwrap();
+        }
+    }
+
+    /// Find new peers by queerying the existing peers
+    /// and adding them to the list of peers
+    async fn discover_peers(&mut self) -> Result<(), std::io::Error> {
+        let existing_peers = self.peers.iter()
+            .map(|peer| peer.public_key)
+            .collect::<HashSet<_>>();
+        let mut new_peers: Vec<Peer> = Vec::new();
+        // send a message to the peers
+        for peer in self.peers.iter_mut(){
+            let message = Message::PeerRequest;
+            peer.send(&message).await.unwrap();
+            let peers = peer.receive().await.unwrap();
+            match peers {
+                Message::PeerResponse(peers) => {
+                    for peer in peers{
+                        // check if the peer is already in the list
+                        if !existing_peers.contains(&peer.public_key){
+                            // add the peer to the list
+                            new_peers.push(peer);
+                        }
+                    }
+                },
+                _ => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Other, 
+                        "Invalid message received"
+                    ));
+                }
+            }
+
+        }
+        // extend the peers list with the new peers
+        self.peers.extend(new_peers);
+        Ok(())
     }
 
 }
