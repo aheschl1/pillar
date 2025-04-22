@@ -3,7 +3,7 @@ use std::{collections::HashMap, rc::Rc, sync::Mutex};
 use crate::primitives::block::Block;
 
 
-struct Account{
+pub struct Account{
     // The address of the account is the public key
     pub address: [u8; 32],
     // The balance of the account
@@ -21,24 +21,9 @@ impl Account{
             nonce: 0,
         }
     }
-
-    // Increases the nonce of the account
-    pub fn increment_nonce(&mut self) {
-        self.nonce += 1;
-    }
-
-    // Decreases the balance of the account
-    pub fn decrease_balance(&mut self, amount: u64) {
-        self.balance -= amount;
-    }
-
-    // Increases the balance of the account
-    pub fn increase_balance(&mut self, amount: u64) {
-        self.balance += amount;
-    }
 }
 
-struct AccountManager{
+pub struct AccountManager{
     // The accounts in the blockchain
     pub accounts: Vec<Rc<Mutex<Account>>>,
     // The mapping from address to account
@@ -61,8 +46,8 @@ impl AccountManager{
     }
 
     // Gets an account by its address
-    pub fn get_account(&self, address: [u8; 32]) -> Option<Rc<Mutex<Account>>> {
-        self.address_to_account.get(&address).cloned()
+    pub fn get_account(&self, address: &[u8; 32]) -> Option<Rc<Mutex<Account>>> {
+        self.address_to_account.get(address).cloned()
     }
 
     /// Updates the accounts from the block
@@ -72,11 +57,11 @@ impl AccountManager{
     pub fn update_from_block(&mut self, block: &Block){
         // Update the accounts from the block
         for transaction in &block.transactions {
-            let sender = self.get_account(transaction.header.sender).unwrap();
-            let receiver = self.get_account(transaction.header.receiver).unwrap();
-            sender.lock().unwrap().decrease_balance(transaction.header.amount);
-            receiver.lock().unwrap().increase_balance(transaction.header.amount);
-            sender.lock().unwrap().increment_nonce();
+            let sender = self.get_account(&transaction.header.sender).unwrap();
+            let receiver = self.get_account(&transaction.header.receiver).unwrap();
+            sender.lock().unwrap().balance -= transaction.header.amount;
+            receiver.lock().unwrap().balance += transaction.header.amount;
+            sender.lock().unwrap().nonce += 1;
         }
     }
 }
