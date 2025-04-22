@@ -2,18 +2,20 @@ use std::collections::HashMap;
 
 use ed25519::{Signature, signature};
 use ed25519_dalek::VerifyingKey;
+use serde::{Deserialize, Serialize};
 
 use crate::{
-    crypto::hashing::{HashFunction, Hashable, Sha3_256Hash},
+    crypto::hashing::{HashFunction, Hashable, DefaultHash},
     primitives::{
         block::Block,
-        transaction::{self, Transaction},
+        transaction::Transaction,
     },
 };
 
 use super::account::AccountManager;
 
 /// Represents the state of the blockchain, including blocks, accounts, and chain parameters.
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Chain {
     /// The blocks in the chain.
     blocks: Vec<Block>,
@@ -22,13 +24,24 @@ pub struct Chain {
     /// The difficulty level for mining new blocks.
     difficulty: u64,
     /// The account manager for tracking account balances and nonces.
+    #[serde(skip)]
     account_manager: AccountManager,
 }
 
 impl Chain {
     /// Creates a new blockchain with a genesis block.
     pub fn new_with_genesis() -> Self {
-        let genesis_block = Block::new([0; 32], 0, 0, vec![], 0, None, &mut Sha3_256Hash::new());
+        let genesis_block = Block::new(
+            [0; 32], 
+            0, 
+            0, 
+            vec![
+                Transaction::new([0; 32], [0;32], 0, 0, 0, &mut DefaultHash::new())
+            ], 
+            0, 
+            None, 
+            &mut DefaultHash::new()
+        );
         Chain {
             blocks: vec![genesis_block],
             depth: 1,
@@ -58,7 +71,7 @@ impl Chain {
         if block.hash.is_none() {
             return false;
         }
-        if block.hash.unwrap() != block.header.hash(&mut Sha3_256Hash::new()).unwrap() {
+        if block.hash.unwrap() != block.header.hash(&mut DefaultHash::new()).unwrap() {
             return false;
         }
         // check the miner is declared
@@ -171,7 +184,7 @@ impl Chain {
             return false;
         }
         // check the hash
-        if transaction.hash != transaction.header.hash(&mut Sha3_256Hash::new()) {
+        if transaction.hash != transaction.header.hash(&mut DefaultHash::new()) {
             return false;
         }
         // verify balance
@@ -201,6 +214,7 @@ impl Chain {
     fn settle_new_block(&mut self, block: Block){
         self.account_manager.update_from_block(&block);
         self.blocks.push(block);
+        self.depth += 1;
     }
 
     /// Adds a new block to the chain if it is valid.

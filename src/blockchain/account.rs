@@ -1,8 +1,11 @@
 use std::{collections::HashMap, rc::Rc, sync::Mutex};
 
+use serde::{Deserialize, Serialize};
+
 use crate::primitives::block::Block;
 
 
+#[derive(Debug)]
 pub struct Account{
     // The address of the account is the public key
     pub address: [u8; 32],
@@ -23,11 +26,18 @@ impl Account{
     }
 }
 
+#[derive(Debug)]
 pub struct AccountManager{
     // The accounts in the blockchain
     pub accounts: Vec<Rc<Mutex<Account>>>,
     // The mapping from address to account
     pub address_to_account: HashMap<[u8; 32], Rc<Mutex<Account>>>,
+}
+
+impl Default for AccountManager {
+    fn default() -> Self {
+        AccountManager::new()
+    }
 }
 
 impl AccountManager{

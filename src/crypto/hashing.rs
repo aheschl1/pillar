@@ -37,17 +37,17 @@ pub trait HashFunction {
 }
 
 /// A struct implementing the SHA3-256 hash function.
-pub struct Sha3_256Hash {
+pub struct DefaultHash {
     /// The internal SHA3-256 hasher.
     hasher: Sha3_256,
     /// The number of parameters added to the hasher.
     n_parameters: usize,
 }
 
-impl HashFunction for Sha3_256Hash {
+impl HashFunction for DefaultHash {
     /// Creates a new instance of the SHA3-256 hash function.
     fn new() -> Self {
-        Sha3_256Hash {
+        DefaultHash {
             hasher: Sha3_256::new(),
             n_parameters: 0,
         }
@@ -84,9 +84,9 @@ impl HashFunction for Sha3_256Hash {
 }
 
 /// Allows cloning of the SHA3-256 hash function.
-impl Clone for Sha3_256Hash {
+impl Clone for DefaultHash {
     fn clone(&self) -> Self {
-        Sha3_256Hash {
+        DefaultHash {
             hasher: self.hasher.clone(),
             n_parameters: self.n_parameters,
         }

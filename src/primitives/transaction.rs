@@ -1,15 +1,22 @@
 use ed25519::signature::Signer;
+use serde::{Deserialize, Serialize};
 use crate::crypto::hashing::{HashFunction, Hashable};
+use serde_with::{serde_as, Bytes};
 
+
+#[serde_as]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Transaction{
     // header is the header of the transaction
     pub header: TransactionHeader,
     // hash is the sha3_256 hash of the transaction header
     pub hash: [u8; 32],
     // signature is the signature over the transaction header
+    #[serde_as(as = "Option<Bytes>")]
     pub signature: Option<[u8; 64]>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TransactionHeader{
     // sender is the ed25519 public key of the sender
     pub sender: [u8; 32],

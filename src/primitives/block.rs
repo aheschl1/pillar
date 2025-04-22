@@ -1,7 +1,10 @@
-use crate::crypto::hashing::{HashFunction, Hashable, Sha3_256Hash};
+use serde::{Deserialize, Deserializer, Serialize};
+
+use crate::crypto::hashing::{HashFunction, Hashable, DefaultHash};
 use crate::crypto::merkle::{generate_proof_of_inclusion, generate_tree, verify_proof_of_inclusion, MerkleProof, MerkleTree};
 use super::transaction::Transaction;
 
+#[derive(Debug, Serialize)]
 pub struct Block{
     // header is the header of the block
     pub header: BlockHeader,
@@ -10,9 +13,38 @@ pub struct Block{
     // hash is the sha3_256 hash of the block header - is none if it hasnt been mined
     pub hash: Option<[u8; 32]>,
     // the merkle tree
+    #[serde(skip)]
     pub merkle_tree: MerkleTree,
 }
 
+impl<'de> Deserialize<'de> for Block {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct PartialBlock {
+            // header is the header of the block
+            pub header: BlockHeader,
+            // transactions is a vector of transactions in this block
+            pub transactions: Vec<Transaction>,
+            // hash is the sha3_256 hash of the block header - is none if it hasnt been mined
+            pub hash: Option<[u8; 32]>,
+        }
+
+        let helper = PartialBlock::deserialize(deserializer)?;
+
+        Ok(Block::new(
+            helper.header.previous_hash,
+            helper.header.nonce,
+            helper.header.timestamp,
+            helper.transactions,
+            helper.header.difficulty,
+            helper.header.miner_address,
+            &mut DefaultHash::new()
+        ))
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct BlockHeader{
     // previous_hash is the sha3_356 hash of the previous block in the chain
     pub previous_hash: [u8; 32],
@@ -79,7 +111,6 @@ impl Hashable for BlockHeader {
         hash_function.update(self.nonce.to_le_bytes());
         hash_function.update(self.timestamp.to_le_bytes());
         hash_function.update(self.difficulty.to_le_bytes());
-
         Ok(hash_function.digest().unwrap())
     }
 }
@@ -118,7 +149,7 @@ impl Block {
         generate_proof_of_inclusion(
             &self.merkle_tree,
             &transaction,
-            &mut Sha3_256Hash::new()
+            &mut DefaultHash::new()
         )
     }
 
@@ -130,7 +161,7 @@ impl Block {
                 &transaction,
                 &proof,
                 self.header.merkle_root,
-                &mut Sha3_256Hash::new()
+                &mut DefaultHash::new()
             )
         } else {
             false

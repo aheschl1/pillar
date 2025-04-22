@@ -1,15 +1,67 @@
+use messages::Message;
+use serde::{Serialize, Deserialize};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
 use crate::blockchain::chain::Chain;
 
 pub mod miner;
+pub mod messages;
 
-
-struct Peer{
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Peer{
     /// The public key of the peer
     pub public_key: [u8; 32],
     /// The IP address of the peer
     pub ip_address: String,
     /// The port of the peer
     pub port: u16,
+    /// connection
+    #[serde(skip)]
+    stream: Option<tokio::net::TcpStream>
+}
+
+impl Peer{
+    /// Create a new peer
+    pub fn new(public_key: [u8; 32], ip_address: String, port: u16) -> Self {
+        Peer {
+            public_key,
+            ip_address,
+            port,
+            stream: None
+        }
+    }
+
+    /// Send a message to the peer
+    pub async fn send(&mut self, message: Message) -> Result<(), std::io::Error> {
+        if self.stream.is_none(){
+            let stream = tokio::net::TcpStream::connect(format!("{}:{}", self.ip_address, self.port)).await?;
+            self.stream = Some(stream);
+        }
+        let stream = self.stream.as_mut().unwrap();
+        // serialize with bincode
+        // send the message
+        stream.write_all(bincode::serialize(&message).map_err(
+            |e| std::io::Error::new(std::io::ErrorKind::Other, e)
+        )?.as_slice()).await?;
+        Ok(())
+    }
+
+    /// Receive a message from the peer
+    pub async fn receive(&mut self) -> Result<Message, std::io::Error> {
+        if self.stream.is_none(){
+            let stream = tokio::net::TcpStream::connect(format!("{}:{}", self.ip_address, self.port)).await?;
+            self.stream = Some(stream);
+        }
+        let stream = self.stream.as_mut().unwrap();
+        // read the message
+        let mut buffer = [0; 2048];
+        let n = stream.read(&mut buffer).await?;
+        // deserialize with bincode
+        let message: Message = bincode::deserialize(&buffer[..n]).map_err(
+            |e| std::io::Error::new(std::io::ErrorKind::Other, e)
+        )?;
+        Ok(message)
+    }
 }
 
 struct Node{
@@ -45,11 +97,16 @@ impl Node {
             chain
         }
     }
+
+    fn broadcast(message: Message){
+        
+    }
+
 }
 
 #[cfg(test)]
 mod test{
-    use crate::{blockchain::chain::Chain, crypto::hashing::{HashFunction, Sha3_256Hash}, primitives::{block::Block, transaction::Transaction}};
+    use crate::{blockchain::chain::Chain, crypto::hashing::{HashFunction, DefaultHash}, primitives::{block::Block, transaction::Transaction}};
     use crate::nodes::miner::Miner;
     use super::Node;
 
@@ -60,7 +117,7 @@ mod test{
         let ip_address = "127.0.0.1".to_string();
         let port = 8080;
         let node = Node::new(public_key, private_key, ip_address, port, vec![], Chain::new_with_genesis());
-        let mut hasher = Sha3_256Hash::new();
+        let mut hasher = DefaultHash::new();
 
         // block
         let previous_hash = [3u8; 32];

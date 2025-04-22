@@ -1,16 +1,19 @@
-use std::{hash::Hash, iter::Zip, rc::Rc, sync::Mutex};
+use std::{hash::Hash, iter::Zip, sync::{Arc, Mutex}};
+
+use serde::{Serialize, Deserialize};
 
 use crate::primitives::transaction::Transaction;
 
-use super::hashing::{HashFunction, Sha3_256Hash};
+use super::hashing::{HashFunction, DefaultHash};
 
+#[derive(Debug)]
 pub struct TreeNode{
     // left is the left child of the node
-    pub left: Option<Rc<Mutex<Box<TreeNode>>>>,
+    pub left: Option<Arc<Mutex<Box<TreeNode>>>>,
     // right is the right child of the node
-    pub right: Option<Rc<Mutex<Box<TreeNode>>>>,
+    pub right: Option<Arc<Mutex<Box<TreeNode>>>>,
     // parent is the parent of the node
-    pub parent: Option<Rc<Mutex<Box<TreeNode>>>>,
+    pub parent: Option<Arc<Mutex<Box<TreeNode>>>>,
     // hash is the sha3_256 hash of the node
     pub hash: [u8; 32],
 }
@@ -42,11 +45,18 @@ pub struct MerkleProof{
 }
 
 /// Merkle tree struct
+#[derive(Debug)]
 pub struct MerkleTree{
     // root is the root of the Merkle tree
-    pub root: Option<Rc<Mutex<Box<TreeNode>>>>,
+    pub root: Option<Arc<Mutex<Box<TreeNode>>>>,
     // store the leaves for logn proof generation
-    pub leaves: Option<Vec<Rc<Mutex<Box<TreeNode>>>>>,
+    pub leaves: Option<Vec<Arc<Mutex<Box<TreeNode>>>>>,
+}
+
+impl Default for MerkleTree {
+    fn default() -> Self {
+        MerkleTree::new()
+    }
 }
 
 impl MerkleTree {
@@ -71,11 +81,11 @@ pub fn generate_tree(data: Vec<&Transaction>, hash_function: &mut impl HashFunct
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Data is empty"));
     }
     // list of transactions to list of leaves
-    let mut data: Vec<Rc<Mutex<Box<TreeNode>>>> = data.into_iter().map(|transaction|{
+    let mut data: Vec<Arc<Mutex<Box<TreeNode>>>> = data.into_iter().map(|transaction|{
         hash_function.update(transaction.hash);
         let node = TreeNode { left: None, right: None, parent:None, hash: hash_function.digest().expect("Hashing failed") };
         // add to leaves
-        Rc::new(Mutex::new(Box::new(node)))
+        Arc::new(Mutex::new(Box::new(node)))
     }).collect();
     let leaves = Some(data.clone());
 
@@ -97,7 +107,7 @@ pub fn generate_tree(data: Vec<&Transaction>, hash_function: &mut impl HashFunct
                     parent: None,
                     hash: hash_function.digest().expect("Hashing failed")
                 };
-                let new_node = Rc::new(Mutex::new(Box::new(new_node)));
+                let new_node = Arc::new(Mutex::new(Box::new(new_node)));
                 // parent pointer
                 if let Ok(mut left_lock) = nodes[0].lock() {
                     left_lock.parent = Some(new_node.clone());
@@ -217,11 +227,11 @@ pub fn verify_proof_of_inclusion(data: &Transaction, proof: &MerkleProof, root: 
 mod tests {
     use super::*;
     use crate::primitives::transaction::Transaction;
-    use crate::crypto::hashing::Sha3_256Hash;
+    use crate::crypto::hashing::DefaultHash;
 
     #[test]
     fn test_generate_tree() {
-        let mut hash_function = Sha3_256Hash::new();
+        let mut hash_function = DefaultHash::new();
         let transaction1 = Transaction::new(
             [0; 32],
             [0; 32],
@@ -288,7 +298,7 @@ mod tests {
 
     #[test]
     fn test_generate_proof_of_inclusion() {
-        let mut hash_function = Sha3_256Hash::new();
+        let mut hash_function = DefaultHash::new();
         let transaction1 = Transaction::new(
             [0; 32],
             [0; 32],
@@ -330,7 +340,7 @@ mod tests {
 
     #[test]
     fn test_verification_of_proof(){
-        let mut hash_function = Sha3_256Hash::new();
+        let mut hash_function = DefaultHash::new();
         let transaction1 = Transaction::new(
             [0; 32],
             [0; 32],
@@ -375,7 +385,7 @@ mod tests {
     }
     #[test]
     fn test_empty_tree() {
-        let mut hash_function = Sha3_256Hash::new();
+        let mut hash_function = DefaultHash::new();
         let data: Vec<&Transaction> = vec![];
         let merkle_tree = generate_tree(data, &mut hash_function);
         assert!(merkle_tree.is_err());
@@ -383,7 +393,7 @@ mod tests {
 
     #[test]
     fn test_odd_tree() {
-        let mut hash_function = Sha3_256Hash::new();
+        let mut hash_function = DefaultHash::new();
         let transaction1 = Transaction::new(
             [0; 32],
             [0; 32],
@@ -417,7 +427,7 @@ mod tests {
 
     #[test]
     fn test_odd_tree_proof(){
-        let mut hash_function = Sha3_256Hash::new();
+        let mut hash_function = DefaultHash::new();
         let transaction1 = Transaction::new(
             [0; 32],
             [0; 32],

@@ -3,7 +3,7 @@ pub mod block;
 
 #[cfg(test)]
 mod tests{
-    use crate::{primitives::{block::BlockHeader, transaction::{Transaction, TransactionHeader}}, crypto::hashing::{HashFunction, Hashable, Sha3_256Hash}};
+    use crate::{primitives::{block::BlockHeader, transaction::{Transaction, TransactionHeader}}, crypto::hashing::{HashFunction, Hashable, DefaultHash}};
     use ed25519_dalek::{Verifier, Signature, SigningKey};
     use rand_core::OsRng;
     // use rand::rngs::OsRng;
@@ -17,7 +17,7 @@ mod tests{
         let timestamp = 1622547800;
 
         let block_header = BlockHeader::new(previous_hash, merkle_root, nonce, timestamp, 1, Some(miner_address));
-        let hash = block_header.hash(&mut Sha3_256Hash::new());
+        let hash = block_header.hash(&mut DefaultHash::new());
 
         assert_eq!(hash.unwrap().len(), 32);
     }
@@ -31,7 +31,7 @@ mod tests{
         let nonce = 12345;
 
         let transaction_header = TransactionHeader::new(sender, receiver, amount, timestamp, nonce);
-        let hash = transaction_header.hash(&mut Sha3_256Hash::new());
+        let hash = transaction_header.hash(&mut DefaultHash::new());
 
         assert_eq!(hash.len(), 32);
     }
@@ -44,7 +44,7 @@ mod tests{
         let timestamp = 1622547800;
         let nonce = 12345;
 
-        let mut hash_function = Sha3_256Hash::new();
+        let mut hash_function = DefaultHash::new();
 
         let mut transaction = Transaction::new(sender, receiver, amount, timestamp, nonce, &mut hash_function);
         assert!(transaction.signature.is_none());
