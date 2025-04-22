@@ -1,4 +1,4 @@
-use crate::{primitives::block::{Block, BlockHeader}, crypto::hashing::{HashFunction, Hashable}};
+use crate::{primitives::block::Block, crypto::hashing::{HashFunction, Hashable}};
 
 use super::Node;
 
@@ -28,7 +28,7 @@ impl Miner for Node{
     fn mine(&self, block: &mut Block, hash_function: &mut impl HashFunction){
         // the block is already pupulated
         block.header.nonce = 0;
-        block.header.miner_address = Some(self.address);
+        block.header.miner_address = Some(self.public_key);
         loop {
             match block.header.hash(hash_function){
                 Ok(hash) => {

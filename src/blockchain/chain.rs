@@ -14,7 +14,7 @@ use crate::{
 use super::account::AccountManager;
 
 /// Represents the state of the blockchain, including blocks, accounts, and chain parameters.
-struct Chain {
+pub struct Chain {
     /// The blocks in the chain.
     blocks: Vec<Block>,
     /// The current depth (number of blocks) in the chain.
