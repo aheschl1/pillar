@@ -8,5 +8,7 @@ pub enum Message {
     ChainRequest,
     ChainResponse(Chain),
     PeerRequest,
-    PeerResponse(Vec<Peer>)
+    PeerResponse(Vec<Peer>),
+    Declaration(Peer),
+    Error(String)
 }
