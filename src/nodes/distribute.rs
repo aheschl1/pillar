@@ -1,4 +1,6 @@
+use super::Node;
 
-async fn information_sharing(){
+
+pub async fn peer_distribution(node: Node){
     
 }

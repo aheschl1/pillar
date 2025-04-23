@@ -1,4 +1,6 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
+use distribute::peer_distribution;
+use tokio::{net::TcpStream, sync::Mutex};
 
 use messages::Message;
 use serde::{Serialize, Deserialize};
@@ -18,9 +20,6 @@ pub struct Peer{
     pub ip_address: String,
     /// The port of the peer
     pub port: u16,
-    /// connection
-    #[serde(skip)]
-    stream: Option<tokio::net::TcpStream>
 }
 
 impl Clone for Peer {
@@ -28,8 +27,7 @@ impl Clone for Peer {
         Peer {
             public_key: self.public_key,
             ip_address: self.ip_address.clone(),
-            port: self.port,
-            stream: None
+            port: self.port
         }
     }
 }
@@ -40,33 +38,25 @@ impl Peer{
         Peer {
             public_key,
             ip_address,
-            port,
-            stream: None
+            port
         }
     }
 
     /// Send a message to the peer
-    pub async fn send(&mut self, message: &Message) -> Result<(), std::io::Error> {
-        if self.stream.is_none(){
-            let stream = tokio::net::TcpStream::connect(format!("{}:{}", self.ip_address, self.port)).await?;
-            self.stream = Some(stream);
-        }
-        let stream = self.stream.as_mut().unwrap();
+    /// Initializaes a new connection to the peer
+    async fn send(&mut self, message: &Message) -> Result<TcpStream, std::io::Error> {
+        let mut stream = tokio::net::TcpStream::connect(format!("{}:{}", self.ip_address, self.port)).await?;
         // serialize with bincode
         // send the message
         stream.write_all(bincode::serialize(&message).map_err(
             |e| std::io::Error::new(std::io::ErrorKind::Other, e)
         )?.as_slice()).await?;
-        Ok(())
+        Ok(stream)
     }
 
-    /// Receive a message from the peer
-    pub async fn receive(&mut self) -> Result<Message, std::io::Error> {
-        if self.stream.is_none(){
-            let stream = tokio::net::TcpStream::connect(format!("{}:{}", self.ip_address, self.port)).await?;
-            self.stream = Some(stream);
-        }
-        let stream = self.stream.as_mut().unwrap();
+    /// Get a response from the peer
+    /// This function will block until a response is received
+    async fn get_response(&self, mut stream: TcpStream) -> Result<Message, std::io::Error> {
         // read the message
         let mut buffer = [0; 2048];
         let n = stream.read(&mut buffer).await?;
@@ -76,21 +66,27 @@ impl Peer{
         )?;
         Ok(message)
     }
+
+    pub async fn initialize_communication(&mut self, message: &Message) -> Result<Message, std::io::Error> {
+        let stream = self.send(message).await?;
+        let response = self.get_response(stream).await?;
+        Ok(response)
+    }
 }
 
 #[derive(Clone)]
 struct Node{
-    pub public_key: [u8; 32],
+    pub public_key: Arc<[u8; 32]>,
     /// The private key of the node
-    pub private_key: [u8; 32],
+    pub private_key: Arc<[u8; 32]>,
     /// The IP address of the node
-    pub ip_address: String,
+    pub ip_address: Arc<String>,
     /// The port of the node
-    pub port: u16,
+    pub port: Arc<u16>,
     // known peers
-    pub peers: Vec<Peer>,
+    pub peers: Arc<Mutex<Vec<Peer>>>,
     // the blockchain
-    pub chain: Chain
+    pub chain: Arc<Mutex<Chain>>
 }
 
 impl Node {
@@ -104,24 +100,29 @@ impl Node {
         chain: Chain
     ) -> Self {
         Node {
-            public_key,
-            private_key,
-            ip_address,
-            port,
-            peers: peers,
-            chain
+            public_key: public_key.into(),
+            private_key: private_key.into(),
+            ip_address: ip_address.into(),
+            port: port.into(),
+            peers: Mutex::new(peers).into(),
+            chain: Mutex::new(chain).into()
         }
     }
 
-    // /// when called, launches a new thread that listens for incoming connections
-    // async fn listen(&self){
-    //     // spawn a new thread to handle the connection
-    //     tokio::spawn();
-    // }
+    /// when called, launches a new thread that listens for incoming connections
+    async fn listen(&self){
+        // spawn a new thread to handle the connection
+        let self_clone = self.clone();
+        tokio::spawn(peer_distribution(self_clone));
+    }
+
+    async fn distribute_peers(self){
+
+    }
 
     /// Broadcast a message to all peers
     async fn broadcast(&mut self, message: Message){
-        for peer in self.peers.iter_mut(){
+        for peer in self.peers.lock().await.iter_mut(){
             peer.send(&message).await.unwrap();
         }
     }
@@ -129,15 +130,13 @@ impl Node {
     /// Find new peers by queerying the existing peers
     /// and adding them to the list of peers
     async fn discover_peers(&mut self) -> Result<(), std::io::Error> {
-        let mut existing_peers = self.peers.iter()
+        let mut existing_peers = self.peers.lock().await.iter()
             .map(|peer| peer.public_key)
             .collect::<HashSet<_>>();
         let mut new_peers: Vec<Peer> = Vec::new();
         // send a message to the peers
-        for peer in self.peers.iter_mut(){
-            let message = Message::PeerRequest;
-            peer.send(&message).await.unwrap();
-            let peers = peer.receive().await.unwrap();
+        for peer in self.peers.lock().await.iter_mut(){
+            let peers = peer.initialize_communication(&Message::PeerRequest).await?;
             match peers {
                 Message::PeerResponse(peers) => {
                     for peer in peers{
@@ -159,7 +158,7 @@ impl Node {
 
         }
         // extend the peers list with the new peers
-        self.peers.extend(new_peers);
+        self.peers.lock().await.extend(new_peers);
         Ok(())
     }
 
