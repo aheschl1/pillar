@@ -8,6 +8,7 @@ use crate::blockchain::chain::Chain;
 
 pub mod miner;
 pub mod messages;
+pub mod distribute;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Peer{
@@ -20,6 +21,17 @@ pub struct Peer{
     /// connection
     #[serde(skip)]
     stream: Option<tokio::net::TcpStream>
+}
+
+impl Clone for Peer {
+    fn clone(&self) -> Self {
+        Peer {
+            public_key: self.public_key,
+            ip_address: self.ip_address.clone(),
+            port: self.port,
+            stream: None
+        }
+    }
 }
 
 impl Peer{
@@ -66,6 +78,7 @@ impl Peer{
     }
 }
 
+#[derive(Clone)]
 struct Node{
     pub public_key: [u8; 32],
     /// The private key of the node
@@ -100,6 +113,12 @@ impl Node {
         }
     }
 
+    /// when called, launches a new thread that listens for incoming connections
+    async fn listen(&self){
+        // spawn a new thread to handle the connection
+        tokio::spawn();
+    }
+
     /// Broadcast a message to all peers
     async fn broadcast(&mut self, message: Message){
         for peer in self.peers.iter_mut(){
@@ -110,7 +129,7 @@ impl Node {
     /// Find new peers by queerying the existing peers
     /// and adding them to the list of peers
     async fn discover_peers(&mut self) -> Result<(), std::io::Error> {
-        let existing_peers = self.peers.iter()
+        let mut existing_peers = self.peers.iter()
             .map(|peer| peer.public_key)
             .collect::<HashSet<_>>();
         let mut new_peers: Vec<Peer> = Vec::new();
@@ -125,6 +144,7 @@ impl Node {
                         // check if the peer is already in the list
                         if !existing_peers.contains(&peer.public_key){
                             // add the peer to the list
+                            existing_peers.insert(peer.public_key);
                             new_peers.push(peer);
                         }
                     }

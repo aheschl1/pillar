@@ -4,7 +4,7 @@ use crate::crypto::hashing::{HashFunction, Hashable, DefaultHash};
 use crate::crypto::merkle::{generate_proof_of_inclusion, generate_tree, verify_proof_of_inclusion, MerkleProof, MerkleTree};
 use super::transaction::Transaction;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct Block{
     // header is the header of the block
     pub header: BlockHeader,

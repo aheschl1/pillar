@@ -1,6 +1,4 @@
-use std::{collections::HashMap, rc::Rc, sync::Mutex};
-
-use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, sync::{Arc, Mutex}};
 
 use crate::primitives::block::Block;
 
@@ -26,12 +24,12 @@ impl Account{
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AccountManager{
     // The accounts in the blockchain
-    pub accounts: Vec<Rc<Mutex<Account>>>,
+    pub accounts: Vec<Arc<Mutex<Account>>>,
     // The mapping from address to account
-    pub address_to_account: HashMap<[u8; 32], Rc<Mutex<Account>>>,
+    pub address_to_account: HashMap<[u8; 32], Arc<Mutex<Account>>>,
 }
 
 impl Default for AccountManager {
@@ -50,15 +48,15 @@ impl AccountManager{
     }
 
     // Adds a new account to the account manager
-    pub fn add_account(&mut self, account: Account) -> Rc<Mutex<Account>>{
-        let account = Rc::new(Mutex::new(account));
+    pub fn add_account(&mut self, account: Account) -> Arc<Mutex<Account>>{
+        let account = Arc::new(Mutex::new(account));
         self.accounts.push(account.clone());
         self.address_to_account.insert(account.clone().lock().unwrap().address, account.clone());
         account
     }
 
     // Gets an account by its address
-    pub fn get_account(&self, address: &[u8; 32]) -> Option<Rc<Mutex<Account>>> {
+    pub fn get_account(&self, address: &[u8; 32]) -> Option<Arc<Mutex<Account>>> {
         self.address_to_account.get(address).cloned()
     }
 

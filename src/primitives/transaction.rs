@@ -5,7 +5,7 @@ use serde_with::{serde_as, Bytes};
 
 
 #[serde_as]
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Transaction{
     // header is the header of the transaction
     pub header: TransactionHeader,
@@ -16,7 +16,7 @@ pub struct Transaction{
     pub signature: Option<[u8; 64]>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TransactionHeader{
     // sender is the ed25519 public key of the sender
     pub sender: [u8; 32],

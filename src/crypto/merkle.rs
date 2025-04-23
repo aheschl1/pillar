@@ -45,7 +45,7 @@ pub struct MerkleProof{
 }
 
 /// Merkle tree struct
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MerkleTree{
     // root is the root of the Merkle tree
     pub root: Option<Arc<Mutex<Box<TreeNode>>>>,
