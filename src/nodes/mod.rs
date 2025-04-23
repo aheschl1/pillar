@@ -113,11 +113,11 @@ impl Node {
         }
     }
 
-    /// when called, launches a new thread that listens for incoming connections
-    async fn listen(&self){
-        // spawn a new thread to handle the connection
-        tokio::spawn();
-    }
+    // /// when called, launches a new thread that listens for incoming connections
+    // async fn listen(&self){
+    //     // spawn a new thread to handle the connection
+    //     tokio::spawn();
+    // }
 
     /// Broadcast a message to all peers
     async fn broadcast(&mut self, message: Message){

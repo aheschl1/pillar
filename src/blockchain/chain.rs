@@ -127,7 +127,7 @@ impl Chain {
     }
 
     /// Ensures that all transactions in a block are valid and do not exceed available funds.
-    fn validate_transaction_set(&self, transactions: &Vec<Transaction>) -> bool {
+    async fn validate_transaction_set(&self, transactions: &Vec<Transaction>) -> bool {
         // we need to make sure that there are no duplicated nonce values under the same user
         let per_user: HashMap<[u8; 32], Vec<&Transaction>> =
             transactions
@@ -144,12 +144,12 @@ impl Chain {
                 return false;
             }
             let total_sum: u64 = transactions.iter().map(|t| t.header.amount).sum();
-            if account.unwrap().lock().unwrap().balance < total_sum {
+            if account.unwrap().lock().await.balance < total_sum {
                 return false;
             }
             // now validate each individual transaction
             for transaction in transactions {
-                let result = self.validate_transaction(transaction);
+                let result = self.validate_transaction(transaction).await;
                 if !result {
                     return false;
                 }
@@ -166,7 +166,7 @@ impl Chain {
     /// 2. The transaction hash is valid.
     /// 3. The sender has sufficient balance.
     /// 4. The nonce matches the sender's expected value.
-    fn validate_transaction(&self, transaction: &Transaction) -> bool {
+    async fn validate_transaction(&self, transaction: &Transaction) -> bool {
         let sender = transaction.header.sender;
         let signature = transaction.signature;
         // check for signature
@@ -193,11 +193,11 @@ impl Chain {
             return false;
         }
         let account = account.clone().unwrap();
-        if account.lock().unwrap().balance < transaction.header.amount {
+        if account.lock().await.balance < transaction.header.amount {
             return false;
         } // @todo: If there are multiple transactions of the same sender in a block, we need to check if the balance is enough for all of them
         // check nonce
-        if transaction.header.nonce != account.lock().unwrap().nonce {
+        if transaction.header.nonce != account.lock().await.nonce {
             return false;
         }
         return true;
