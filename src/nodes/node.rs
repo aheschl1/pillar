@@ -157,6 +157,17 @@ impl Node {
                 self.transaction_sender.send(transaction.clone()).unwrap();
                 Ok(Message::TransactionAck)
             },
+            Message::BlockTransmission(block) => {
+                if block.header.miner_address.unwrap() == *self.public_key{
+                    // SKIP OWN BLOCK
+                    return Ok(Message::BlockAck);
+                }
+                // add the block to the chain - first it is verified
+                self.chain.lock().await.add_new_block(block.clone())?;
+                // broadcast the block
+                self.broadcast(&Message::BlockTransmission(block.clone())).await?;
+                Ok(Message::BlockAck)
+            },
             _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Expected a request"))
         }
     }

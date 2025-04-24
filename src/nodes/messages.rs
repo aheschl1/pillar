@@ -13,5 +13,6 @@ pub enum Message {
     TransactionRequest(Transaction),
     TransactionAck,
     BlockTransmission(Block),
+    BlockAck,
     Error(String)
 }
