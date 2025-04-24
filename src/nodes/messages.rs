@@ -1,6 +1,6 @@
 use crate::{blockchain::chain::Chain, primitives::{block::Block, transaction::Transaction}};
 use serde::{Serialize, Deserialize};
-use super::Peer;
+use super::peer::Peer;
 
 
 #[derive(Serialize, Deserialize, Debug)]

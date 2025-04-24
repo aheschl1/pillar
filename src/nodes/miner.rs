@@ -4,7 +4,7 @@ use tokio::sync::Mutex;
 
 use crate::{crypto::hashing::{DefaultHash, HashFunction, Hashable}, primitives::block::Block};
 
-use super::Node;
+use super::node::Node;
 
 #[derive(Clone)]
 pub struct Miner {
