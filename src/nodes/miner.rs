@@ -2,14 +2,14 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use crate::{primitives::block::Block, crypto::hashing::{HashFunction, Hashable}};
+use crate::{crypto::hashing::{DefaultHash, HashFunction, Hashable}, primitives::block::Block};
 
 use super::Node;
 
 #[derive(Clone)]
 pub struct Miner {
     pub node: Arc<Mutex<Node>>,
-    current_block: Option<Block>,
+    pub ready_queue: Arc<Mutex<Vec<Block>>>,
 }
 
 impl Miner{
@@ -21,7 +21,7 @@ impl Miner{
         if let Some(_) = transaction_pool{
             return Ok(Miner {
                 node: Arc::new(Mutex::new(node)),
-                current_block: None
+                ready_queue: Mutex::new(vec![]).into(),
             });
         }else{
             return Err(std::io::Error::new(
@@ -55,12 +55,12 @@ impl Miner{
         leading_zeros >= difficulty
     }
 
-    pub async fn mine(&self, block: &mut Block, hash_function: &mut impl HashFunction){
+    pub async fn mine(self, mut block: Block, mut hash_function: impl HashFunction){
         // the block is already pupulated
         block.header.nonce = 0;
         block.header.miner_address = Some(*self.node.lock().await.public_key);
         loop {
-            match block.header.hash(hash_function){
+            match block.header.hash(&mut hash_function){
                 Ok(hash) => {
                     if self.is_valid_hash(block.header.difficulty, &hash) {
                         block.hash = Some(hash);
@@ -73,14 +73,47 @@ impl Miner{
             }
             block.header.nonce += 1;
         }
+        // add the ready queue
+        self.ready_queue.lock().await.push(block.clone());
     }
 
     /// monitors the nodes transaction pool
     /// Takes ownership of a copy of the miner
+    /// TODO: decide how many transactions to mine at once
     pub async fn monitor_pool(self) {
         // monitor the pool for transactions
+        let transactions_to_mine = 10;
+        let max_wait_time = 10; // seconds
+        let mut transactions = vec![];
+        let mut last_polled_at: Option<u64> = None;
         loop {
-            
+            let transaction = self.node.lock().await.transaction_pool.as_ref().unwrap().lock().await.pop();
+            match transaction{
+                Some(transaction) => {
+                    transactions.push(transaction);
+                    // grab unix timestamp
+                    last_polled_at = Some(tokio::time::Instant::now().elapsed().as_secs());
+                },
+                None => {}
+            }
+            if (last_polled_at.is_some() && tokio::time::Instant::now().elapsed().as_secs() - last_polled_at.unwrap() > max_wait_time) ||
+                transactions.len() >= transactions_to_mine {
+                // mine
+                let block = Block::new(
+                    self.node.lock().await.chain.lock().await.get_top_block().unwrap().hash.unwrap(), // if it crahses, there is bug
+                    0,
+                    tokio::time::Instant::now().elapsed().as_secs(),
+                    transactions,
+                    self.node.lock().await.chain.lock().await.difficulty,
+                    Some(*self.node.lock().await.public_key),
+                    &mut DefaultHash::new()
+                );
+                // spawn off the mining process
+                tokio::spawn(self.clone().mine(block, DefaultHash::new()));
+                // reset for next mine
+                last_polled_at = None;
+                transactions = vec![];
+            }
         }
     }
 }
@@ -121,16 +154,18 @@ mod test{
         let difficulty = 1;
         let miner_address = None;
 
-        let mut block = Block::new(previous_hash, nonce, timestamp, transactions, difficulty, miner_address, &mut hasher);
+        let block = Block::new(previous_hash, nonce, timestamp, transactions, difficulty, miner_address, &mut hasher);
 
         // mine the block
-        miner.mine(&mut block, &mut hasher).await;
+        miner.clone().mine(block, hasher).await;
+        
+        let mined_block = miner.ready_queue.lock().await.pop().unwrap();
 
-        assert!(block.header.nonce > 0);
-        assert!(block.header.miner_address.is_some());
-        assert_eq!(block.header.previous_hash, previous_hash);
-        assert_eq!(block.header.timestamp, timestamp);
-        assert_eq!(block.header.difficulty, difficulty);
-        assert!(block.hash.is_some());
+        assert!(mined_block.header.nonce > 0);
+        assert!(mined_block.header.miner_address.is_some());
+        assert_eq!(mined_block.header.previous_hash, previous_hash);
+        assert_eq!(mined_block.header.timestamp, timestamp);
+        assert_eq!(mined_block.header.difficulty, difficulty);
+        assert!(mined_block.hash.is_some());
     }
 }

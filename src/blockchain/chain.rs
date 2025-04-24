@@ -22,7 +22,7 @@ pub struct Chain {
     /// The current depth (number of blocks) in the chain.
     depth: u64,
     /// The difficulty level for mining new blocks.
-    difficulty: u64,
+    pub difficulty: u64,
     /// The account manager for tracking account balances and nonces.
     #[serde(skip)]
     account_manager: AccountManager,
@@ -48,6 +48,10 @@ impl Chain {
             difficulty: 4,
             account_manager: AccountManager::new(),
         }
+    }
+
+    pub fn get_top_block(&self) -> Option<&Block> {
+        self.blocks.last()
     }
 
     /// Checks if a hash meets the required difficulty level.
