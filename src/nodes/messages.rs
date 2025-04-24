@@ -1,4 +1,4 @@
-use crate::blockchain::chain::Chain;
+use crate::{blockchain::chain::Chain, primitives::transaction::Transaction};
 use serde::{Serialize, Deserialize};
 use super::Peer;
 
@@ -10,5 +10,7 @@ pub enum Message {
     PeerRequest,
     PeerResponse(Vec<Peer>),
     Declaration(Peer),
+    TransactionRequest(Transaction),
+    TransactionAck,
     Error(String)
 }

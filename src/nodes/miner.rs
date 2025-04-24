@@ -1,15 +1,33 @@
+use std::sync::Arc;
+
+use rand_core::le;
+use tokio::sync::Mutex;
+
 use crate::{primitives::block::Block, crypto::hashing::{HashFunction, Hashable}};
 
 use super::Node;
 
-pub trait Miner {
-    /// Mine a block and retrun the mined block
-    fn mine(&self, block: &mut Block, hash_function: &mut impl HashFunction);
-    /// Check if the hash is valid
-    fn is_valid_hash(&self, difficulty: u64, hash: &[u8; 32]) -> bool;
+pub struct Miner {
+    pub node: Arc<Mutex<Node>>,
 }
 
-impl Miner for Node{
+impl Miner{
+
+    /// Creates a new miner instance
+    /// Takes ownership of the node
+    pub fn new(node: Node) -> Result<Self, std::io::Error> {
+        let transaction_pool = &node.transaction_pool;
+        if let Some(_) = transaction_pool{
+            return Ok(Miner {
+                node: Arc::new(Mutex::new(node)),
+            });
+        }else{
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Transaction pool not found",
+            ));
+        }
+    }
 
     fn is_valid_hash(&self, difficulty: u64, hash: &[u8; 32]) -> bool {
         // check for 'difficulty' leading 0 bits
@@ -25,10 +43,10 @@ impl Miner for Node{
         leading_zeros >= difficulty
     }
 
-    fn mine(&self, block: &mut Block, hash_function: &mut impl HashFunction){
+    pub async fn mine(&self, block: &mut Block, hash_function: &mut impl HashFunction){
         // the block is already pupulated
         block.header.nonce = 0;
-        block.header.miner_address = Some(*self.public_key);
+        block.header.miner_address = Some(*self.node.lock().await.public_key);
         loop {
             match block.header.hash(hash_function){
                 Ok(hash) => {
@@ -42,6 +60,14 @@ impl Miner for Node{
                 }
             }
             block.header.nonce += 1;
+        }
+    }
+
+    /// monitors the nodes transaction pool
+    pub async fn monitor_pool(&mut self) {
+        // monitor the pool for transactions
+        loop {
+            
         }
     }
 }

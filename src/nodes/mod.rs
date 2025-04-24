@@ -78,7 +78,7 @@ impl Peer{
 }
 
 #[derive(Clone)]
-struct Node{
+pub struct Node{
     pub public_key: Arc<[u8; 32]>,
     /// The private key of the node
     pub private_key: Arc<[u8; 32]>,
@@ -91,7 +91,7 @@ struct Node{
     // the blockchain
     pub chain: Arc<Mutex<Chain>>,
     /// transactions to be serviced
-    pub transaction_pool: Arc<Mutex<TransactionPool>>
+    pub transaction_pool: Option<Arc<Mutex<TransactionPool>>>
 }
 
 impl Node {
@@ -103,7 +103,7 @@ impl Node {
         port: u16,
         peers: Vec<Peer>,
         chain: Chain,
-        transaction_pool: TransactionPool
+        transaction_pool: Option<TransactionPool>
     ) -> Self {
         Node {
             public_key: public_key.into(),
@@ -112,7 +112,7 @@ impl Node {
             port: port.into(),
             peers: Mutex::new(peers).into(),
             chain: Mutex::new(chain).into(),
-            transaction_pool: Mutex::new(transaction_pool).into(),
+            transaction_pool: transaction_pool.map(|pool| Arc::new(Mutex::new(pool)))
         }
     }
 
@@ -185,6 +185,16 @@ impl Node {
             Message::ChainRequest => {
                 Ok(Message::ChainResponse(self.chain.lock().await.clone()))
             },
+            Message::TransactionRequest(transaction) => {
+                // add the transaction to the pool
+                match self.transaction_pool{
+                    Some(ref pool) => {
+                        pool.lock().await.add_transaction(transaction.clone());
+                    },
+                    None => {}
+                }
+                Ok(Message::TransactionAck)
+            },
             _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Expected a request"))
         }
     }
@@ -246,19 +256,22 @@ impl Node {
 
 #[cfg(test)]
 mod test{
-    use std::{net::{IpAddr, Ipv4Addr}, str::FromStr};
+    use std::{net::{IpAddr, Ipv4Addr}, str::FromStr, sync::Arc};
+
+    use tokio::sync::Mutex;
 
     use crate::{blockchain::chain::Chain, crypto::hashing::{DefaultHash, HashFunction}, primitives::{block::Block, pool::TransactionPool, transaction::Transaction}};
     use crate::nodes::miner::Miner;
     use super::Node;
 
-    #[test]
-    fn test_miner(){
+    #[tokio::test]
+    async fn test_miner(){
         let public_key = [1u8; 32];
         let private_key = [2u8; 32];
         let ip_address = IpAddr::V4(Ipv4Addr::from_str("127.0.0.1").unwrap());
         let port = 8080;
-        let node = Node::new(public_key, private_key, ip_address, port, vec![], Chain::new_with_genesis(), TransactionPool::new());
+        let node = Node::new(public_key, private_key, ip_address, port, vec![], Chain::new_with_genesis(), Some(TransactionPool::new()));
+        let miner = Miner::new(node).unwrap();
         let mut hasher = DefaultHash::new();
 
         // block
@@ -281,7 +294,7 @@ mod test{
         let mut block = Block::new(previous_hash, nonce, timestamp, transactions, difficulty, miner_address, &mut hasher);
 
         // mine the block
-        node.mine(&mut block, &mut hasher);
+        miner.mine(&mut block, &mut hasher).await;
 
         assert!(block.header.nonce > 0);
         assert!(block.header.miner_address.is_some());
