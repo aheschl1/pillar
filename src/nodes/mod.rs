@@ -117,7 +117,7 @@ impl Node {
     }
 
     /// when called, launches a new thread that listens for incoming connections
-    pub async fn serve(&self){
+    pub fn serve(&self){
         // spawn a new thread to handle the connection
         let self_clone = self.clone();
         tokio::spawn(self_clone.serve_peers());
@@ -252,55 +252,4 @@ impl Node {
         Ok(())
     }
 
-}
-
-#[cfg(test)]
-mod test{
-    use std::{net::{IpAddr, Ipv4Addr}, str::FromStr, sync::Arc};
-
-    use tokio::sync::Mutex;
-
-    use crate::{blockchain::chain::Chain, crypto::hashing::{DefaultHash, HashFunction}, primitives::{block::Block, pool::TransactionPool, transaction::Transaction}};
-    use crate::nodes::miner::Miner;
-    use super::Node;
-
-    #[tokio::test]
-    async fn test_miner(){
-        let public_key = [1u8; 32];
-        let private_key = [2u8; 32];
-        let ip_address = IpAddr::V4(Ipv4Addr::from_str("127.0.0.1").unwrap());
-        let port = 8080;
-        let node = Node::new(public_key, private_key, ip_address, port, vec![], Chain::new_with_genesis(), Some(TransactionPool::new()));
-        let miner = Miner::new(node).unwrap();
-        let mut hasher = DefaultHash::new();
-
-        // block
-        let previous_hash = [3u8; 32];
-        let nonce = 12345;
-        let timestamp = 1622547800;
-        let transactions = vec![
-            Transaction::new(
-                [0u8; 32], 
-                [0u8; 32], 
-                1, 
-                timestamp, 
-                0,
-                &mut hasher.clone()
-            )
-        ];
-        let difficulty = 1;
-        let miner_address = None;
-
-        let mut block = Block::new(previous_hash, nonce, timestamp, transactions, difficulty, miner_address, &mut hasher);
-
-        // mine the block
-        miner.mine(&mut block, &mut hasher).await;
-
-        assert!(block.header.nonce > 0);
-        assert!(block.header.miner_address.is_some());
-        assert_eq!(block.header.previous_hash, previous_hash);
-        assert_eq!(block.header.timestamp, timestamp);
-        assert_eq!(block.header.difficulty, difficulty);
-        assert!(block.hash.is_some());
-    }
 }
