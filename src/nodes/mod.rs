@@ -5,7 +5,7 @@ use messages::Message;
 use serde::{Serialize, Deserialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::blockchain::chain::Chain;
+use crate::{blockchain::chain::Chain, primitives::{pool::TransactionPool, transaction::{self, Transaction}}};
 
 pub mod miner;
 pub mod messages;
@@ -89,7 +89,9 @@ struct Node{
     // known peers
     pub peers: Arc<Mutex<Vec<Peer>>>,
     // the blockchain
-    pub chain: Arc<Mutex<Chain>>
+    pub chain: Arc<Mutex<Chain>>,
+    /// transactions to be serviced
+    pub transaction_pool: Arc<Mutex<TransactionPool>>
 }
 
 impl Node {
@@ -100,7 +102,8 @@ impl Node {
         ip_address: IpAddr, 
         port: u16,
         peers: Vec<Peer>,
-        chain: Chain
+        chain: Chain,
+        transaction_pool: TransactionPool
     ) -> Self {
         Node {
             public_key: public_key.into(),
@@ -108,7 +111,8 @@ impl Node {
             ip_address: ip_address,
             port: port.into(),
             peers: Mutex::new(peers).into(),
-            chain: Mutex::new(chain).into()
+            chain: Mutex::new(chain).into(),
+            transaction_pool: Mutex::new(transaction_pool).into(),
         }
     }
 
@@ -141,7 +145,7 @@ impl Node {
                     return;
                 }
                 let declaration = declaration.unwrap();
-                let peer = match declaration {
+                match declaration {
                     Message::Declaration(peer) => {
                         // add the peer to the list if and only if it is not already in the list
                         self_clone.maybe_update_peers(peer.clone()).await.unwrap();
@@ -244,7 +248,7 @@ impl Node {
 mod test{
     use std::{net::{IpAddr, Ipv4Addr}, str::FromStr};
 
-    use crate::{blockchain::chain::Chain, crypto::hashing::{HashFunction, DefaultHash}, primitives::{block::Block, transaction::Transaction}};
+    use crate::{blockchain::chain::Chain, crypto::hashing::{DefaultHash, HashFunction}, primitives::{block::Block, pool::TransactionPool, transaction::Transaction}};
     use crate::nodes::miner::Miner;
     use super::Node;
 
@@ -254,7 +258,7 @@ mod test{
         let private_key = [2u8; 32];
         let ip_address = IpAddr::V4(Ipv4Addr::from_str("127.0.0.1").unwrap());
         let port = 8080;
-        let node = Node::new(public_key, private_key, ip_address, port, vec![], Chain::new_with_genesis());
+        let node = Node::new(public_key, private_key, ip_address, port, vec![], Chain::new_with_genesis(), TransactionPool::new());
         let mut hasher = DefaultHash::new();
 
         // block

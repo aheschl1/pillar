@@ -1,5 +1,6 @@
 pub mod transaction;
 pub mod block;
+pub mod pool;
 
 #[cfg(test)]
 mod tests{
