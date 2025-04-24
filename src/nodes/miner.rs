@@ -16,7 +16,7 @@ impl Miner{
     /// Creates a new miner instance
     /// Takes ownership of the node
     pub fn new(node: Node) -> Result<Self, std::io::Error> {
-        let transaction_pool = &node.transaction_pool;
+        let transaction_pool = &node.miner_pool;
         if let Some(_) = transaction_pool{
             return Ok(Miner {
                 node: Arc::new(node),
@@ -72,7 +72,7 @@ impl Miner{
             block.header.nonce += 1;
         }
         // add the ready queue
-        self.node.transaction_pool.as_ref().unwrap().add_block(block);
+        self.node.miner_pool.as_ref().unwrap().add_block(block);
     }
 
     /// monitors the nodes transaction pool
@@ -85,7 +85,7 @@ impl Miner{
         let mut transactions = vec![];
         let mut last_polled_at: Option<u64> = None;
         loop {
-            let transaction = self.node.transaction_pool.as_ref().unwrap().pop_transaction();
+            let transaction = self.node.miner_pool.as_ref().unwrap().pop_transaction();
             match transaction{
                 Some(transaction) => {
                     transactions.push(transaction);
@@ -121,7 +121,7 @@ impl Miner{
 mod test{
     use std::{net::{IpAddr, Ipv4Addr}, str::FromStr};
 
-    use crate::{blockchain::chain::Chain, crypto::hashing::{DefaultHash, HashFunction}, primitives::{block::Block, pool::TransactionPool, transaction::Transaction}};
+    use crate::{blockchain::chain::Chain, crypto::hashing::{DefaultHash, HashFunction}, primitives::{block::Block, pool::MinerPool, transaction::Transaction}};
     use crate::nodes::miner::Miner;
     use super::Node;
 
@@ -131,7 +131,7 @@ mod test{
         let private_key = [2u8; 32];
         let ip_address = IpAddr::V4(Ipv4Addr::from_str("127.0.0.1").unwrap());
         let port = 8080;
-        let node = Node::new(public_key, private_key, ip_address, port, vec![], Chain::new_with_genesis(), Some(TransactionPool::new()));
+        let node = Node::new(public_key, private_key, ip_address, port, vec![], Chain::new_with_genesis(), Some(MinerPool::new()));
         let miner = Miner::new(node).unwrap();
         let mut hasher = DefaultHash::new();
 
@@ -157,7 +157,7 @@ mod test{
         // mine the block
         miner.clone().mine(block, hasher).await;
         
-        let mined_block = miner.node.transaction_pool.as_ref().unwrap().pop_block().unwrap();
+        let mined_block = miner.node.miner_pool.as_ref().unwrap().pop_block().unwrap();
         assert!(mined_block.header.nonce > 0);
         assert!(mined_block.header.miner_address.is_some());
         assert_eq!(mined_block.header.previous_hash, previous_hash);

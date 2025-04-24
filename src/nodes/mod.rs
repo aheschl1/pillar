@@ -1,11 +1,12 @@
 use std::{collections::HashSet, net::{IpAddr, Ipv6Addr}, sync::Arc};
+use crossbeam::channel;
 use tokio::{net::{TcpListener, TcpStream}, sync::Mutex};
 
 use messages::Message;
 use serde::{Serialize, Deserialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::{blockchain::chain::Chain, primitives::{pool::TransactionPool, transaction::{self, Transaction}}};
+use crate::{blockchain::chain::Chain, primitives::{pool::MinerPool, transaction::{self, Transaction}}};
 
 pub mod miner;
 pub mod messages;
@@ -91,7 +92,11 @@ pub struct Node{
     // the blockchain
     pub chain: Arc<Mutex<Chain>>,
     /// transactions to be serviced
-    pub transaction_pool: Option<Arc<TransactionPool>>
+    pub miner_pool: Option<Arc<MinerPool>>,
+    /// transactions to be broadcasted
+    pub transaction_receiver: channel::Receiver<Transaction>,
+    /// transaction input
+    pub transaction_sender: channel::Sender<Transaction>
 }
 
 impl Node {
@@ -103,8 +108,9 @@ impl Node {
         port: u16,
         peers: Vec<Peer>,
         chain: Chain,
-        transaction_pool: Option<TransactionPool>
+        transaction_pool: Option<MinerPool>
     ) -> Self {
+        let (transaction_sender, transaction_receiver) = channel::unbounded();
         Node {
             public_key: public_key.into(),
             private_key: private_key.into(),
@@ -112,7 +118,9 @@ impl Node {
             port: port.into(),
             peers: Mutex::new(peers).into(),
             chain: Mutex::new(chain).into(),
-            transaction_pool: transaction_pool.map(|pool| Arc::new(pool))
+            miner_pool: transaction_pool.map(|pool| Arc::new(pool)),
+            transaction_receiver,
+            transaction_sender,
         }
     }
 
@@ -120,7 +128,8 @@ impl Node {
     pub fn serve(&self){
         // spawn a new thread to handle the connection
         let self_clone = self.clone();
-        tokio::spawn(self_clone.serve_peers());
+        tokio::spawn(self_clone.clone().serve_peers());
+        tokio::spawn(self_clone.broadcast_knowledge());
     }
 
     /// This function serves as a loop that accepts incoming requests, and handles the main protocol
@@ -174,6 +183,24 @@ impl Node {
         }
     }
 
+
+    /// Background process that consumes mined blocks, and transactions which must be forwarded
+    async fn broadcast_knowledge(self) -> Result<(), std::io::Error> {
+        loop{
+            // send a message to all peers
+            if let Some(pool) = &self.miner_pool{
+                while pool.block_count() > 0{
+                    self.broadcast(&Message::BlockTransmission(pool.pop_block().unwrap())).await?;
+                }
+            }
+            while self.transaction_receiver.len() > 0{
+                // receive the transaction from the sender
+                let transaction = self.transaction_receiver.recv().unwrap();
+                self.broadcast(&Message::TransactionRequest(transaction)).await?;
+            }
+        }
+    }
+
     /// Derive the response to a request from a peer
     async fn serve_request(&mut self, message: &Message) -> Result<Message, std::io::Error>{
         match message{
@@ -185,13 +212,19 @@ impl Node {
                 Ok(Message::ChainResponse(self.chain.lock().await.clone()))
             },
             Message::TransactionRequest(transaction) => {
+                // IF IT HAS OUR PUBLIC KEY< DROP
+                if transaction.header.sender == *self.public_key{
+                    return Ok(Message::TransactionAck);
+                }
                 // add the transaction to the pool
-                match self.transaction_pool{
+                match self.miner_pool{
                     Some(ref pool) => {
                         pool.add_transaction(transaction.clone());
                     },
                     None => {}
                 }
+                // to be broadcasted
+                self.transaction_sender.send(transaction.clone()).unwrap();
                 Ok(Message::TransactionAck)
             },
             _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Expected a request"))

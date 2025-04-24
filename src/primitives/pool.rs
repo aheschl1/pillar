@@ -4,7 +4,7 @@ use crossbeam::channel;
 
 
 #[derive(Debug, Clone)]
-pub struct TransactionPool {
+pub struct MinerPool {
     // receiver channel
     transaction_receiver: channel::Receiver<Transaction>,
     // sender channel
@@ -17,11 +17,11 @@ pub struct TransactionPool {
 /// Transaction pool for now is just a vector of transactions
 /// In the future, it will be a more complex structure - perhaps a max heap on the transaction fee
 /// Rn, FIFO
-impl TransactionPool{
+impl MinerPool{
     pub fn new() -> Self {
         let (transaction_sender, transaction_receiver) = channel::unbounded();
         let (block_sender, block_receiver) = channel::unbounded();
-        TransactionPool {
+        MinerPool {
             transaction_receiver,
             transaction_sender,
             block_sender,
@@ -57,5 +57,11 @@ impl TransactionPool{
     pub fn add_block(&self, block: Block) {
         // send the block to the receiver
         self.block_sender.send(block).unwrap();
+    }
+
+    /// Returns the number of blocks in the pool
+    pub fn block_count(&self) -> usize {
+        // get the number of blocks in the pool
+        self.block_receiver.len()
     }
 }
