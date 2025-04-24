@@ -91,7 +91,7 @@ pub struct Node{
     // the blockchain
     pub chain: Arc<Mutex<Chain>>,
     /// transactions to be serviced
-    pub transaction_pool: Option<Arc<Mutex<TransactionPool>>>
+    pub transaction_pool: Option<Arc<TransactionPool>>
 }
 
 impl Node {
@@ -112,7 +112,7 @@ impl Node {
             port: port.into(),
             peers: Mutex::new(peers).into(),
             chain: Mutex::new(chain).into(),
-            transaction_pool: transaction_pool.map(|pool| Arc::new(Mutex::new(pool)))
+            transaction_pool: transaction_pool.map(|pool| Arc::new(pool))
         }
     }
 
@@ -174,7 +174,6 @@ impl Node {
         }
     }
 
-
     /// Derive the response to a request from a peer
     async fn serve_request(&mut self, message: &Message) -> Result<Message, std::io::Error>{
         match message{
@@ -189,7 +188,7 @@ impl Node {
                 // add the transaction to the pool
                 match self.transaction_pool{
                     Some(ref pool) => {
-                        pool.lock().await.add_transaction(transaction.clone());
+                        pool.add_transaction(transaction.clone());
                     },
                     None => {}
                 }
@@ -225,7 +224,7 @@ impl Node {
         for peer in self.peers.lock().await.iter_mut(){
             let peers = peer.communicate(
                 &Message::PeerRequest, 
-                Peer::new(*self.public_key, self.ip_address, *self.port)
+                self.clone().into()
             ).await?;
             match peers {
                 Message::PeerResponse(peers) => {
@@ -252,4 +251,26 @@ impl Node {
         Ok(())
     }
 
+}
+
+
+impl Into<Peer> for Node {
+    fn into(self) -> Peer {
+        Peer::new(*self.public_key, self.ip_address, *self.port)
+    }
+}
+
+pub trait Broadcaster{
+    /// Broadcast a message to all peers
+    async fn broadcast(&self, message: &Message) -> Result<(), std::io::Error>;
+}
+
+impl Broadcaster for Node {
+    async fn broadcast(&self, message: &Message) -> Result<(), std::io::Error> {
+        // send a message to all peers
+        for peer in self.peers.lock().await.iter_mut(){
+            peer.communicate(message, self.clone().into()).await?;
+        }
+        Ok(())
+    }
 }

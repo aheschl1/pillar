@@ -8,8 +8,7 @@ use super::Node;
 
 #[derive(Clone)]
 pub struct Miner {
-    pub node: Arc<Mutex<Node>>,
-    pub ready_queue: Arc<Mutex<Vec<Block>>>,
+    pub node: Arc<Node>
 }
 
 impl Miner{
@@ -20,8 +19,7 @@ impl Miner{
         let transaction_pool = &node.transaction_pool;
         if let Some(_) = transaction_pool{
             return Ok(Miner {
-                node: Arc::new(Mutex::new(node)),
-                ready_queue: Mutex::new(vec![]).into(),
+                node: Arc::new(node),
             });
         }else{
             return Err(std::io::Error::new(
@@ -34,7 +32,7 @@ impl Miner{
     /// Starts monitoring of the pool in a background process
     /// and serves the node
     pub async fn serve(&self){
-        self.node.lock().await.serve();
+        self.node.serve();
         // start the miner
         let self_clone = self.clone();
         tokio::spawn(self_clone.monitor_pool());
@@ -58,7 +56,7 @@ impl Miner{
     pub async fn mine(self, mut block: Block, mut hash_function: impl HashFunction){
         // the block is already pupulated
         block.header.nonce = 0;
-        block.header.miner_address = Some(*self.node.lock().await.public_key);
+        block.header.miner_address = Some(*self.node.public_key);
         loop {
             match block.header.hash(&mut hash_function){
                 Ok(hash) => {
@@ -74,7 +72,7 @@ impl Miner{
             block.header.nonce += 1;
         }
         // add the ready queue
-        self.ready_queue.lock().await.push(block.clone());
+        self.node.transaction_pool.as_ref().unwrap().add_block(block);
     }
 
     /// monitors the nodes transaction pool
@@ -87,7 +85,7 @@ impl Miner{
         let mut transactions = vec![];
         let mut last_polled_at: Option<u64> = None;
         loop {
-            let transaction = self.node.lock().await.transaction_pool.as_ref().unwrap().lock().await.pop();
+            let transaction = self.node.transaction_pool.as_ref().unwrap().pop_transaction();
             match transaction{
                 Some(transaction) => {
                     transactions.push(transaction);
@@ -100,12 +98,12 @@ impl Miner{
                 transactions.len() >= transactions_to_mine {
                 // mine
                 let block = Block::new(
-                    self.node.lock().await.chain.lock().await.get_top_block().unwrap().hash.unwrap(), // if it crahses, there is bug
+                    self.node.chain.lock().await.get_top_block().unwrap().hash.unwrap(), // if it crahses, there is bug
                     0,
                     tokio::time::Instant::now().elapsed().as_secs(),
                     transactions,
-                    self.node.lock().await.chain.lock().await.difficulty,
-                    Some(*self.node.lock().await.public_key),
+                    self.node.chain.lock().await.difficulty,
+                    Some(*self.node.public_key),
                     &mut DefaultHash::new()
                 );
                 // spawn off the mining process
@@ -159,8 +157,7 @@ mod test{
         // mine the block
         miner.clone().mine(block, hasher).await;
         
-        let mined_block = miner.ready_queue.lock().await.pop().unwrap();
-
+        let mined_block = miner.node.transaction_pool.as_ref().unwrap().pop_block().unwrap();
         assert!(mined_block.header.nonce > 0);
         assert!(mined_block.header.miner_address.is_some());
         assert_eq!(mined_block.header.previous_hash, previous_hash);
