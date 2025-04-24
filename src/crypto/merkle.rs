@@ -9,11 +9,11 @@ use super::hashing::{HashFunction, DefaultHash};
 #[derive(Debug)]
 pub struct TreeNode{
     // left is the left child of the node
-    pub left: Option<Arc<Mutex<Box<TreeNode>>>>,
+    pub left: Option<Arc<Mutex<TreeNode>>>,
     // right is the right child of the node
-    pub right: Option<Arc<Mutex<Box<TreeNode>>>>,
+    pub right: Option<Arc<Mutex<TreeNode>>>,
     // parent is the parent of the node
-    pub parent: Option<Arc<Mutex<Box<TreeNode>>>>,
+    pub parent: Option<Arc<Mutex<TreeNode>>>,
     // hash is the sha3_256 hash of the node
     pub hash: [u8; 32],
 }
@@ -48,9 +48,9 @@ pub struct MerkleProof{
 #[derive(Debug, Clone)]
 pub struct MerkleTree{
     // root is the root of the Merkle tree
-    pub root: Option<Arc<Mutex<Box<TreeNode>>>>,
+    pub root: Option<Arc<Mutex<TreeNode>>>,
     // store the leaves for logn proof generation
-    pub leaves: Option<Vec<Arc<Mutex<Box<TreeNode>>>>>,
+    pub leaves: Option<Vec<Arc<Mutex<TreeNode>>>>,
 }
 
 impl Default for MerkleTree {
@@ -81,11 +81,11 @@ pub fn generate_tree(data: Vec<&Transaction>, hash_function: &mut impl HashFunct
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Data is empty"));
     }
     // list of transactions to list of leaves
-    let mut data: Vec<Arc<Mutex<Box<TreeNode>>>> = data.into_iter().map(|transaction|{
+    let mut data: Vec<Arc<Mutex<TreeNode>>> = data.into_iter().map(|transaction|{
         hash_function.update(transaction.hash);
         let node = TreeNode { left: None, right: None, parent:None, hash: hash_function.digest().expect("Hashing failed") };
         // add to leaves
-        Arc::new(Mutex::new(Box::new(node)))
+        Arc::new(Mutex::new(node))
     }).collect();
     let leaves = Some(data.clone());
 
@@ -107,7 +107,7 @@ pub fn generate_tree(data: Vec<&Transaction>, hash_function: &mut impl HashFunct
                     parent: None,
                     hash: hash_function.digest().expect("Hashing failed")
                 };
-                let new_node = Arc::new(Mutex::new(Box::new(new_node)));
+                let new_node = Arc::new(Mutex::new(new_node));
                 // parent pointer
                 if let Ok(mut left_lock) = nodes[0].lock() {
                     left_lock.parent = Some(new_node.clone());
