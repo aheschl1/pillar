@@ -5,6 +5,7 @@ use tokio::sync::Mutex;
 use crate::primitives::block::Block;
 
 
+
 #[derive(Debug)]
 pub struct Account{
     // The address of the account is the public key
