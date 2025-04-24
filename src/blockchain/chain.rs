@@ -144,7 +144,7 @@ impl Chain {
                 return false;
             }
             let total_sum: u64 = transactions.iter().map(|t| t.header.amount).sum();
-            if account.unwrap().lock().await.balance < total_sum {
+            if account.unwrap().lock().unwrap().balance < total_sum {
                 return false;
             }
             // now validate each individual transaction
@@ -193,11 +193,11 @@ impl Chain {
             return false;
         }
         let account = account.clone().unwrap();
-        if account.lock().await.balance < transaction.header.amount {
+        if account.lock().unwrap().balance < transaction.header.amount {
             return false;
         } // @todo: If there are multiple transactions of the same sender in a block, we need to check if the balance is enough for all of them
         // check nonce
-        if transaction.header.nonce != account.lock().await.nonce {
+        if transaction.header.nonce != account.lock().unwrap().nonce {
             return false;
         }
         return true;

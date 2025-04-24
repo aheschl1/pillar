@@ -1,6 +1,5 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::{Arc, Mutex}};
 
-use tokio::sync::Mutex;
 
 use crate::primitives::block::Block;
 
@@ -54,7 +53,7 @@ impl AccountManager{
     pub async fn add_account(&mut self, account: Account) -> Arc<Mutex<Account>>{
         let account = Arc::new(Mutex::new(account));
         self.accounts.push(account.clone());
-        self.address_to_account.insert(account.clone().lock().await.address, account.clone());
+        self.address_to_account.insert(account.clone().lock().unwrap().address, account.clone());
         account
     }
 
@@ -77,9 +76,9 @@ impl AccountManager{
                 None => self.add_account(Account::new(transaction.header.receiver, 0)).await,
             };
             // sender always needs to exist, or the block would not pass verification
-            sender.lock().await.balance -= transaction.header.amount;
-            receiver.lock().await.balance += transaction.header.amount;
-            sender.lock().await.nonce += 1;
+            sender.lock().unwrap().balance -= transaction.header.amount;
+            receiver.lock().unwrap().balance += transaction.header.amount;
+            sender.lock().unwrap().nonce += 1;
         }
     }
 }

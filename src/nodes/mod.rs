@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, net::{IpAddr, Ipv6Addr}, sync::Arc};
 use tokio::{net::{TcpListener, TcpStream}, sync::Mutex};
 
 use messages::Message;
@@ -15,7 +15,7 @@ pub struct Peer{
     /// The public key of the peer
     pub public_key: [u8; 32],
     /// The IP address of the peer
-    pub ip_address: String,
+    pub ip_address: IpAddr,
     /// The port of the peer
     pub port: u16,
 }
@@ -32,7 +32,7 @@ impl Clone for Peer {
 
 impl Peer{
     /// Create a new peer
-    pub fn new(public_key: [u8; 32], ip_address: String, port: u16) -> Self {
+    pub fn new(public_key: [u8; 32], ip_address: IpAddr, port: u16) -> Self {
         Peer {
             public_key,
             ip_address,
@@ -83,7 +83,7 @@ struct Node{
     /// The private key of the node
     pub private_key: Arc<[u8; 32]>,
     /// The IP address of the node
-    pub ip_address: Arc<String>,
+    pub ip_address: IpAddr,
     /// The port of the node
     pub port: Arc<u16>,
     // known peers
@@ -97,7 +97,7 @@ impl Node {
     pub fn new(
         public_key: [u8; 32], 
         private_key: [u8; 32], 
-        ip_address: String, 
+        ip_address: IpAddr, 
         port: u16,
         peers: Vec<Peer>,
         chain: Chain
@@ -105,7 +105,7 @@ impl Node {
         Node {
             public_key: public_key.into(),
             private_key: private_key.into(),
-            ip_address: ip_address.into(),
+            ip_address: ip_address,
             port: port.into(),
             peers: Mutex::new(peers).into(),
             chain: Mutex::new(chain).into()
@@ -211,7 +211,7 @@ impl Node {
         for peer in self.peers.lock().await.iter_mut(){
             let peers = peer.communicate(
                 &Message::PeerRequest, 
-                Peer::new(*self.public_key, self.ip_address.to_string(), *self.port)
+                Peer::new(*self.public_key, self.ip_address, *self.port)
             ).await?;
             match peers {
                 Message::PeerResponse(peers) => {
@@ -242,6 +242,8 @@ impl Node {
 
 #[cfg(test)]
 mod test{
+    use std::{net::{IpAddr, Ipv4Addr}, str::FromStr};
+
     use crate::{blockchain::chain::Chain, crypto::hashing::{HashFunction, DefaultHash}, primitives::{block::Block, transaction::Transaction}};
     use crate::nodes::miner::Miner;
     use super::Node;
@@ -250,7 +252,7 @@ mod test{
     fn test_miner(){
         let public_key = [1u8; 32];
         let private_key = [2u8; 32];
-        let ip_address = "127.0.0.1".to_string();
+        let ip_address = IpAddr::V4(Ipv4Addr::from_str("127.0.0.1").unwrap());
         let port = 8080;
         let node = Node::new(public_key, private_key, ip_address, port, vec![], Chain::new_with_genesis());
         let mut hasher = DefaultHash::new();
