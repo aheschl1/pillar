@@ -39,6 +39,7 @@ impl<'de> Deserialize<'de> for Block {
             helper.transactions,
             helper.header.difficulty,
             helper.header.miner_address,
+            helper.header.depth,
             &mut DefaultHash::new()
         ))
     }
@@ -58,6 +59,8 @@ pub struct BlockHeader{
     pub difficulty: u64,
     // the address of the miner is the sha3_256 hash of the miner address
     pub miner_address: Option<[u8; 32]>,
+    // the depth is a depth of the block in the chain
+    pub depth: u64
 }
 
 impl Clone for BlockHeader {
@@ -69,6 +72,7 @@ impl Clone for BlockHeader {
             timestamp: self.timestamp,
             difficulty: self.difficulty,
             miner_address: self.miner_address,
+            depth: self.depth
         }
     }
 }
@@ -79,7 +83,8 @@ impl BlockHeader {
         merkle_root: [u8; 32], 
         nonce: u64, timestamp: u64,
         difficulty: u64,
-        miner_address: Option<[u8; 32]>
+        miner_address: Option<[u8; 32]>,
+        depth: u64
     ) -> Self {
         BlockHeader {
             previous_hash,
@@ -88,6 +93,7 @@ impl BlockHeader {
             timestamp,
             difficulty,
             miner_address,
+            depth
         }
     }
 }
@@ -111,6 +117,7 @@ impl Hashable for BlockHeader {
         hash_function.update(self.nonce.to_le_bytes());
         hash_function.update(self.timestamp.to_le_bytes());
         hash_function.update(self.difficulty.to_le_bytes());
+        hash_function.update(self.depth.to_le_bytes());
         Ok(hash_function.digest().unwrap())
     }
 }
@@ -124,7 +131,8 @@ impl Block {
         transactions: Vec<Transaction>,
         difficulty: u64,
         miner_address: Option<[u8; 32]>,
-        hasher: &mut impl HashFunction
+        depth: u64,
+        hasher: &mut impl HashFunction,
     ) -> Self {
         let merkle_tree = generate_tree(transactions.iter().collect(), hasher).unwrap();
         let header = BlockHeader::new(
@@ -133,7 +141,8 @@ impl Block {
             nonce, 
             timestamp,
             difficulty,
-            miner_address
+            miner_address,
+            depth
         );
         let hash = header.hash(hasher);
         Block {

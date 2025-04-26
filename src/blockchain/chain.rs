@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::{cmp::max, collections::HashMap};
 
-use ed25519::{Signature, signature};
+use ed25519::Signature;
 use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 
@@ -18,9 +18,11 @@ use super::account::AccountManager;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Chain {
     /// The blocks in the chain.
-    blocks: Vec<Block>,
+    blocks: HashMap<[u8; 32], Block>,
     /// The current depth (number of blocks) in the chain.
-    depth: u64,
+    pub depth: u64,
+    /// the block at the deepest depth
+    deepest_hash: [u8; 32],
     /// The difficulty level for mining new blocks.
     pub difficulty: u64,
     /// The account manager for tracking account balances and nonces.
@@ -39,19 +41,20 @@ impl Chain {
                 Transaction::new([0; 32], [0;32], 0, 0, 0, &mut DefaultHash::new())
             ], 
             0, 
-            None, 
+            Some([0; 32]),
+            0,
             &mut DefaultHash::new()
         );
+        let mut blocks = HashMap::new();
+        let genisis_hash = genesis_block.hash.unwrap();
+        blocks.insert(genisis_hash, genesis_block);
         Chain {
-            blocks: vec![genesis_block],
+            blocks: blocks,
             depth: 1,
+            deepest_hash: genisis_hash,
             difficulty: 4,
             account_manager: AccountManager::new(),
         }
-    }
-
-    pub fn get_top_block(&self) -> Option<&Block> {
-        self.blocks.last()
     }
 
     /// Checks if a hash meets the required difficulty level.
@@ -92,20 +95,19 @@ impl Chain {
         // check the previous hash exists
         // TODO: Maybe it doesnt need to be the most recent block that is previous_hash
         let previous_hash = block.header.previous_hash;
-        let valid = match self.blocks.last() {
+        let previous_block = self.blocks.get(&previous_hash);
+        let valid = match previous_block {
             Some(last_block) => {
-                if last_block.hash.unwrap() != previous_hash {
-                    return false;
-                }
-                true
+                // check that the depth is correct
+                last_block.header.depth + 1 != block.header.depth 
             }
-            None => false,
+            None => false
         };
         if !valid {
             return false;
         }
         // check the timestamp is greater than the previous block
-        let result = match self.blocks.last() {
+        let result = match previous_block {
             Some(last_block) => {
                 if block.header.timestamp <= last_block.header.timestamp {
                     return false;
@@ -163,6 +165,12 @@ impl Chain {
         true
     }
 
+    /// Find the longest existing fork in the chain.
+    pub fn get_top_block(&self) -> Option<&Block>{
+        // we use the deepest hash as the top block
+        self.blocks.get(&self.deepest_hash)
+    }
+
     /// Validates an individual transaction for correctness.
     ///
     /// Checks:
@@ -208,17 +216,22 @@ impl Chain {
     }
 
     /// Verifies the validity of a block, including its transactions and metadata.
-    pub fn verify_block(&self, block: &Block) -> bool {
+    pub async fn verify_block(&self, block: &Block) -> bool {
         self.validate_block(block);
-        self.validate_transaction_set(&block.transactions);
+        self.validate_transaction_set(&block.transactions).await;
         true
     }
 
     /// Call this only after a block has been verified
-    fn settle_new_block(&mut self, block: Block){
-        self.account_manager.update_from_block(&block);
-        self.blocks.push(block);
-        self.depth += 1;
+    async fn settle_new_block(&mut self, block: Block){
+        self.account_manager.update_from_block(&block).await;
+        self.blocks.insert(block.hash.unwrap(), block.clone());
+        // update the depth - the depth of this block is checked in the verification
+        // perhaps this is a fork deeper in the chain, so we do not always update 
+        if block.header.depth > self.depth {
+            self.deepest_hash = block.hash.unwrap();
+            self.depth = block.header.depth;
+        }
     }
 
     /// Adds a new block to the chain if it is valid.
@@ -231,9 +244,9 @@ impl Chain {
     ///
     /// * `Ok(())` if the block is successfully added.
     /// * `Err(std::io::Error)` if the block is invalid.
-    pub fn add_new_block(&mut self, block: Block) -> Result<(), std::io::Error> {
-        if self.verify_block(&block) {
-            self.settle_new_block(block);
+    pub async fn add_new_block(&mut self, block: Block) -> Result<(), std::io::Error> {
+        if self.verify_block(&block).await {
+            self.settle_new_block(block).await;
             Ok(())
         } else {
             Err(std::io::Error::new(

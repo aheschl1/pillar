@@ -163,7 +163,7 @@ impl Node {
                     return Ok(Message::BlockAck);
                 }
                 // add the block to the chain - first it is verified
-                self.chain.lock().await.add_new_block(block.clone())?;
+                self.chain.lock().await.add_new_block(block.clone()).await?;
                 // broadcast the block
                 self.broadcast(&Message::BlockTransmission(block.clone())).await?;
                 Ok(Message::BlockAck)
@@ -223,6 +223,10 @@ impl Node {
         // extend the peers list with the new peers
         self.peers.lock().await.extend(new_peers);
         Ok(())
+    }
+
+    async fn discover_chain(){
+        
     }
 
 }

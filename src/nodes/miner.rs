@@ -104,6 +104,7 @@ impl Miner{
                     transactions,
                     self.node.chain.lock().await.difficulty,
                     Some(*self.node.public_key),
+                    self.node.chain.lock().await.depth + 1,
                     &mut DefaultHash::new()
                 );
                 // spawn off the mining process
@@ -152,7 +153,7 @@ mod test{
         let difficulty = 1;
         let miner_address = None;
 
-        let block = Block::new(previous_hash, nonce, timestamp, transactions, difficulty, miner_address, &mut hasher);
+        let block = Block::new(previous_hash, nonce, timestamp, transactions, difficulty, miner_address, 1, &mut hasher);
 
         // mine the block
         miner.clone().mine(block, hasher).await;
