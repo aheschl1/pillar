@@ -1,7 +1,8 @@
-mod primitives;
+mod blockchain;
 mod crypto;
 mod nodes;
-mod blockchain;
+mod primitives;
+mod protocol;
 
 fn main() {
     println!("Hello, world!");

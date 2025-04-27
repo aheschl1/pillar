@@ -5,9 +5,9 @@ use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    crypto::hashing::{HashFunction, Hashable, DefaultHash},
+    crypto::hashing::{DefaultHash, HashFunction, Hashable},
     primitives::{
-        block::Block,
+        block::{Block, BlockHeader},
         transaction::Transaction,
     },
 };
@@ -169,6 +169,17 @@ impl Chain {
     pub fn get_top_block(&self) -> Option<&Block>{
         // we use the deepest hash as the top block
         self.blocks.get(&self.deepest_hash)
+    }
+
+    pub fn get_block(&self, hash: &[u8; 32]) -> Option<&Block> {
+        self.blocks.get(hash)
+    }
+
+    pub fn get_block_headers(&self) -> Vec<BlockHeader> {
+        self.blocks
+            .values()
+            .map(|block| block.header.clone())
+            .collect()
     }
 
     /// Validates an individual transaction for correctness.
