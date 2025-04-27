@@ -1,67 +1,53 @@
-use std::{hash::Hash, iter::Zip, sync::{Arc, Mutex}};
+use std::hash::Hash;
+use slotmap::{SlotMap, new_key_type};
 
-use serde::{Serialize, Deserialize};
 
 use crate::primitives::transaction::Transaction;
-
 use super::hashing::{HashFunction, DefaultHash};
 
-#[derive(Debug)]
-pub struct TreeNode{
-    // left is the left child of the node
-    pub left: Option<Arc<Mutex<TreeNode>>>,
-    // right is the right child of the node
-    pub right: Option<Arc<Mutex<TreeNode>>>,
-    // parent is the parent of the node
-    pub parent: Option<Arc<Mutex<TreeNode>>>,
-    // hash is the sha3_256 hash of the node
+// Define a key type for our nodes
+new_key_type! {
+    pub struct NodeKey;
+}
+
+#[derive(Debug, Clone)]
+pub struct TreeNode {
+    pub left: Option<NodeKey>,
+    pub right: Option<NodeKey>,
+    pub parent: Option<NodeKey>,
     pub hash: [u8; 32],
 }
 
-// copy
-impl Clone for TreeNode {
-    fn clone(&self) -> Self {
-        TreeNode {
-            left: self.left.clone(),
-            right: self.right.clone(),
-            parent: self.parent.clone(),
-            hash: self.hash.clone(),
-        }
-    }
-}
-
+#[derive(Debug, Clone)]
 pub enum HashDirection {
     Left,
     Right,
 }
 
-pub struct MerkleProof{
-    // hash is the hash of the node
+#[derive(Debug, Clone)]
+pub struct MerkleProof {
     pub hashes: Vec<[u8; 32]>,
-    // direction is the direction of the node
     pub directions: Vec<HashDirection>,
-    // root is the root of the tree
-    pub root: [u8; 32]
+    pub root: [u8; 32],
 }
 
-/// Merkle tree struct
 #[derive(Debug, Clone)]
-pub struct MerkleTree{
-    // root is the root of the Merkle tree
-    pub root: Option<Arc<Mutex<TreeNode>>>,
-    // store the leaves for logn proof generation
-    pub leaves: Option<Vec<Arc<Mutex<TreeNode>>>>,
+pub struct MerkleTree {
+    pub nodes: SlotMap<NodeKey, TreeNode>,
+    pub root: Option<NodeKey>,
+    pub leaves: Option<Vec<NodeKey>>,
 }
 
 impl Default for MerkleTree {
     fn default() -> Self {
-        MerkleTree::new()
+        Self::new()
     }
 }
 
 impl MerkleTree {
     pub fn new() -> Self {
         MerkleTree {
+            nodes: SlotMap::with_key(),
             root: None,
             leaves: None,
         }
@@ -69,144 +55,107 @@ impl MerkleTree {
 }
 
 /// Generate a Merkle tree from the given data
-/// 
-/// # Arguments
-/// 
-/// * `data` - A vector of references to Transaction objects
-/// * `hash_function` - A mutable instance of a type implementing the HashFunction trait
-/// 
-/// TODO: This is inneficient, as it clones the data twice 
 pub fn generate_tree(data: Vec<&Transaction>, hash_function: &mut impl HashFunction) -> Result<MerkleTree, std::io::Error> {
     if data.is_empty() {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Data is empty"));
     }
-    // list of transactions to list of leaves
-    let mut data: Vec<Arc<Mutex<TreeNode>>> = data.into_iter().map(|transaction|{
-        hash_function.update(transaction.hash);
-        let node = TreeNode { left: None, right: None, parent:None, hash: hash_function.digest().expect("Hashing failed") };
-        // add to leaves
-        Arc::new(Mutex::new(node))
-    }).collect();
-    let leaves = Some(data.clone());
 
-    // work up levels, adding references to the previous level
-    // until we reach the root
-    while data.len() > 1 {
-        if data.len() % 2 != 0 {
-            data.push(data.last().unwrap().clone());
+    let mut tree = MerkleTree::new();
+
+    // Create leaves
+    let mut leaves: Vec<NodeKey> = data.into_iter().map(|transaction| {
+        hash_function.update(transaction.hash);
+        let node = TreeNode {
+            left: None,
+            right: None,
+            parent: None,
+            hash: hash_function.digest().expect("Hashing failed"),
+        };
+        tree.nodes.insert(node)
+    }).collect();
+    
+    let leaves_clone = leaves.clone();
+
+    // Build up the tree
+    while leaves.len() > 1 {
+        if leaves.len() % 2 != 0 {
+            leaves.push(*leaves.last().unwrap());
         }
-        data = data.chunks(2)
-            .map(|nodes|{
-                // nodes is a slice of two TreeNode
-                hash_function.update(nodes[0].lock().unwrap().hash);
-                hash_function.update(nodes[1].lock().unwrap().hash);
-                // new node
-                let new_node = TreeNode { 
-                    left: Some(nodes[0].clone()), 
-                    right: Some(nodes[1].clone()), 
-                    parent: None,
-                    hash: hash_function.digest().expect("Hashing failed")
-                };
-                let new_node = Arc::new(Mutex::new(new_node));
-                // parent pointer
-                if let Ok(mut left_lock) = nodes[0].lock() {
-                    left_lock.parent = Some(new_node.clone());
-                }
-                if let Ok(mut right_lock) = nodes[1].lock() {
-                    right_lock.parent = Some(new_node.clone());
-                }
-                
-                return new_node;
-            }).collect();
+
+        leaves = leaves.chunks(2).map(|pair| {
+            let (left_key, right_key) = (pair[0], pair[1]);
+            let left_hash = tree.nodes[left_key].hash;
+            let right_hash = tree.nodes[right_key].hash;
+
+            hash_function.update(left_hash);
+            hash_function.update(right_hash);
+
+            let new_node = TreeNode {
+                left: Some(left_key),
+                right: Some(right_key),
+                parent: None,
+                hash: hash_function.digest().expect("Hashing failed"),
+            };
+
+            let parent_key = tree.nodes.insert(new_node);
+            
+            tree.nodes[left_key].parent = Some(parent_key);
+            tree.nodes[right_key].parent = Some(parent_key);
+
+            parent_key
+        }).collect();
     }
-    let merkle = MerkleTree {
-        root: Some(data[0].clone()),
-        leaves: leaves,
-    };
-    Ok(merkle)
+
+    tree.root = Some(leaves[0]);
+    tree.leaves = Some(leaves_clone);
+
+    Ok(tree)
 }
 
-/// Generate a Merkle tree from the given data
-/// 
-/// # Arguments
-/// 
-/// * `data` - A reference to the Transaction object for which to generate the proof
-/// * `hash_function` - A mutable instance of a type implementing the HashFunction trait
-/// 
-/// # Returns
-/// 
-/// * `Ok(())` if the tree was generated successfully
-/// * `Err(std::io::Error)` if the tree could not be generated
-pub fn generate_proof_of_inclusion(merkle_tree: &MerkleTree, data: &Transaction, hash_function:  &mut impl HashFunction) -> Option<MerkleProof> {
-    if merkle_tree.leaves.is_none() {
-        return None;
-    }
-    if merkle_tree.root.is_none() {
-        return None;
-    }
-    // hash of hash is leaf
+/// Generate a Merkle proof for a specific transaction
+pub fn generate_proof_of_inclusion(merkle_tree: &MerkleTree, data: &Transaction, hash_function: &mut impl HashFunction) -> Option<MerkleProof> {
+    let leaves = merkle_tree.leaves.as_ref()?;
+    let nodes = &merkle_tree.nodes;
+    let root_key = merkle_tree.root?;
+
+    // Hash the data
     hash_function.update(data.hash);
-    let leaf_hash = hash_function.digest().expect("Hashing failed");
-    let leaves = merkle_tree.leaves.as_ref().unwrap();
-    // find the leaf
-    let current_node = leaves.iter().find(|node| node.lock().unwrap().hash == leaf_hash);
-    if current_node.is_none() {
-        return None;
-    }
-    // proof
-    // let mut proof = Vec::new();
-    let mut directions = Vec::new();
+    let target_hash = hash_function.digest().expect("Hashing failed");
+
+    // Find matching leaf
+    let mut current_key = leaves.iter().find(|&&key| nodes[key].hash == target_hash)?.clone();
+    
     let mut hashes = Vec::new();
+    let mut directions = Vec::new();
 
-    let mut current_node = current_node.unwrap().clone();
-
-    loop{ 
-        let node = current_node.lock().unwrap();
-        let hash = node.hash;
-        let parent = node.parent.clone();
-        drop(node);
-        // if not root
-        if let Some(parent_node) = parent {
-            let parent = parent_node.lock().unwrap();
-            if parent.left.as_ref().map(|node| node.lock().unwrap().hash) == Some(hash) {
-                // proof.push((parent.right.as_ref().unwrap().lock().unwrap().hash, HashDirection::Right));
-                hashes.push(parent.right.as_ref().unwrap().lock().unwrap().hash);
+    while let Some(parent_key) = nodes[current_key].parent {
+        let parent = &nodes[parent_key];
+        if parent.left == Some(current_key) {
+            if let Some(right_key) = parent.right {
+                hashes.push(nodes[right_key].hash);
                 directions.push(HashDirection::Right);
-            } else {
-                // proof.push((parent.left.as_ref().unwrap().lock().unwrap().hash, HashDirection::Left));
-                hashes.push(parent.left.as_ref().unwrap().lock().unwrap().hash);
+            }
+        } else if parent.right == Some(current_key) {
+            if let Some(left_key) = parent.left {
+                hashes.push(nodes[left_key].hash);
                 directions.push(HashDirection::Left);
             }
-            current_node = parent_node.clone();
-        } else {
-            break;
         }
+        current_key = parent_key;
     }
 
     Some(MerkleProof {
         hashes,
         directions,
-        root: merkle_tree.root.as_ref().unwrap().lock().unwrap().hash,
+        root: nodes[root_key].hash,
     })
-    
 }
 
-/// Verify the proof of inclusion for a given transaction
-/// 
-/// # Arguments
-/// 
-/// * `data` - A reference to the Transaction object for which to verify the proof
-/// * `proof` - A vector of tuples containing the hash and direction of each node in the proof
-/// * `root` - The root hash of the Merkle tree
-/// * `hash_function` - A mutable instance of a type implementing the HashFunction trait
-/// 
-/// # Returns
-/// 
-/// * `true` if the proof is valid
-/// * `false` if the proof is invalid
-pub fn verify_proof_of_inclusion(data: &Transaction, proof: &MerkleProof, root: [u8; 32], hash_function:  &mut impl HashFunction) -> bool {
+/// Verify a Merkle proof
+pub fn verify_proof_of_inclusion(data: &Transaction, proof: &MerkleProof, root: [u8; 32], hash_function: &mut impl HashFunction) -> bool {
     hash_function.update(data.hash);
     let mut current_hash = hash_function.digest().expect("Hashing failed");
+
     for (hash, direction) in proof.hashes.iter().zip(proof.directions.iter()) {
         match direction {
             HashDirection::Left => {
@@ -220,6 +169,7 @@ pub fn verify_proof_of_inclusion(data: &Transaction, proof: &MerkleProof, root: 
         }
         current_hash = hash_function.digest().expect("Hashing failed");
     }
+
     current_hash == root
 }
 
@@ -273,7 +223,7 @@ mod tests {
         let mut height = 0;
         let mut current_node = merkle_tree.root.clone();
         while let Some(node) = current_node {
-            let node = node.lock().unwrap();
+            let node = merkle_tree.nodes.get(node).unwrap();
             if node.left.is_some() {
                 height += 1;
                 current_node = node.left.clone();
@@ -285,7 +235,7 @@ mod tests {
         // verify each parent has two children or 0 children
         let mut current_node = merkle_tree.root.clone();
         while let Some(node) = current_node {
-            let node = node.lock().unwrap();
+            let node = merkle_tree.nodes.get(node).unwrap();
             if node.left.is_some() {
                 assert!(node.right.is_some());
                 current_node = node.left.clone();
@@ -379,9 +329,9 @@ mod tests {
         let proof = generate_proof_of_inclusion(&mut merkle_tree, &transaction3, &mut hash_function).unwrap();
         assert_eq!(proof.hashes.len(), 2);
         // pass
-        assert!(verify_proof_of_inclusion(&transaction3, &proof, merkle_tree.root.as_ref().unwrap().lock().unwrap().hash, &mut hash_function));
+        assert!(verify_proof_of_inclusion(&transaction3, &proof, merkle_tree.nodes[merkle_tree.root.unwrap()].hash, &mut hash_function));
         // fail
-        assert!(!verify_proof_of_inclusion(&transaction1, &proof, merkle_tree.root.as_ref().unwrap().lock().unwrap().hash, &mut hash_function));
+        assert!(!verify_proof_of_inclusion(&transaction1, &proof, merkle_tree.nodes[merkle_tree.root.unwrap()].hash, &mut hash_function));
     }
     #[test]
     fn test_empty_tree() {
@@ -458,8 +408,8 @@ mod tests {
         let proof = generate_proof_of_inclusion(&mut merkle_tree, &transaction1, &mut hash_function).unwrap();
         assert_eq!(proof.hashes.len(), 2);
         // test verification
-        assert!(verify_proof_of_inclusion(&transaction1, &proof, merkle_tree.root.as_ref().unwrap().lock().unwrap().hash, &mut hash_function));
+        assert!(verify_proof_of_inclusion(&transaction1, &proof, merkle_tree.nodes[merkle_tree.root.unwrap()].hash, &mut hash_function));
         // test failure
-        assert!(!verify_proof_of_inclusion(&transaction2, &proof, merkle_tree.root.as_ref().unwrap().lock().unwrap().hash, &mut hash_function));
+        assert!(!verify_proof_of_inclusion(&transaction2, &proof, merkle_tree.nodes[merkle_tree.root.unwrap()].hash, &mut hash_function));
     }
 }

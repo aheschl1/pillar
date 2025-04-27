@@ -137,7 +137,7 @@ impl Block {
         let merkle_tree = generate_tree(transactions.iter().collect(), hasher).unwrap();
         let header = BlockHeader::new(
             previous_hash, 
-            merkle_tree.root.clone().unwrap().lock().unwrap().hash,
+            merkle_tree.nodes.get(merkle_tree.root.unwrap()).unwrap().hash,
             nonce, 
             timestamp,
             difficulty,

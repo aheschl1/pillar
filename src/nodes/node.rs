@@ -1,6 +1,6 @@
 use std::{collections::HashSet, net::IpAddr, sync::Arc};
-use crossbeam::channel;
 use super::peer::Peer;
+use flume::{Receiver, Sender};
 use tokio::{net::{TcpListener, TcpStream}, sync::Mutex};
 
 use super::messages::Message;
@@ -24,9 +24,9 @@ pub struct Node{
     /// transactions to be serviced
     pub miner_pool: Option<Arc<MinerPool>>,
     /// transactions to be broadcasted
-    pub transaction_receiver: channel::Receiver<Transaction>,
+    pub transaction_receiver: Receiver<Transaction>,
     /// transaction input
-    pub transaction_sender: channel::Sender<Transaction>
+    pub transaction_sender: Sender<Transaction>
 }
 
 impl Node {
@@ -40,7 +40,7 @@ impl Node {
         chain: Chain,
         transaction_pool: Option<MinerPool>
     ) -> Self {
-        let (transaction_sender, transaction_receiver) = channel::unbounded();
+        let (transaction_sender, transaction_receiver) = flume::unbounded();
         Node {
             public_key: public_key.into(),
             private_key: private_key.into(),

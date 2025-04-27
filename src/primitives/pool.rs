@@ -1,17 +1,18 @@
 use std::sync::{Arc, Mutex};
+use flume::{Receiver, Sender};
+
 use super::{block::Block, transaction::Transaction};
-use crossbeam::channel;
 
 
 #[derive(Debug, Clone)]
 pub struct MinerPool {
     // receiver channel
-    transaction_receiver: channel::Receiver<Transaction>,
+    transaction_receiver: Receiver<Transaction>,
     // sender channel
-    transaction_sender: channel::Sender<Transaction>,
+    transaction_sender: Sender<Transaction>,
     // ready blocks
-    block_sender: channel::Sender<Block>,
-    block_receiver: channel::Receiver<Block>,
+    block_sender: Sender<Block>,
+    block_receiver: Receiver<Block>,
 }
 
 /// Transaction pool for now is just a vector of transactions
@@ -19,8 +20,8 @@ pub struct MinerPool {
 /// Rn, FIFO
 impl MinerPool{
     pub fn new() -> Self {
-        let (transaction_sender, transaction_receiver) = channel::unbounded();
-        let (block_sender, block_receiver) = channel::unbounded();
+        let (transaction_sender, transaction_receiver) = flume::unbounded();
+        let (block_sender, block_receiver) = flume::unbounded();
         MinerPool {
             transaction_receiver,
             transaction_sender,
