@@ -1,7 +1,8 @@
-use std::{cmp::max, collections::HashMap};
+use std::collections::{HashMap, HashSet};
 
 use ed25519::Signature;
 use ed25519_dalek::VerifyingKey;
+use rand_core::block;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -18,13 +19,15 @@ use super::account::AccountManager;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Chain {
     /// The blocks in the chain.
-    blocks: HashMap<[u8; 32], Block>,
+    pub blocks: HashMap<[u8; 32], Block>,
     /// The current depth (number of blocks) in the chain.
     pub depth: u64,
     /// the block at the deepest depth
-    deepest_hash: [u8; 32],
+    pub deepest_hash: [u8; 32],
     /// The difficulty level for mining new blocks.
     pub difficulty: u64,
+    // track the leaves
+    pub leaves: HashSet<[u8; 32]>,
     /// The account manager for tracking account balances and nonces.
     #[serde(skip)]
     account_manager: AccountManager,
@@ -47,12 +50,16 @@ impl Chain {
         );
         let mut blocks = HashMap::new();
         let genisis_hash = genesis_block.hash.unwrap();
+        let mut leaves = HashSet::new();
+        leaves.insert(genisis_hash);
+
         blocks.insert(genisis_hash, genesis_block);
         Chain {
             blocks: blocks,
             depth: 1,
             deepest_hash: genisis_hash,
             difficulty: 4,
+            leaves: leaves,
             account_manager: AccountManager::new(),
         }
     }
@@ -237,6 +244,8 @@ impl Chain {
     async fn settle_new_block(&mut self, block: Block){
         self.account_manager.update_from_block(&block).await;
         self.blocks.insert(block.hash.unwrap(), block.clone());
+        self.leaves.remove(&block.header.previous_hash);
+        self.leaves.insert(block.hash.unwrap());
         // update the depth - the depth of this block is checked in the verification
         // perhaps this is a fork deeper in the chain, so we do not always update 
         if block.header.depth > self.depth {
@@ -265,5 +274,9 @@ impl Chain {
                 "Block is not valid",
             ))
         }
+    }
+
+    pub fn trim(&self){
+        
     }
 }
