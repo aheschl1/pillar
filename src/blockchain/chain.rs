@@ -276,7 +276,7 @@ impl Chain {
         }
     } 
 
-    pub fn trim(&self){
+    pub fn trim(&mut self){
         let mut seen = HashMap::<[u8; 32], [u8; 32]>::new(); // node: leaf leading there
         let mut forks_to_kill = HashSet::<&[u8; 32]>::new();
         for leaf in self.leaves.iter(){
@@ -288,7 +288,7 @@ impl Chain {
                 let mut best_depth = leaf; // we track this so thsat we can update the seen map
                 if seen.contains_key(&node.hash.unwrap()){ // already seen
                     let fork = &seen[&node.hash.unwrap()]; // the biggest fork off so far 
-                    let fork = &self.blocks[fork];
+                    let fork = self.blocks.get(fork).unwrap();
                     if fork.header.depth >= current_fork_depth + 10{
                         // kill this current fork from the leaf
                         forks_to_kill.insert(leaf);
@@ -307,5 +307,23 @@ impl Chain {
             }
         }
         // actully trim
+        let mut nodes_to_remove = Vec::new();
+        for fork in forks_to_kill.iter(){
+            let mut current_node = self.blocks.get(*fork);
+            // collect nodes to remove until the seen is no longer the fork
+            while let Some(node) = current_node {
+                if seen[&node.hash.unwrap()] == **fork {
+                    nodes_to_remove.push(node.hash.unwrap());
+                }else{
+                    // we have reached the end of this fork
+                    break;
+                }
+                current_node = self.blocks.get(&node.header.previous_hash);
+            }
+        }
+        // perform removal after collecting nodes
+        for hash in nodes_to_remove {
+            self.blocks.remove(&hash);
+        }
     }
 }
