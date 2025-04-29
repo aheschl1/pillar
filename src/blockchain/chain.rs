@@ -10,7 +10,7 @@ use crate::{
     primitives::{
         block::{Block, BlockHeader},
         transaction::Transaction,
-    },
+    }, protocol::pow::is_valid_hash,
 };
 
 use super::account::AccountManager;
@@ -63,22 +63,7 @@ impl Chain {
             account_manager: AccountManager::new(),
         }
     }
-
-    /// Checks if a hash meets the required difficulty level.
-    fn is_valid_hash(&self, difficulty: u64, hash: &[u8; 32]) -> bool {
-        // check for 'difficulty' leading 0 bits
-        let mut leading_zeros: u64 = 0;
-        for byte in hash.iter() {
-            if *byte == 0 {
-                leading_zeros += 8;
-            } else {
-                leading_zeros += byte.leading_zeros() as u64;
-                break;
-            }
-        }
-        leading_zeros >= difficulty
-    }
-
+    
     /// Validates the structure and metadata of a block.
     fn validate_block(&self, block: &Block) -> bool {
         // check hash validity
@@ -96,7 +81,7 @@ impl Chain {
         if block.header.difficulty != self.difficulty {
             return false;
         }
-        if !self.is_valid_hash(block.header.difficulty, &block.hash.unwrap()) {
+        if !is_valid_hash(block.header.difficulty, &block.hash.unwrap()) {
             return false;
         }
         // check the previous hash exists
@@ -104,26 +89,10 @@ impl Chain {
         let previous_hash = block.header.previous_hash;
         let previous_block = self.blocks.get(&previous_hash);
         let valid = match previous_block {
-            Some(last_block) => {
-                // check that the depth is correct
-                last_block.header.depth + 1 != block.header.depth 
-            }
+            Some(last_block) => (last_block.header.depth + 1 == block.header.depth) && (block.header.timestamp >= last_block.header.timestamp),
             None => false
         };
         if !valid {
-            return false;
-        }
-        // check the timestamp is greater than the previous block
-        let result = match previous_block {
-            Some(last_block) => {
-                if block.header.timestamp <= last_block.header.timestamp {
-                    return false;
-                }
-                true
-            }
-            None => false,
-        };
-        if !result {
             return false;
         }
         // check the time is not too far in the future
@@ -235,9 +204,10 @@ impl Chain {
 
     /// Verifies the validity of a block, including its transactions and metadata.
     pub async fn verify_block(&self, block: &Block) -> bool {
-        self.validate_block(block);
-        self.validate_transaction_set(&block.transactions).await;
-        true
+        let mut result = self.validate_block(block);
+        return result;
+        result = result && self.validate_transaction_set(&block.transactions).await;
+        result
     }
 
     /// Call this only after a block has been verified
@@ -325,5 +295,69 @@ impl Chain {
         for hash in nodes_to_remove {
             self.blocks.remove(&hash);
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::blockchain::account::Account;
+    use crate::nodes::miner;
+    use crate::primitives::transaction::Transaction;
+    use crate::crypto::hashing::DefaultHash;
+    use crate::protocol::pow::mine;
+
+    #[test]
+    fn test_chain_creation() {
+        let chain = Chain::new_with_genesis();
+        assert_eq!(chain.depth, 1);
+        assert_eq!(chain.blocks.len(), 1);
+        assert_eq!(chain.leaves.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_chain_add_block() {
+        let mut chain = Chain::new_with_genesis();
+        let mut block = Block::new(
+            chain.deepest_hash, 
+            0, 
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            vec![
+                Transaction::new([0; 32], [0;32], 0, 0, 0, &mut DefaultHash::new())
+            ], 
+            4, 
+            Some([0; 32]),
+            1,
+            &mut DefaultHash::new()
+        );
+        chain.account_manager.add_account(Account::new([0; 32], 0)).await;
+        mine(&mut block, [0; 32], DefaultHash::new()).await;
+        println!("Block: {:?}", block);
+        let result = chain.add_new_block(block).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_chain_invalid_block() {
+        let mut chain = Chain::new_with_genesis();
+        let block = Block::new(
+            [0; 32], 
+            0, 
+            0, 
+            vec![
+                Transaction::new([0; 32], [0;32], 0, 0, 0, &mut DefaultHash::new())
+            ], 
+            0, 
+            Some([0; 32]),
+            0,
+            &mut DefaultHash::new()
+        );
+        chain.account_manager.add_account(Account::new([0; 32], 0)).await;
+        let result = chain.add_new_block(block).await;
+        assert!(result.is_err());
     }
 }
