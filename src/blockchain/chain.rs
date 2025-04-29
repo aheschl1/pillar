@@ -274,9 +274,38 @@ impl Chain {
                 "Block is not valid",
             ))
         }
-    }
+    } 
 
     pub fn trim(&self){
-        
+        let mut seen = HashMap::<[u8; 32], [u8; 32]>::new(); // node: leaf leading there
+        let mut forks_to_kill = HashSet::<&[u8; 32]>::new();
+        for leaf in self.leaves.iter(){
+            // iterate backwards, marking each node
+            // if the node is already seen, then check the leaf that saw it - can they coexist?
+            let current_fork_depth = self.blocks[leaf].header.depth;
+            let mut current_node = self.blocks.get(leaf);
+            while let Some(node) = current_node { // while there is a prevvious block
+                let mut best_depth = leaf; // we track this so thsat we can update the seen map
+                if seen.contains_key(&node.hash.unwrap()){ // already seen
+                    let fork = &seen[&node.hash.unwrap()]; // the biggest fork off so far 
+                    let fork = &self.blocks[fork];
+                    if fork.header.depth >= current_fork_depth + 10{
+                        // kill this current fork from the leaf
+                        forks_to_kill.insert(leaf);
+                        break; // leave this fork early - everything downstream has been marked, and we kill eitherway
+                    }else if fork.header.depth + 10 <= current_fork_depth {
+                        // kill other fork
+                        forks_to_kill.insert(fork.hash.as_ref().unwrap());
+                    }else{
+                        // update which one is the deepest marking
+                        best_depth = if fork.header.depth > node.header.depth {fork.hash.as_ref().unwrap()} else {best_depth};
+                    }
+                }
+                // update
+                seen.insert(node.hash.unwrap(), *best_depth); // update marking
+                current_node = self.blocks.get(&node.header.previous_hash);
+            }
+        }
+        // actully trim
     }
 }
