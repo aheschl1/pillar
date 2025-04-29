@@ -248,7 +248,7 @@ impl Chain {
 
     pub fn trim(&mut self){
         let mut seen = HashMap::<[u8; 32], [u8; 32]>::new(); // node: leaf leading there
-        let mut forks_to_kill = HashSet::<&[u8; 32]>::new();
+        let mut forks_to_kill = HashSet::<[u8; 32]>::new();
         for leaf in self.leaves.iter(){
             // iterate backwards, marking each node
             // if the node is already seen, then check the leaf that saw it - can they coexist?
@@ -261,11 +261,11 @@ impl Chain {
                     let fork = self.blocks.get(fork).unwrap();
                     if fork.header.depth >= current_fork_depth + 10{
                         // kill this current fork from the leaf
-                        forks_to_kill.insert(leaf);
+                        forks_to_kill.insert(leaf.clone());
                         break; // leave this fork early - everything downstream has been marked, and we kill eitherway
                     }else if fork.header.depth + 10 <= current_fork_depth {
                         // kill other fork
-                        forks_to_kill.insert(fork.hash.as_ref().unwrap());
+                        forks_to_kill.insert(fork.hash.unwrap());
                     }else{
                         // update which one is the deepest marking
                         best_depth = if fork.header.depth > node.header.depth {fork.hash.as_ref().unwrap()} else {best_depth};
@@ -279,10 +279,12 @@ impl Chain {
         // actully trim
         let mut nodes_to_remove = Vec::new();
         for fork in forks_to_kill.iter(){
-            let mut current_node = self.blocks.get(*fork);
+            let mut current_node = self.blocks.get(fork);
+            // update leaves
+            self.leaves.remove(fork);
             // collect nodes to remove until the seen is no longer the fork
             while let Some(node) = current_node {
-                if seen[&node.hash.unwrap()] == **fork {
+                if seen[&node.hash.unwrap()] == *fork {
                     nodes_to_remove.push(node.hash.unwrap());
                 }else{
                     // we have reached the end of this fork
@@ -360,4 +362,170 @@ mod tests {
         let result = chain.add_new_block(block).await;
         assert!(result.is_err());
     }
+
+    #[tokio::test]
+    async fn test_trim_removes_short_fork() {
+        let mut chain = Chain::new_with_genesis();
+        let sender = [1u8; 32];
+        chain.account_manager.add_account(Account::new(sender, 1000)).await;
+
+        let mut parent_hash = chain.deepest_hash;
+        let genesis_hash = parent_hash.clone();
+        for depth in 1..=11 {
+            let mut block = Block::new(
+                parent_hash,
+                0,
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth,
+                vec![Transaction::new(sender, [2; 32], 10, 0, depth, &mut DefaultHash::new())],
+                4,
+                Some(sender),
+                depth,
+                &mut DefaultHash::new(),
+            );
+            mine(&mut block, sender, DefaultHash::new()).await;
+            parent_hash = block.hash.unwrap();
+            chain.add_new_block(block).await.unwrap();
+        }
+
+        let long_chain_leaf = parent_hash;
+
+        // Create shorter fork from genesis (only 1 block)
+        let mut fork_block = Block::new(
+            genesis_hash, // same genesis
+            0,
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()+30,
+            vec![Transaction::new(sender, [2; 32], 10, 0, 0, &mut DefaultHash::new())],
+            4,
+            Some(sender),
+            1,
+            &mut DefaultHash::new(),
+        );
+        mine(&mut fork_block, sender, DefaultHash::new()).await;
+        chain.add_new_block(fork_block.clone()).await.unwrap();
+
+        assert!(chain.blocks.contains_key(&fork_block.hash.unwrap()));
+
+        // Trim should remove the short fork
+        chain.trim();
+        assert!(!chain.blocks.contains_key(&fork_block.hash.unwrap()));
+        assert!(chain.blocks.contains_key(&long_chain_leaf));
+    }
+
+    #[tokio::test]
+    async fn test_trim_keeps_close_forks() {
+        let mut chain = Chain::new_with_genesis();
+        let sender = [1u8; 32];
+        chain.account_manager.add_account(Account::new(sender, 1000)).await;
+
+        let mut parent_hash = chain.deepest_hash;
+        let genesis_hash = parent_hash;
+
+        // Build a main chain of depth 9
+        for depth in 1..=9 {
+            let mut block = Block::new(
+                parent_hash,
+                0,
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth,
+                vec![Transaction::new(sender, [2; 32], 10, 0, depth, &mut DefaultHash::new())],
+                4,
+                Some(sender),
+                depth,
+                &mut DefaultHash::new(),
+            );
+            mine(&mut block, sender, DefaultHash::new()).await;
+            parent_hash = block.hash.unwrap();
+            chain.add_new_block(block).await.unwrap();
+        }
+
+        // Add a 1-block fork off the genesis (difference = 9)
+        let mut fork_block = Block::new(
+            genesis_hash,
+            0,
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 50,
+            vec![Transaction::new(sender, [2; 32], 10, 0, 0, &mut DefaultHash::new())],
+            4,
+            Some(sender),
+            1,
+            &mut DefaultHash::new(),
+        );
+        mine(&mut fork_block, sender, DefaultHash::new()).await;
+        let fork_hash = fork_block.hash.unwrap();
+        chain.add_new_block(fork_block).await.unwrap();
+
+        // This fork is <10 behind, so it should NOT be trimmed
+        chain.trim();
+        assert!(chain.blocks.contains_key(&fork_hash));
+    }
+
+    #[tokio::test]
+    async fn test_trim_multiple_short_forks() {
+        let mut chain = Chain::new_with_genesis();
+        let sender = [1u8; 32];
+        chain.account_manager.add_account(Account::new(sender, 2000)).await;
+
+        let mut main_hash = chain.deepest_hash;
+        let genesis_hash = main_hash;
+
+        // Extend the main chain to depth 12
+        for depth in 1..=12 {
+            let mut block = Block::new(
+                main_hash,
+                0,
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth,
+                vec![Transaction::new(sender, [2; 32], 10, 0, depth, &mut DefaultHash::new())],
+                4,
+                Some(sender),
+                depth,
+                &mut DefaultHash::new(),
+            );
+            mine(&mut block, sender, DefaultHash::new()).await;
+            main_hash = block.hash.unwrap();
+            chain.add_new_block(block).await.unwrap();
+        }
+
+        // Create two short forks from genesis (depth 1)
+        let mut fork_hashes = vec![];
+        for offset in 0..2 {
+            let mut fork_block = Block::new(
+                genesis_hash,
+                0,
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 100 + offset,
+                vec![Transaction::new(sender, [2; 32], 10, 0, offset, &mut DefaultHash::new())],
+                4,
+                Some(sender),
+                1,
+                &mut DefaultHash::new(),
+            );
+            mine(&mut fork_block, sender, DefaultHash::new()).await;
+            let hash = fork_block.hash.unwrap();
+            fork_hashes.push(hash);
+            chain.add_new_block(fork_block).await.unwrap();
+        }
+
+        // Verify they were added
+        for hash in &fork_hashes {
+            assert!(chain.blocks.contains_key(hash));
+        }
+
+        // Run trim — both forks should be removed
+        chain.trim();
+
+        for hash in &fork_hashes {
+            assert!(!chain.blocks.contains_key(hash));
+        }
+
+        assert_eq!(chain.leaves.len(), 1); // only the longest chain remains
+        assert!(chain.blocks.contains_key(&main_hash));
+        // check that the right number of blocks remain
+        assert_eq!(chain.blocks.len(), 13); // 12 from main chain + genesis
+        // actually count the number of blocks in the main chain
+        let mut current_hash = main_hash;
+        let mut count = 0;
+        while let Some(block) = chain.blocks.get(&current_hash) {
+            count += 1;
+            current_hash = block.header.previous_hash;
+        }
+        assert_eq!(count, 13); // 12 blocks in the main chain
+    }
+
 }
