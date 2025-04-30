@@ -54,12 +54,11 @@ async fn query_block_from_peer(
 async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std::io::Error> {
     let mut threads = Vec::new();
     let (tx, block_channel) = flume::unbounded();
-    let mut rng = rng();
     for (hash, _) in shard.headers{
-        let mut peer = node.peers.lock().await.choose(&mut rng).unwrap().clone(); // random peer
         let nodeclone = node.clone();
         let sender = tx.clone();
         let handle = tokio::spawn(async move{
+            let mut peer = nodeclone.peers.lock().await.choose(&mut rng()).unwrap().clone(); // random peer
             let block = query_block_from_peer(&mut peer, &nodeclone.into(), hash).await;
             sender.send(block).unwrap();
         });
@@ -82,7 +81,7 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std
         loop{ // we need to keep going until it passes full validation
             match chain.add_new_block(block){
                 Err(_) => { // failed validation
-                    let mut peer = node.peers.lock().await.choose(&mut rng).unwrap().clone(); // random peer
+                    let mut peer = node.peers.lock().await.choose(&mut rng()).unwrap().clone(); // random peer
                     block = query_block_from_peer(&mut peer, &node.clone().into(), hash).await;
                 }
                 _ => {break;} // passed validation
@@ -129,8 +128,7 @@ pub fn deepest_shard(shards: Vec<ChainShard>) -> Result<ChainShard, std::io::Err
         None => Err(std::io::Error::new(
             std::io::ErrorKind::Other,
             "No shards found",
-        )),
-        
+        )),   
     }
 }
 
