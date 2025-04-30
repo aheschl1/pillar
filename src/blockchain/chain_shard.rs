@@ -9,14 +9,14 @@ use super::chain::Chain;
 /// chain shard is used to build up a chain given a list of block headers
 /// It is responsible for the validation and construction of the chain from a new node.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ChainShard {
-    headers: HashMap<[u8; 32], BlockHeader>,
-    leaves: HashSet<[u8; 32]>
+pub struct ChainShard {
+    pub headers: HashMap<[u8; 32], BlockHeader>,
+    pub leaves: HashSet<[u8; 32]>
 }
 
 impl ChainShard{
     /// ensures the hashs are good, and the depths work
-    fn validate(&self) -> bool{
+    pub fn validate(&self) -> bool{
         // validate header
         for (declared_hash, header) in self.headers.iter(){
             // TODO figure out how to do expected difficulty

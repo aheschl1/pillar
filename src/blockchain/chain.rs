@@ -13,7 +13,7 @@ use crate::{
     },
 };
 
-use super::account::AccountManager;
+use super::{account::AccountManager, chain_shard::ChainShard};
 
 /// Represents the state of the blockchain, including blocks, accounts, and chain parameters.
 #[derive(Debug, Serialize, Deserialize, Clone)]

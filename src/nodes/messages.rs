@@ -1,4 +1,4 @@
-use crate::{blockchain::chain::Chain, primitives::{block::{Block, BlockHeader}, transaction::Transaction}};
+use crate::{blockchain::{chain::Chain, chain_shard::ChainShard}, primitives::{block::{Block, BlockHeader}, transaction::Transaction}};
 use serde::{Serialize, Deserialize};
 use super::peer::Peer;
 
@@ -28,9 +28,9 @@ pub enum Message {
     // response with a specific block
     BlockResponse(Option<Block>),
     // request for the block headers
-    ChainDiscoveryRequest,
+    ChainShardRequest,
     // response with the block headers
-    ChainDiscoveryResponse(Vec<BlockHeader>),
+    ChainShardResponse(ChainShard),
     // error message
     Error(String)
 }

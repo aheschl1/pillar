@@ -96,7 +96,7 @@ impl Node {
                 match declaration {
                     Message::Declaration(peer) => {
                         // add the peer to the list if and only if it is not already in the list
-                        self_clone.maybe_update_peers(peer.clone()).await.unwrap();
+                        self_clone.maybe_update_peer(peer.clone()).await.unwrap();
                         // send a response
                         peer
                     }
@@ -191,10 +191,9 @@ impl Node {
                 let block = self.chain.lock().await.get_block(hash).cloned();
                 Ok(Message::BlockResponse(block))
             },
-            Message::ChainDiscoveryRequest => {
+            Message::ChainShardRequest => {
                 // send the block headers to the peer
-                let headers = self.chain.lock().await.get_block_headers();
-                Ok(Message::ChainDiscoveryResponse(headers))
+                Ok(Message::ChainShardResponse(self.chain.lock().await.clone().into()))
             }
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -211,7 +210,7 @@ impl Node {
             .unwrap();
     }
 
-    async fn maybe_update_peers(&self, peer: Peer) -> Result<(), std::io::Error> {
+    async fn maybe_update_peer(&self, peer: Peer) -> Result<(), std::io::Error> {
         // check if the peer is already in the list
         let mut peers = self.peers.lock().await;
         if !peers.iter().any(|p| p.public_key == peer.public_key) {
@@ -219,6 +218,12 @@ impl Node {
             peers.push(peer);
         }
         Ok(())
+    }
+
+    pub async fn maybe_update_peers(&self, peers: Vec<Peer>){
+        for peer in peers {
+            self.maybe_update_peer(peer).await.unwrap();
+        }
     }
 }
 
@@ -230,15 +235,16 @@ impl Into<Peer> for Node {
 
 pub trait Broadcaster {
     /// Broadcast a message to all peers
-    async fn broadcast(&self, message: &Message) -> Result<(), std::io::Error>;
+    async fn broadcast(&self, message: &Message) -> Result<Vec<Message>, std::io::Error>;
 }
 
 impl Broadcaster for Node {
-    async fn broadcast(&self, message: &Message) -> Result<(), std::io::Error> {
+    async fn broadcast(&self, message: &Message) -> Result<Vec<Message>, std::io::Error> {
         // send a message to all peers
+        let mut responses = Vec::new();
         for peer in self.peers.lock().await.iter_mut() {
-            peer.communicate(message, self.clone().into()).await?;
+            responses.push(peer.communicate(message, self.clone().into()).await?);
         }
-        Ok(())
+        Ok(responses)
     }
 }
