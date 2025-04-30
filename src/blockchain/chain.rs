@@ -10,7 +10,7 @@ use crate::{
     primitives::{
         block::{Block, BlockHeader},
         transaction::Transaction,
-    }, protocol::pow::is_valid_hash,
+    },
 };
 
 use super::account::AccountManager;
@@ -70,22 +70,10 @@ impl Chain {
         if block.hash.is_none() {
             return false;
         }
-        if block.hash.unwrap() != block.header.hash(&mut DefaultHash::new()).unwrap() {
-            return false;
-        }
-        // check the miner is declared
-        if block.header.miner_address.is_none() {
-            return false;
-        }
-        // check the difficulty
-        if block.header.difficulty != self.difficulty {
-            return false;
-        }
-        if !is_valid_hash(block.header.difficulty, &block.hash.unwrap()) {
+        if !block.header.validate(self.difficulty, block.hash.unwrap(), &mut DefaultHash::new()) {
             return false;
         }
         // check the previous hash exists
-        // TODO: Maybe it doesnt need to be the most recent block that is previous_hash
         let previous_hash = block.header.previous_hash;
         let previous_block = self.blocks.get(&previous_hash);
         let valid = match previous_block {
@@ -95,16 +83,6 @@ impl Chain {
         if !valid {
             return false;
         }
-        // check the time is not too far in the future
-        let current_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        if block.header.timestamp > current_time + 60 * 60 {
-            // one hour margin
-            return false;
-        }
-
         true
     }
 

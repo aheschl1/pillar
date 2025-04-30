@@ -2,6 +2,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::crypto::hashing::{HashFunction, Hashable, DefaultHash};
 use crate::crypto::merkle::{generate_proof_of_inclusion, generate_tree, verify_proof_of_inclusion, MerkleProof, MerkleTree};
+use crate::protocol::pow::is_valid_hash;
 use super::transaction::Transaction;
 
 #[derive(Debug, Serialize, Clone)]
@@ -95,6 +96,48 @@ impl BlockHeader {
             miner_address,
             depth
         }
+    }
+
+    /// Validate header of the block
+    /// Checks:
+    /// * The miner is declared
+    /// * The difficulty is correct
+    /// * The hash is valid
+    /// * The time is not too far in the future
+    /// 
+    /// # Arguments
+    /// 
+    /// * `expected_difficulty` - The expected difficulty of the block
+    /// * `hasher` - A mutable instance of a type implementing the HashFunction trait
+    pub fn validate(
+        &self, 
+        expected_difficulty: u64, 
+        expected_hash: [u8; 32],
+        hasher: &mut impl HashFunction
+    ) -> bool{
+        // check the miner is declared
+        if self.miner_address.is_none() {
+            return false;
+        }
+        if self.difficulty != expected_difficulty {
+            return false;
+        }
+        if expected_hash != self.hash(hasher).unwrap() {
+            return false;
+        }
+        if !is_valid_hash(self.difficulty, &self.hash(hasher).unwrap()) {
+            return false;
+        }
+        // check the time is not too far in the future
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        if self.timestamp > current_time + 60 * 60 {
+            // one hour margin
+            return false;
+        }
+        true
     }
 }
 

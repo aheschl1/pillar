@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{crypto::hashing::{DefaultHash, HashFunction, Hashable}, primitives::block::BlockHeader};
+use crate::{crypto::hashing::{DefaultHash, HashFunction}, primitives::block::BlockHeader};
 
 use super::chain::Chain;
 
@@ -16,19 +16,37 @@ struct ChainShard {
 
 impl ChainShard{
     /// ensures the hashs are good, and the depths work
-    fn verify(&self) -> bool{
+    fn validate(&self) -> bool{
+        // validate header
         for (declared_hash, header) in self.headers.iter(){
-            // check the hash is correct
-            if header.hash(&mut DefaultHash::new()).unwrap() != *declared_hash {
+            // TODO figure out how to do expected difficulty
+            if !header.validate(
+                header.difficulty, 
+                *declared_hash,
+                &mut DefaultHash::new() 
+            ){
+                return false;
+            }
+
+            // check the previous hashes exists
+            let previous_hash = header.previous_hash;
+            let previous_block = self.headers.get(&previous_hash);
+            let valid = match previous_block {
+                Some(last_block) => (last_block.depth + 1 == header.depth) && (header.timestamp >= last_block.timestamp),
+                None => false
+            };
+            if !valid {
                 return false;
             }
         }
+        
         true
     }
 }
 
 impl From<Chain> for ChainShard{
-    fn from(chain: Chain) -> Self {
+    fn from(mut chain: Chain) -> Self {
+        chain.trim();
         let headers = 
             chain
             .blocks
