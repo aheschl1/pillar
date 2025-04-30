@@ -4,11 +4,16 @@ use super::peers::discover_peers;
 
 /// Given a shard (validated) uses te node to get the chain
 pub async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std::io::Error> {
-    
+    Err(
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Not implemented yet",
+        )
+    )
 }
 
 /// Discovery algorithm for the chain
-pub async fn dicover_chain(node: &mut Node) -> Result<(), std::io::Error> {
+pub async fn dicover_chain(node: &mut Node) -> Result<Chain, std::io::Error> {
     // get the peers first
     discover_peers(node).await?;
     // broadcast the chain shard request to all peers
@@ -28,10 +33,11 @@ pub async fn dicover_chain(node: &mut Node) -> Result<(), std::io::Error> {
             _ => {}
         }
     }
+    drop(peers);
     // find deepest out of peers
     let shard = deepest_shard(chain_shards)?;
     // now we have valid shards
-    Ok(())
+    shard_to_chain(node, shard).await
 }
 
 /// Find the deepest chain shard - they shoudl in theory be the same but we want the longest
