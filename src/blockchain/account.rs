@@ -50,7 +50,7 @@ impl AccountManager{
     }
 
     // Adds a new account to the account manager
-    pub async fn add_account(&mut self, account: Account) -> Arc<Mutex<Account>>{
+    pub fn add_account(&mut self, account: Account) -> Arc<Mutex<Account>>{
         let account = Arc::new(Mutex::new(account));
         self.accounts.push(account.clone());
         self.address_to_account.insert(account.clone().lock().unwrap().address, account.clone());
@@ -66,14 +66,14 @@ impl AccountManager{
     /// This is called when a new block is added to the chain
     /// This does NOT verify the block - VERIFY THE BLOCK FIRST
     /// This is called when a new block is added to the chain
-    pub async fn update_from_block(&mut self, block: &Block){
+    pub fn update_from_block(&mut self, block: &Block){
         // Update the accounts from the block
         for transaction in &block.transactions {
             let sender = self.get_account(&transaction.header.sender).unwrap();
             // may need to make a new public account for the receiver under the established public key
             let receiver = match self.get_account(&transaction.header.receiver){
                 Some(account) => account,
-                None => self.add_account(Account::new(transaction.header.receiver, 0)).await,
+                None => self.add_account(Account::new(transaction.header.receiver, 0)),
             };
             // sender always needs to exist, or the block would not pass verification
             sender.lock().unwrap().balance -= transaction.header.amount;

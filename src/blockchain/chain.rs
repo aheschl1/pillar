@@ -115,7 +115,7 @@ impl Chain {
             transactions
                 .into_iter()
                 .fold(HashMap::new(), |mut acc, tx| {
-                    acc.entry(tx.header.sender) // assuming this gives you the [u32; 32] key
+                    acc.entry(tx.header.sender) // assuming this gives you the [u8; 32] key
                         .or_default()
                         .push(tx);
                     acc
@@ -125,6 +125,7 @@ impl Chain {
             if account.is_none() {
                 return false;
             }
+            // return true;
             let total_sum: u64 = transactions.iter().map(|t| t.header.amount).sum();
             if account.unwrap().lock().unwrap().balance < total_sum {
                 return false;
@@ -205,14 +206,13 @@ impl Chain {
     /// Verifies the validity of a block, including its transactions and metadata.
     pub async fn verify_block(&self, block: &Block) -> bool {
         let mut result = self.validate_block(block);
-        return result;
         result = result && self.validate_transaction_set(&block.transactions).await;
         result
     }
 
     /// Call this only after a block has been verified
     async fn settle_new_block(&mut self, block: Block){
-        self.account_manager.update_from_block(&block).await;
+        self.account_manager.update_from_block(&block);
         self.blocks.insert(block.hash.unwrap(), block.clone());
         self.leaves.remove(&block.header.previous_hash);
         self.leaves.insert(block.hash.unwrap());
@@ -249,13 +249,15 @@ impl Chain {
     pub fn trim(&mut self){
         let mut seen = HashMap::<[u8; 32], [u8; 32]>::new(); // node: leaf leading there
         let mut forks_to_kill = HashSet::<[u8; 32]>::new();
-        for leaf in self.leaves.iter(){
+        let mut sorted_leaves : Vec::<&[u8; 32]> = self.leaves.iter().collect();
+        // visit deepest leaves first so that we can look back at deeper forks later
+        sorted_leaves.sort_by_key(|x| -(self.blocks[*x].header.depth as i64)); 
+        for leaf in sorted_leaves{
             // iterate backwards, marking each node
             // if the node is already seen, then check the leaf that saw it - can they coexist?
             let current_fork_depth = self.blocks[leaf].header.depth;
             let mut current_node = self.blocks.get(leaf);
             while let Some(node) = current_node { // while there is a prevvious block
-                let mut best_depth = leaf; // we track this so thsat we can update the seen map
                 if seen.contains_key(&node.hash.unwrap()){ // already seen
                     let fork = &seen[&node.hash.unwrap()]; // the biggest fork off so far 
                     let fork = self.blocks.get(fork).unwrap();
@@ -263,16 +265,11 @@ impl Chain {
                         // kill this current fork from the leaf
                         forks_to_kill.insert(leaf.clone());
                         break; // leave this fork early - everything downstream has been marked, and we kill eitherway
-                    }else if fork.header.depth + 10 <= current_fork_depth {
-                        // kill other fork
-                        forks_to_kill.insert(fork.hash.unwrap());
-                    }else{
-                        // update which one is the deepest marking
-                        best_depth = if fork.header.depth > node.header.depth {fork.hash.as_ref().unwrap()} else {best_depth};
                     }
+                }else{
+                    // indicate seen
+                    seen.insert(node.hash.unwrap(), *leaf);
                 }
-                // update
-                seen.insert(node.hash.unwrap(), *best_depth); // update marking
                 current_node = self.blocks.get(&node.header.previous_hash);
             }
         }
@@ -303,10 +300,12 @@ impl Chain {
 
 #[cfg(test)]
 mod tests {
+    use ed25519_dalek::SigningKey;
+    use rand_core::OsRng;
+
     use super::*;
     use crate::blockchain::account::Account;
-    use crate::nodes::miner;
-    use crate::primitives::transaction::Transaction;
+    use crate::primitives::transaction::{self, Transaction};
     use crate::crypto::hashing::DefaultHash;
     use crate::protocol::pow::mine;
 
@@ -321,6 +320,13 @@ mod tests {
     #[tokio::test]
     async fn test_chain_add_block() {
         let mut chain = Chain::new_with_genesis();
+
+        let signing_key = SigningKey::generate(&mut OsRng);
+        // public
+        let sender = signing_key.verifying_key().to_bytes();
+
+        let mut trans = Transaction::new(sender, [0;32], 0, 0, 0, &mut DefaultHash::new());
+        trans.sign(&signing_key).unwrap();
         let mut block = Block::new(
             chain.deepest_hash, 
             0, 
@@ -329,15 +335,15 @@ mod tests {
                 .unwrap()
                 .as_secs(),
             vec![
-                Transaction::new([0; 32], [0;32], 0, 0, 0, &mut DefaultHash::new())
+                trans
             ], 
             4, 
             Some([0; 32]),
             1,
             &mut DefaultHash::new()
         );
-        chain.account_manager.add_account(Account::new([0; 32], 0)).await;
-        mine(&mut block, [0; 32], DefaultHash::new()).await;
+        chain.account_manager.add_account(Account::new(sender, 0));
+        mine(&mut block, sender, DefaultHash::new()).await;
         println!("Block: {:?}", block);
         let result = chain.add_new_block(block).await;
         assert!(result.is_ok());
@@ -346,19 +352,26 @@ mod tests {
     #[tokio::test]
     async fn test_chain_invalid_block() {
         let mut chain = Chain::new_with_genesis();
+        let signing_key = SigningKey::generate(&mut OsRng);
+        // public
+        let sender = signing_key.verifying_key().to_bytes();
+
+        let mut trans = Transaction::new(sender, [0;32], 0, 0, 0, &mut DefaultHash::new());
+        trans.sign(&signing_key).unwrap();
+
         let block = Block::new(
             [0; 32], 
             0, 
             0, 
             vec![
-                Transaction::new([0; 32], [0;32], 0, 0, 0, &mut DefaultHash::new())
+               trans
             ], 
             0, 
             Some([0; 32]),
             0,
             &mut DefaultHash::new()
         );
-        chain.account_manager.add_account(Account::new([0; 32], 0)).await;
+        chain.account_manager.add_account(Account::new([0; 32], 0));
         let result = chain.add_new_block(block).await;
         assert!(result.is_err());
     }
@@ -366,17 +379,23 @@ mod tests {
     #[tokio::test]
     async fn test_trim_removes_short_fork() {
         let mut chain = Chain::new_with_genesis();
-        let sender = [1u8; 32];
-        chain.account_manager.add_account(Account::new(sender, 1000)).await;
+        
+        let signing_key = SigningKey::generate(&mut OsRng);
+        // public
+        let sender = signing_key.verifying_key().to_bytes();
+
+        chain.account_manager.add_account(Account::new(sender, 1000));
 
         let mut parent_hash = chain.deepest_hash;
         let genesis_hash = parent_hash.clone();
         for depth in 1..=11 {
+            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth-1, &mut DefaultHash::new());
+            transaction.sign(&signing_key).unwrap();
             let mut block = Block::new(
                 parent_hash,
                 0,
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth,
-                vec![Transaction::new(sender, [2; 32], 10, 0, depth, &mut DefaultHash::new())],
+                vec![transaction],
                 4,
                 Some(sender),
                 depth,
@@ -390,11 +409,13 @@ mod tests {
         let long_chain_leaf = parent_hash;
 
         // Create shorter fork from genesis (only 1 block)
+        let mut trans = Transaction::new(sender, [2; 32], 10, 0, 11, &mut DefaultHash::new());
+        trans.sign(&signing_key).unwrap();
         let mut fork_block = Block::new(
             genesis_hash, // same genesis
             0,
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()+30,
-            vec![Transaction::new(sender, [2; 32], 10, 0, 0, &mut DefaultHash::new())],
+            vec![trans],
             4,
             Some(sender),
             1,
@@ -409,24 +430,31 @@ mod tests {
         chain.trim();
         assert!(!chain.blocks.contains_key(&fork_block.hash.unwrap()));
         assert!(chain.blocks.contains_key(&long_chain_leaf));
+        assert!(chain.blocks.contains_key(&chain.blocks[&long_chain_leaf].header.previous_hash));
     }
 
     #[tokio::test]
     async fn test_trim_keeps_close_forks() {
         let mut chain = Chain::new_with_genesis();
-        let sender = [1u8; 32];
-        chain.account_manager.add_account(Account::new(sender, 1000)).await;
+        let signing_key = SigningKey::generate(&mut OsRng);
+        // public
+        let sender = signing_key.verifying_key().to_bytes();
+
+        chain.account_manager.add_account(Account::new(sender, 1000));
 
         let mut parent_hash = chain.deepest_hash;
         let genesis_hash = parent_hash;
 
         // Build a main chain of depth 9
         for depth in 1..=9 {
+            let time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth;
+            let mut transaction = Transaction::new(sender, [2; 32], 10, time, depth-1, &mut DefaultHash::new());
+            transaction.sign(&signing_key).unwrap();
             let mut block = Block::new(
                 parent_hash,
                 0,
-                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth,
-                vec![Transaction::new(sender, [2; 32], 10, 0, depth, &mut DefaultHash::new())],
+                time,
+                vec![transaction],
                 4,
                 Some(sender),
                 depth,
@@ -437,12 +465,14 @@ mod tests {
             chain.add_new_block(block).await.unwrap();
         }
 
+        let mut trans = Transaction::new(sender, [2; 32], 10, 0, 9, &mut DefaultHash::new());
+        trans.sign(&signing_key).unwrap();
         // Add a 1-block fork off the genesis (difference = 9)
         let mut fork_block = Block::new(
             genesis_hash,
             0,
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 50,
-            vec![Transaction::new(sender, [2; 32], 10, 0, 0, &mut DefaultHash::new())],
+            vec![trans],
             4,
             Some(sender),
             1,
@@ -460,19 +490,23 @@ mod tests {
     #[tokio::test]
     async fn test_trim_multiple_short_forks() {
         let mut chain = Chain::new_with_genesis();
-        let sender = [1u8; 32];
-        chain.account_manager.add_account(Account::new(sender, 2000)).await;
+        let signing_key = SigningKey::generate(&mut OsRng);
+        // public
+        let sender = signing_key.verifying_key().to_bytes();
+        chain.account_manager.add_account(Account::new(sender, 2000));
 
         let mut main_hash = chain.deepest_hash;
         let genesis_hash = main_hash;
 
         // Extend the main chain to depth 12
         for depth in 1..=12 {
+            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth-1, &mut DefaultHash::new());
+            transaction.sign(&signing_key).unwrap();
             let mut block = Block::new(
                 main_hash,
                 0,
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth,
-                vec![Transaction::new(sender, [2; 32], 10, 0, depth, &mut DefaultHash::new())],
+                vec![transaction],
                 4,
                 Some(sender),
                 depth,
@@ -486,11 +520,13 @@ mod tests {
         // Create two short forks from genesis (depth 1)
         let mut fork_hashes = vec![];
         for offset in 0..2 {
+            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, offset+12, &mut DefaultHash::new());
+            transaction.sign(&signing_key).unwrap();
             let mut fork_block = Block::new(
                 genesis_hash,
                 0,
-                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 100 + offset,
-                vec![Transaction::new(sender, [2; 32], 10, 0, offset, &mut DefaultHash::new())],
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 20 + offset,
+                vec![transaction],
                 4,
                 Some(sender),
                 1,
@@ -505,6 +541,7 @@ mod tests {
         // Verify they were added
         for hash in &fork_hashes {
             assert!(chain.blocks.contains_key(hash));
+            assert!(chain.leaves.contains(hash));
         }
 
         // Run trim — both forks should be removed
@@ -512,6 +549,7 @@ mod tests {
 
         for hash in &fork_hashes {
             assert!(!chain.blocks.contains_key(hash));
+            assert!(!chain.leaves.contains(hash));
         }
 
         assert_eq!(chain.leaves.len(), 1); // only the longest chain remains
