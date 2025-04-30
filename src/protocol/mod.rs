@@ -1,3 +1,4 @@
-mod chain;
-mod peers;
+pub mod chain;
+pub mod peers;
 pub mod pow;
+pub mod difficulty;

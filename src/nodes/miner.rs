@@ -66,7 +66,6 @@ impl Miner{
                     0,
                     tokio::time::Instant::now().elapsed().as_secs(),
                     transactions,
-                    self.node.chain.lock().await.difficulty,
                     Some(*self.node.public_key),
                     self.node.chain.lock().await.depth + 1,
                     &mut DefaultHash::new()
@@ -121,10 +120,9 @@ mod test{
                 &mut hasher.clone()
             )
         ];
-        let difficulty = 1;
         let miner_address = None;
 
-        let mut block = Block::new(previous_hash, nonce, timestamp, transactions, difficulty, miner_address, 1, &mut hasher);
+        let mut block = Block::new(previous_hash, nonce, timestamp, transactions, miner_address, 1, &mut hasher);
 
         // mine the block
         mine(&mut block, *miner.node.public_key, hasher).await;
@@ -133,7 +131,6 @@ mod test{
         assert!(block.header.miner_address.is_some());
         assert_eq!(block.header.previous_hash, previous_hash);
         assert_eq!(block.header.timestamp, timestamp);
-        assert_eq!(block.header.difficulty, difficulty);
         assert!(block.hash.is_some());
     }
 }

@@ -1,15 +1,95 @@
-use crate::{blockchain::{chain::Chain, chain_shard::ChainShard}, nodes::{messages::Message, node::{Broadcaster, Node}}};
+use flume::Sender;
+use rand::{rng, seq::IndexedRandom};
+
+use crate::{blockchain::{chain::Chain, chain_shard::ChainShard}, crypto::{hashing::{DefaultHash, HashFunction}, merkle::generate_tree}, nodes::{messages::Message, node::{Broadcaster, Node}, peer::Peer}, primitives::{block::Block, transaction::Transaction}};
 
 use super::peers::discover_peers;
 
-/// Given a shard (validated) uses te node to get the chain
-pub async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std::io::Error> {
-    Err(
-        std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "Not implemented yet",
-        )
-    )
+async fn query_block_from_peer(
+    peer: &mut Peer, 
+    initializing_peer: &Peer,
+    hash: [u8; 32]
+) -> Block{
+    // send the block request to the peer
+    // TODO better error handling
+    loop{
+        let response = peer.communicate(&Message::BlockRequest(hash), initializing_peer).await;
+        let block = match response {
+            Ok(Message::BlockResponse(block)) => {
+                // add the block to the chain
+                match block{
+                    Some(block) => {
+                        // we need to verify that the header validates
+                        // and that the transactions are the same as declared
+                        let mut result = true;
+                        // check header
+                        result &= block.header.validate(hash, &mut DefaultHash::new());
+                        // verify merkle root
+                        let tree = generate_tree(
+                            block.transactions.iter().map(|x|x).collect(), 
+                            &mut DefaultHash::new()
+                        );
+                        result = result 
+                            && tree.is_ok()  // tree worked
+                            && tree.as_ref().unwrap().get_root_hash().is_some() // has root
+                            && tree.unwrap().get_root_hash().unwrap() == block.header.merkle_root; // root matches
+                        if result{
+                            Some(block)
+                        }else{
+                            None
+                        }
+                    },
+                    _ => None
+                }
+            }
+            _ => None
+        };
+        if let Some(block) = block{
+            return block;
+        }
+    }
+}
+
+/// Given a shard (validated) uses the node to get the chain
+async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std::io::Error> {
+    let mut threads = Vec::new();
+    let (tx, block_channel) = flume::unbounded();
+    let mut rng = rng();
+    for (hash, _) in shard.headers{
+        let mut peer = node.peers.lock().await.choose(&mut rng).unwrap().clone(); // random peer
+        let nodeclone = node.clone();
+        let sender = tx.clone();
+        let handle = tokio::spawn(async move{
+            let block = query_block_from_peer(&mut peer, &nodeclone.into(), hash).await;
+            sender.send(block).unwrap();
+        });
+        threads.push(handle);
+    }
+    // let the threads finish
+    for thread in threads {
+        thread.await.unwrap();
+    }
+    // now all blocks should be in the channel
+    // we need to work our way up by depth
+    let mut blocks: Vec<Block> = block_channel.iter().collect();
+    // sort by depth
+    blocks.sort_by_key(|x| x.header.depth);
+    // note: we know that there is exactly one genesis from shard validation
+    let mut chain = Chain::new_with_genesis();
+    for block in &blocks[1..]{ // skip the first - genesis
+        let mut block = block.to_owned();
+        let hash = block.hash.unwrap();
+        loop{ // we need to keep going until it passes full validation
+            match chain.add_new_block(block){
+                Err(_) => { // failed validation
+                    let mut peer = node.peers.lock().await.choose(&mut rng).unwrap().clone(); // random peer
+                    block = query_block_from_peer(&mut peer, &node.clone().into(), hash).await;
+                }
+                _ => {break;} // passed validation
+            }
+        }
+    }
+    Ok(chain)
 }
 
 /// Discovery algorithm for the chain
@@ -21,7 +101,7 @@ pub async fn dicover_chain(node: &mut Node) -> Result<Chain, std::io::Error> {
     let mut chain_shards = Vec::new();
     for peer in peers.iter_mut() {
         // send the chain shard request to the peer
-        let response = peer.communicate(&Message::ChainShardRequest, node.clone().into()).await?;
+        let response = peer.communicate(&Message::ChainShardRequest, &node.clone().into()).await?;
         match response {
             Message::ChainShardResponse(shard) => {
                 // add the shard to the chain
@@ -41,6 +121,7 @@ pub async fn dicover_chain(node: &mut Node) -> Result<Chain, std::io::Error> {
 }
 
 /// Find the deepest chain shard - they shoudl in theory be the same but we want the longest
+/// TODO: Maybe we should check agreement of hashes and such, but with POW deepest should be accurate
 pub fn deepest_shard(shards: Vec<ChainShard>) -> Result<ChainShard, std::io::Error> {
     let shard = shards.iter().max_by_key(|shard| shard.leaves.iter().max_by_key(|leaf| shard.headers[*leaf].depth).unwrap());
     match shard {
@@ -51,4 +132,19 @@ pub fn deepest_shard(shards: Vec<ChainShard>) -> Result<ChainShard, std::io::Err
         )),
         
     }
+}
+
+/// The definition of the genisis block
+pub fn get_genesis_block() -> Block{
+    Block::new(
+        [0; 32], 
+        0, 
+        0, 
+        vec![
+            Transaction::new([0; 32], [0;32], 0, 0, 0, &mut DefaultHash::new())
+        ], 
+        Some([0; 32]),
+        0,
+        &mut DefaultHash::new()
+    )
 }

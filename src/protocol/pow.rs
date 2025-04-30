@@ -1,5 +1,7 @@
 use crate::{crypto::hashing::{HashFunction, Hashable}, primitives::block::Block};
 
+use super::difficulty::get_difficulty_from_depth;
+
 
 pub fn is_valid_hash(difficulty: u64, hash: &[u8; 32]) -> bool {
     // check for 'difficulty' leading 0 bits
@@ -22,7 +24,7 @@ pub async fn mine(block: &mut Block, address: [u8; 32], mut hash_function: impl 
     loop {
         match block.header.hash(&mut hash_function){
             Ok(hash) => {
-                if is_valid_hash(block.header.difficulty, &hash) {
+                if is_valid_hash(get_difficulty_from_depth(block.header.depth), &hash) {
                     block.hash = Some(hash);
                     break;
                 }

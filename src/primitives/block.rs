@@ -2,6 +2,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::crypto::hashing::{HashFunction, Hashable, DefaultHash};
 use crate::crypto::merkle::{generate_proof_of_inclusion, generate_tree, verify_proof_of_inclusion, MerkleProof, MerkleTree};
+use crate::protocol::difficulty::get_difficulty_from_depth;
 use crate::protocol::pow::is_valid_hash;
 use super::transaction::Transaction;
 
@@ -38,7 +39,6 @@ impl<'de> Deserialize<'de> for Block {
             helper.header.nonce,
             helper.header.timestamp,
             helper.transactions,
-            helper.header.difficulty,
             helper.header.miner_address,
             helper.header.depth,
             &mut DefaultHash::new()
@@ -46,7 +46,7 @@ impl<'de> Deserialize<'de> for Block {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct BlockHeader{
     // previous_hash is the sha3_356 hash of the previous block in the chain
     pub previous_hash: [u8; 32],
@@ -56,8 +56,6 @@ pub struct BlockHeader{
     pub nonce: u64,
     // timestamp is the time the block was created
     pub timestamp: u64,
-    // difficulty is the difficulty of the block
-    pub difficulty: u64,
     // the address of the miner is the sha3_256 hash of the miner address
     pub miner_address: Option<[u8; 32]>,
     // the depth is a depth of the block in the chain
@@ -71,7 +69,6 @@ impl Clone for BlockHeader {
             merkle_root: self.merkle_root,
             nonce: self.nonce,
             timestamp: self.timestamp,
-            difficulty: self.difficulty,
             miner_address: self.miner_address,
             depth: self.depth
         }
@@ -83,7 +80,6 @@ impl BlockHeader {
         previous_hash: [u8; 32], 
         merkle_root: [u8; 32], 
         nonce: u64, timestamp: u64,
-        difficulty: u64,
         miner_address: Option<[u8; 32]>,
         depth: u64
     ) -> Self {
@@ -92,7 +88,6 @@ impl BlockHeader {
             merkle_root,
             nonce,
             timestamp,
-            difficulty,
             miner_address,
             depth
         }
@@ -111,7 +106,6 @@ impl BlockHeader {
     /// * `hasher` - A mutable instance of a type implementing the HashFunction trait
     pub fn validate(
         &self, 
-        expected_difficulty: u64, 
         expected_hash: [u8; 32],
         hasher: &mut impl HashFunction
     ) -> bool{
@@ -119,13 +113,10 @@ impl BlockHeader {
         if self.miner_address.is_none() {
             return false;
         }
-        if self.difficulty != expected_difficulty {
-            return false;
-        }
         if expected_hash != self.hash(hasher).unwrap() {
             return false;
         }
-        if !is_valid_hash(self.difficulty, &self.hash(hasher).unwrap()) {
+        if !is_valid_hash(get_difficulty_from_depth(self.depth), &self.hash(hasher).unwrap()) {
             return false;
         }
         // check the time is not too far in the future
@@ -159,7 +150,6 @@ impl Hashable for BlockHeader {
         hash_function.update(self.miner_address.unwrap());
         hash_function.update(self.nonce.to_le_bytes());
         hash_function.update(self.timestamp.to_le_bytes());
-        hash_function.update(self.difficulty.to_le_bytes());
         hash_function.update(self.depth.to_le_bytes());
         Ok(hash_function.digest().unwrap())
     }
@@ -172,7 +162,6 @@ impl Block {
         nonce: u64,
         timestamp: u64,
         transactions: Vec<Transaction>,
-        difficulty: u64,
         miner_address: Option<[u8; 32]>,
         depth: u64,
         hasher: &mut impl HashFunction,
@@ -183,7 +172,6 @@ impl Block {
             merkle_tree.nodes.get(merkle_tree.root.unwrap()).unwrap().hash,
             nonce, 
             timestamp,
-            difficulty,
             miner_address,
             depth
         );

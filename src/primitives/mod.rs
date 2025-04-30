@@ -17,7 +17,7 @@ mod tests{
         let nonce = 12345;
         let timestamp = 1622547800;
 
-        let block_header = BlockHeader::new(previous_hash, merkle_root, nonce, timestamp, 1, Some(miner_address), 0);
+        let block_header = BlockHeader::new(previous_hash, merkle_root, nonce, timestamp, Some(miner_address), 0);
         let hash = block_header.hash(&mut DefaultHash::new());
 
         assert_eq!(hash.unwrap().len(), 32);

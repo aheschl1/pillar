@@ -19,7 +19,7 @@ pub async fn discover_peers(node: &mut Node) -> Result<(), std::io::Error> {
     // send a message to the peers
     for peer in node.peers.lock().await.iter_mut() {
         let peers = peer
-            .communicate(&Message::PeerRequest, node.clone().into())
+            .communicate(&Message::PeerRequest, &node.clone().into())
             .await?;
         match peers {
             Message::PeerResponse(peers) => {

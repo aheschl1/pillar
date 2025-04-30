@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{crypto::hashing::{DefaultHash, HashFunction}, primitives::block::BlockHeader};
+use crate::{crypto::hashing::{DefaultHash, HashFunction}, primitives::block::BlockHeader, protocol::chain::get_genesis_block};
 
 use super::chain::Chain;
 
@@ -17,11 +17,21 @@ pub struct ChainShard {
 impl ChainShard{
     /// ensures the hashs are good, and the depths work
     pub fn validate(&self) -> bool{
+        let mut genesis_found = false;
         // validate header
         for (declared_hash, header) in self.headers.iter(){
-            // TODO figure out how to do expected difficulty
+            if header.depth == 0{
+                if genesis_found{
+                    return false;
+                }
+                // make sure valid genesis
+                let correct_gensis = get_genesis_block();
+                if *header != correct_gensis.header{
+                    return false;
+                }
+                genesis_found = true;
+            }
             if !header.validate(
-                header.difficulty, 
                 *declared_hash,
                 &mut DefaultHash::new() 
             ){
@@ -40,7 +50,7 @@ impl ChainShard{
             }
         }
         
-        true
+        genesis_found // the last check
     }
 }
 

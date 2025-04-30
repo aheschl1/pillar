@@ -52,6 +52,20 @@ impl MerkleTree {
             leaves: None,
         }
     }
+
+    pub fn get_root_hash(&self) -> Option<[u8; 32]>{
+        match self.root{
+            None => None,
+            Some(root) => {
+                let root = self.nodes.get(root);
+                if let Some(root) = root {
+                    Some(root.hash)
+                }else{
+                    None
+                }
+            }
+        }
+    }
 }
 
 /// Generate a Merkle tree from the given data

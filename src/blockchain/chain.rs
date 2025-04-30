@@ -2,18 +2,17 @@ use std::collections::{HashMap, HashSet};
 
 use ed25519::Signature;
 use ed25519_dalek::VerifyingKey;
-use rand_core::block;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    crypto::hashing::{DefaultHash, HashFunction, Hashable},
+    crypto::hashing::{DefaultHash, HashFunction},
     primitives::{
         block::{Block, BlockHeader},
         transaction::Transaction,
-    },
+    }, protocol::chain::get_genesis_block,
 };
 
-use super::{account::AccountManager, chain_shard::ChainShard};
+use super::account::AccountManager;
 
 /// Represents the state of the blockchain, including blocks, accounts, and chain parameters.
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -24,8 +23,6 @@ pub struct Chain {
     pub depth: u64,
     /// the block at the deepest depth
     pub deepest_hash: [u8; 32],
-    /// The difficulty level for mining new blocks.
-    pub difficulty: u64,
     // track the leaves
     pub leaves: HashSet<[u8; 32]>,
     /// The account manager for tracking account balances and nonces.
@@ -36,18 +33,7 @@ pub struct Chain {
 impl Chain {
     /// Creates a new blockchain with a genesis block.
     pub fn new_with_genesis() -> Self {
-        let genesis_block = Block::new(
-            [0; 32], 
-            0, 
-            0, 
-            vec![
-                Transaction::new([0; 32], [0;32], 0, 0, 0, &mut DefaultHash::new())
-            ], 
-            0, 
-            Some([0; 32]),
-            0,
-            &mut DefaultHash::new()
-        );
+        let genesis_block = get_genesis_block();
         let mut blocks = HashMap::new();
         let genisis_hash = genesis_block.hash.unwrap();
         let mut leaves = HashSet::new();
@@ -58,7 +44,6 @@ impl Chain {
             blocks: blocks,
             depth: 1,
             deepest_hash: genisis_hash,
-            difficulty: 4,
             leaves: leaves,
             account_manager: AccountManager::new(),
         }
@@ -70,7 +55,7 @@ impl Chain {
         if block.hash.is_none() {
             return false;
         }
-        if !block.header.validate(self.difficulty, block.hash.unwrap(), &mut DefaultHash::new()) {
+        if !block.header.validate(block.hash.unwrap(), &mut DefaultHash::new()) {
             return false;
         }
         // check the previous hash exists
@@ -87,7 +72,7 @@ impl Chain {
     }
 
     /// Ensures that all transactions in a block are valid and do not exceed available funds.
-    async fn validate_transaction_set(&self, transactions: &Vec<Transaction>) -> bool {
+    fn validate_transaction_set(&self, transactions: &Vec<Transaction>) -> bool {
         // we need to make sure that there are no duplicated nonce values under the same user
         let per_user: HashMap<[u8; 32], Vec<&Transaction>> =
             transactions
@@ -110,7 +95,7 @@ impl Chain {
             }
             // now validate each individual transaction
             for transaction in transactions {
-                let result = self.validate_transaction(transaction).await;
+                let result = self.validate_transaction(transaction);
                 if !result {
                     return false;
                 }
@@ -144,7 +129,7 @@ impl Chain {
     /// 2. The transaction hash is valid.
     /// 3. The sender has sufficient balance.
     /// 4. The nonce matches the sender's expected value.
-    async fn validate_transaction(&self, transaction: &Transaction) -> bool {
+    fn validate_transaction(&self, transaction: &Transaction) -> bool {
         let sender = transaction.header.sender;
         let signature = transaction.signature;
         // check for signature
@@ -182,14 +167,14 @@ impl Chain {
     }
 
     /// Verifies the validity of a block, including its transactions and metadata.
-    pub async fn verify_block(&self, block: &Block) -> bool {
+    pub fn verify_block(&self, block: &Block) -> bool {
         let mut result = self.validate_block(block);
-        result = result && self.validate_transaction_set(&block.transactions).await;
+        result = result && self.validate_transaction_set(&block.transactions);
         result
     }
 
     /// Call this only after a block has been verified
-    async fn settle_new_block(&mut self, block: Block){
+    fn settle_new_block(&mut self, block: Block){
         self.account_manager.update_from_block(&block);
         self.blocks.insert(block.hash.unwrap(), block.clone());
         self.leaves.remove(&block.header.previous_hash);
@@ -212,9 +197,9 @@ impl Chain {
     ///
     /// * `Ok(())` if the block is successfully added.
     /// * `Err(std::io::Error)` if the block is invalid.
-    pub async fn add_new_block(&mut self, block: Block) -> Result<(), std::io::Error> {
-        if self.verify_block(&block).await {
-            self.settle_new_block(block).await;
+    pub fn add_new_block(&mut self, block: Block) -> Result<(), std::io::Error> {
+        if self.verify_block(&block) {
+            self.settle_new_block(block);
             Ok(())
         } else {
             Err(std::io::Error::new(
@@ -315,7 +300,6 @@ mod tests {
             vec![
                 trans
             ], 
-            4, 
             Some([0; 32]),
             1,
             &mut DefaultHash::new()
@@ -323,7 +307,7 @@ mod tests {
         chain.account_manager.add_account(Account::new(sender, 0));
         mine(&mut block, sender, DefaultHash::new()).await;
         println!("Block: {:?}", block);
-        let result = chain.add_new_block(block).await;
+        let result = chain.add_new_block(block);
         assert!(result.is_ok());
     }
 
@@ -344,13 +328,12 @@ mod tests {
             vec![
                trans
             ], 
-            0, 
             Some([0; 32]),
             0,
             &mut DefaultHash::new()
         );
         chain.account_manager.add_account(Account::new([0; 32], 0));
-        let result = chain.add_new_block(block).await;
+        let result = chain.add_new_block(block);
         assert!(result.is_err());
     }
 
@@ -374,14 +357,13 @@ mod tests {
                 0,
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth,
                 vec![transaction],
-                4,
                 Some(sender),
                 depth,
                 &mut DefaultHash::new(),
             );
             mine(&mut block, sender, DefaultHash::new()).await;
             parent_hash = block.hash.unwrap();
-            chain.add_new_block(block).await.unwrap();
+            chain.add_new_block(block).unwrap();
         }
 
         let long_chain_leaf = parent_hash;
@@ -394,13 +376,12 @@ mod tests {
             0,
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()+30,
             vec![trans],
-            4,
             Some(sender),
             1,
             &mut DefaultHash::new(),
         );
         mine(&mut fork_block, sender, DefaultHash::new()).await;
-        chain.add_new_block(fork_block.clone()).await.unwrap();
+        chain.add_new_block(fork_block.clone()).unwrap();
 
         assert!(chain.blocks.contains_key(&fork_block.hash.unwrap()));
 
@@ -433,14 +414,13 @@ mod tests {
                 0,
                 time,
                 vec![transaction],
-                4,
                 Some(sender),
                 depth,
                 &mut DefaultHash::new(),
             );
             mine(&mut block, sender, DefaultHash::new()).await;
             parent_hash = block.hash.unwrap();
-            chain.add_new_block(block).await.unwrap();
+            chain.add_new_block(block).unwrap();
         }
 
         let mut trans = Transaction::new(sender, [2; 32], 10, 0, 9, &mut DefaultHash::new());
@@ -451,14 +431,13 @@ mod tests {
             0,
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 50,
             vec![trans],
-            4,
             Some(sender),
             1,
             &mut DefaultHash::new(),
         );
         mine(&mut fork_block, sender, DefaultHash::new()).await;
         let fork_hash = fork_block.hash.unwrap();
-        chain.add_new_block(fork_block).await.unwrap();
+        chain.add_new_block(fork_block).unwrap();
 
         // This fork is <10 behind, so it should NOT be trimmed
         chain.trim();
@@ -485,14 +464,13 @@ mod tests {
                 0,
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth,
                 vec![transaction],
-                4,
                 Some(sender),
                 depth,
                 &mut DefaultHash::new(),
             );
             mine(&mut block, sender, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
-            chain.add_new_block(block).await.unwrap();
+            chain.add_new_block(block).unwrap();
         }
 
         // Create two short forks from genesis (depth 1)
@@ -505,7 +483,6 @@ mod tests {
                 0,
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 20 + offset,
                 vec![transaction],
-                4,
                 Some(sender),
                 1,
                 &mut DefaultHash::new(),
@@ -513,7 +490,7 @@ mod tests {
             mine(&mut fork_block, sender, DefaultHash::new()).await;
             let hash = fork_block.hash.unwrap();
             fork_hashes.push(hash);
-            chain.add_new_block(fork_block).await.unwrap();
+            chain.add_new_block(fork_block).unwrap();
         }
 
         // Verify they were added

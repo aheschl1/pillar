@@ -180,7 +180,7 @@ impl Node {
                     return Ok(Message::BlockAck);
                 }
                 // add the block to the chain - first it is verified
-                self.chain.lock().await.add_new_block(block.clone()).await?;
+                self.chain.lock().await.add_new_block(block.clone())?;
                 // broadcast the block
                 self.broadcast(&Message::BlockTransmission(block.clone()))
                     .await?;
@@ -233,6 +233,18 @@ impl Into<Peer> for Node {
     }
 }
 
+impl Into<Peer> for &Node {
+    fn into(self) -> Peer {
+        Peer::new(*self.public_key, self.ip_address, *self.port)
+    }
+}
+
+// impl Into<Peer> for &mut Node {
+//     fn into(self) -> Peer {
+//         Peer::new(*self.public_key, self.ip_address, *self.port)
+//     }
+// }
+
 pub trait Broadcaster {
     /// Broadcast a message to all peers
     async fn broadcast(&self, message: &Message) -> Result<Vec<Message>, std::io::Error>;
@@ -243,7 +255,7 @@ impl Broadcaster for Node {
         // send a message to all peers
         let mut responses = Vec::new();
         for peer in self.peers.lock().await.iter_mut() {
-            responses.push(peer.communicate(message, self.clone().into()).await?);
+            responses.push(peer.communicate(message, &self.into()).await?);
         }
         Ok(responses)
     }
