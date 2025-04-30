@@ -5,49 +5,47 @@ use crate::{blockchain::{chain::Chain, chain_shard::ChainShard}, crypto::{hashin
 
 use super::peers::discover_peers;
 
+/// Queries a peer to send a block.
 async fn query_block_from_peer(
     peer: &mut Peer, 
     initializing_peer: &Peer,
     hash: [u8; 32]
-) -> Block{
+) -> Result<Block, std::io::Error>{
     // send the block request to the peer
     // TODO better error handling
-    loop{
-        let response = peer.communicate(&Message::BlockRequest(hash), initializing_peer).await;
-        let block = match response {
-            Ok(Message::BlockResponse(block)) => {
-                // add the block to the chain
-                match block{
-                    Some(block) => {
-                        // we need to verify that the header validates
-                        // and that the transactions are the same as declared
-                        let mut result = true;
-                        // check header
-                        result &= block.header.validate(hash, &mut DefaultHash::new());
-                        // verify merkle root
-                        let tree = generate_tree(
-                            block.transactions.iter().map(|x|x).collect(), 
-                            &mut DefaultHash::new()
-                        );
-                        result = result 
-                            && tree.is_ok()  // tree worked
-                            && tree.as_ref().unwrap().get_root_hash().is_some() // has root
-                            && tree.unwrap().get_root_hash().unwrap() == block.header.merkle_root; // root matches
-                        if result{
-                            Some(block)
-                        }else{
-                            None
-                        }
-                    },
-                    _ => None
-                }
+    let response = peer.communicate(&Message::BlockRequest(hash), initializing_peer).await?;
+    let block = match response {
+        Message::BlockResponse(block) => {
+            // add the block to the chain
+            match block{
+                Some(block) => {
+                    // we need to verify that the header validates
+                    // and that the transactions are the same as declared
+                    let mut result = true;
+                    // check header
+                    result &= block.header.validate(hash, &mut DefaultHash::new());
+                    // verify merkle root
+                    let tree = generate_tree(
+                        block.transactions.iter().map(|x|x).collect(), 
+                        &mut DefaultHash::new()
+                    );
+                    result = result 
+                        && tree.is_ok()  // tree worked
+                        && tree.as_ref().unwrap().get_root_hash().is_some() // has root
+                        && tree.unwrap().get_root_hash().unwrap() == block.header.merkle_root; // root matches
+                    if result{
+                        Ok(block)
+                    }else{
+                        Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Block failed verification"))
+                    }
+                },
+                _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Peer responded wrong"))
+
             }
-            _ => None
-        };
-        if let Some(block) = block{
-            return block;
         }
-    }
+        _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Peer responded wrong"))
+    };
+    block
 }
 
 /// Given a shard (validated) uses the node to get the chain
@@ -58,9 +56,17 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std
         let nodeclone = node.clone();
         let sender = tx.clone();
         let handle = tokio::spawn(async move{
-            let mut peer = nodeclone.peers.lock().await.choose(&mut rng()).unwrap().clone(); // random peer
-            let block = query_block_from_peer(&mut peer, &nodeclone.into(), hash).await;
-            sender.send(block).unwrap();
+            loop{ // keep asking for the node until we pass
+                let mut peer = nodeclone.clone().peers.lock().await.choose(&mut rng()).unwrap().clone(); // random peer
+                let block = query_block_from_peer(&mut peer, &nodeclone.clone().into(), hash).await;
+                match block{
+                    Ok(block)=>{
+                        sender.send(block).unwrap();
+                        break;
+                    },
+                    Err(_) => {}
+                };
+            }
         });
         threads.push(handle);
     }
@@ -82,7 +88,7 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std
             match chain.add_new_block(block){
                 Err(_) => { // failed validation
                     let mut peer = node.peers.lock().await.choose(&mut rng()).unwrap().clone(); // random peer
-                    block = query_block_from_peer(&mut peer, &node.clone().into(), hash).await;
+                    block = query_block_from_peer(&mut peer, &node.clone().into(), hash).await?; // one more attempt, then fail.
                 }
                 _ => {break;} // passed validation
             }
