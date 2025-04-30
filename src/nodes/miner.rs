@@ -32,17 +32,19 @@ impl Miner{
     /// Starts monitoring of the pool in a background process
     /// and serves the node
     pub async fn serve(&self){
+        if self.node.chain.is_none(){
+            panic!("Cannot serve the miner before initial chain download.")
+        }
         self.node.serve();
         // start the miner
         let self_clone = self.clone();
         tokio::spawn(self_clone.monitor_pool());
-
     }
 
     /// monitors the nodes transaction pool
     /// Takes ownership of a copy of the miner
     /// TODO: decide how many transactions to mine at once
-    pub async fn monitor_pool(self) {
+    async fn monitor_pool(self) {
         // monitor the pool for transactions
         let transactions_to_mine = 10;
         let max_wait_time = 10; // seconds
@@ -62,12 +64,12 @@ impl Miner{
                 transactions.len() >= transactions_to_mine {
                 // mine
                 let mut block = Block::new(
-                    self.node.chain.lock().await.get_top_block().unwrap().hash.unwrap(), // if it crahses, there is bug
+                    self.node.chain.as_ref().unwrap().lock().await.get_top_block().unwrap().hash.unwrap(), // if it crahses, there is bug
                     0,
                     tokio::time::Instant::now().elapsed().as_secs(),
                     transactions,
                     Some(*self.node.public_key),
-                    self.node.chain.lock().await.depth + 1,
+                    self.node.chain.as_ref().unwrap().lock().await.depth + 1,
                     &mut DefaultHash::new()
                 );
                 // spawn off the mining process
@@ -102,7 +104,7 @@ mod test{
         let private_key = [2u8; 32];
         let ip_address = IpAddr::V4(Ipv4Addr::from_str("127.0.0.1").unwrap());
         let port = 8080;
-        let node = Node::new(public_key, private_key, ip_address, port, vec![], Chain::new_with_genesis(), Some(MinerPool::new()));
+        let node = Node::new(public_key, private_key, ip_address, port, vec![], Some(Chain::new_with_genesis()), Some(MinerPool::new()));
         let miner = Miner::new(node).unwrap();
         let mut hasher = DefaultHash::new();
 

@@ -11,7 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::{
     blockchain::chain::Chain,
-    primitives::{pool::MinerPool, transaction::Transaction},
+    primitives::{pool::MinerPool, transaction::Transaction}, protocol::chain::dicover_chain,
 };
 
 #[derive(Clone)]
@@ -26,13 +26,13 @@ pub struct Node {
     // known peers
     pub peers: Arc<Mutex<Vec<Peer>>>,
     // the blockchain
-    pub chain: Arc<Mutex<Chain>>,
+    pub chain: Option<Arc<Mutex<Chain>>>,
     /// transactions to be serviced
     pub miner_pool: Option<Arc<MinerPool>>,
     /// transactions to be broadcasted
-    pub transaction_receiver: Receiver<Transaction>,
+    pub broadcast_receiver: Receiver<Message>,
     /// transaction input
-    pub transaction_sender: Sender<Transaction>,
+    pub broadcast_sender: Sender<Message>,
 }
 
 impl Node {
@@ -43,20 +43,20 @@ impl Node {
         ip_address: IpAddr,
         port: u16,
         peers: Vec<Peer>,
-        chain: Chain,
+        chain: Option<Chain>,
         transaction_pool: Option<MinerPool>,
     ) -> Self {
-        let (transaction_sender, transaction_receiver) = flume::unbounded();
+        let (broadcast_sender, broadcast_receiver) = flume::unbounded();
         Node {
             public_key: public_key.into(),
             private_key: private_key.into(),
             ip_address,
             port: port.into(),
             peers: Mutex::new(peers).into(),
-            chain: Mutex::new(chain).into(),
+            chain: chain.map(|c|Mutex::new(c).into()),
             miner_pool: transaction_pool.map(Arc::new),
-            transaction_receiver,
-            transaction_sender,
+            broadcast_receiver,
+            broadcast_sender,
         }
     }
 
@@ -64,6 +64,15 @@ impl Node {
     pub fn serve(&self) {
         // spawn a new thread to handle the connection
         let self_clone = self.clone();
+        if let None = self.chain{
+            let mut selfcloneclone = self_clone.clone();
+            tokio::spawn(async move{
+                 // try to discover
+                let _ = dicover_chain(
+                    &mut selfcloneclone
+                ).await;
+            });
+        }
         tokio::spawn(self_clone.clone().serve_peers());
         tokio::spawn(self_clone.broadcast_knowledge());
     }
@@ -144,11 +153,13 @@ impl Node {
                         .await?;
                 }
             }
-            while !self.transaction_receiver.is_empty() {
+            let mut i = 0;
+            while i < 10 && !self.broadcast_receiver.is_empty() {
                 // receive the transaction from the sender
-                let transaction = self.transaction_receiver.recv().unwrap();
-                self.broadcast(&Message::TransactionRequest(transaction))
+                let message = self.broadcast_receiver.recv().unwrap();
+                self.broadcast(&message)
                     .await?;
+                i += 1; // We want to make sure we check back at the mineing pool
             }
         }
     }
@@ -160,7 +171,13 @@ impl Node {
                 // send all peers
                 Ok(Message::PeerResponse(self.peers.lock().await.clone()))
             }
-            Message::ChainRequest => Ok(Message::ChainResponse(self.chain.lock().await.clone())),
+            Message::ChainRequest => {
+                if let Some(chain) = self.chain.as_ref(){
+                    Ok(Message::ChainResponse(chain.lock().await.clone()))
+                }else{
+                    Ok(Message::Error("Chain not downloaded for peer".into()))
+                }
+            },
             Message::TransactionRequest(transaction) => {
                 // IF IT HAS OUR PUBLIC KEY< DROP
                 if transaction.header.sender == *self.public_key {
@@ -171,7 +188,7 @@ impl Node {
                     pool.add_transaction(transaction.clone());
                 }
                 // to be broadcasted
-                self.transaction_sender.send(transaction.clone()).unwrap();
+                self.broadcast_sender.send(Message::TransactionRequest(transaction.to_owned())).unwrap();
                 Ok(Message::TransactionAck)
             }
             Message::BlockTransmission(block) => {
@@ -180,20 +197,29 @@ impl Node {
                     return Ok(Message::BlockAck);
                 }
                 // add the block to the chain - first it is verified
-                self.chain.lock().await.add_new_block(block.clone())?;
+                if let Some(chain) = self.chain.as_ref(){
+                    chain.lock().await.add_new_block(block.clone())?;
+                }
                 // broadcast the block
-                self.broadcast(&Message::BlockTransmission(block.clone()))
-                    .await?;
+                self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap();
                 Ok(Message::BlockAck)
             },
             Message::BlockRequest(hash) => {
                 // send a block to the peer upon request
-                let block = self.chain.lock().await.get_block(hash).cloned();
-                Ok(Message::BlockResponse(block))
+                if let Some(chain) = self.chain.as_ref(){
+                    let block = chain.lock().await.get_block(hash).cloned();
+                    Ok(Message::BlockResponse(block))
+                }else{
+                    Ok(Message::Error("Chain not downloaded for peer".into()))
+                }
             },
             Message::ChainShardRequest => {
                 // send the block headers to the peer
-                Ok(Message::ChainShardResponse(self.chain.lock().await.clone().into()))
+                if let Some(chain) = self.chain.as_ref(){
+                    Ok(Message::ChainShardResponse(chain.lock().await.clone().into()))
+                }else{
+                    Ok(Message::Error("Chain not downloaded for peer".into()))
+                }
             }
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
