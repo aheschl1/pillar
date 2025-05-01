@@ -1,4 +1,5 @@
 use std::hash::Hash;
+use serde::{Deserialize, Serialize};
 use slotmap::{SlotMap, new_key_type};
 
 
@@ -18,13 +19,13 @@ pub struct TreeNode {
     pub hash: [u8; 32],
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum HashDirection {
     Left,
     Right,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MerkleProof {
     pub hashes: Vec<[u8; 32]>,
     pub directions: Vec<HashDirection>,

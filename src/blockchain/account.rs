@@ -1,12 +1,11 @@
 use std::{cmp::Ordering, collections::HashMap, sync::{Arc, Mutex}};
 
-
-use sha3::digest::typenum::Cmp;
+use serde::{Deserialize, Serialize};
 
 use crate::primitives::block::Block;
 
-#[derive(Debug, Clone)]
-pub struct AccountHistory{
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransactionStub{
     // The block hash of the block that created this account
     pub block_hash: [u8; 32],
     // The transaction hash of the transaction that created this account
@@ -22,7 +21,7 @@ pub struct Account{
     // The nonce of the account, to prevent replay attacks
     pub nonce: u64,
     // a tracking of blocks/transactions that lead to this balance
-    pub history: Vec<AccountHistory>, // (block hash, transaction hash)
+    pub history: Vec<TransactionStub>, // (block hash, transaction hash)
 }
 
 impl Account{
@@ -33,7 +32,7 @@ impl Account{
         let history = match balance.cmp(&0){
             Ordering::Equal => vec![],
             Ordering::Greater => vec![
-                AccountHistory{
+                TransactionStub{
                     transaction_hash: [0; 32],
                     block_hash: [0; 32]
                 }
@@ -106,7 +105,7 @@ impl AccountManager{
             sender.nonce += 1;
             receiver.balance += transaction.header.amount;
             // update history
-            let history = AccountHistory{
+            let history = TransactionStub{
                 block_hash: block.hash.unwrap(),
                 transaction_hash: transaction.hash
             };

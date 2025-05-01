@@ -1,5 +1,6 @@
 use super::peer::Peer;
 use flume::{Receiver, Sender};
+use rand::rand_core::block;
 use std::{collections::HashSet, net::IpAddr, sync::Arc};
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -219,7 +220,22 @@ impl Node {
                 }else{
                     Ok(Message::Error("Chain not downloaded for peer".into()))
                 }
-            }
+            },
+            Message::TransactionProofRequest(stub) => {
+                if let Some(chain) = self.chain.as_ref(){
+                    let block = chain.lock().await;
+                    let block = block.get_block(&stub.block_hash);
+                    
+                    if let Some(block) = block{
+                        let proof = block.get_proof_for_transaction(stub.transaction_hash);
+                        Ok(Message::TransactionProofResponse(proof.unwrap(), block.header.clone()))
+                    }else{
+                        Ok(Message::Error("Block does not exist".into()))
+                    }                 
+                }else{
+                    Ok(Message::Error("Chain not downloaded for peer".into()))
+                }
+            },
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "Expected a request",

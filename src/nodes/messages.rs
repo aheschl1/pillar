@@ -1,4 +1,4 @@
-use crate::{blockchain::{chain::Chain, chain_shard::ChainShard}, primitives::{block::{Block, BlockHeader}, transaction::Transaction}};
+use crate::{blockchain::{account::TransactionStub, chain::Chain, chain_shard::ChainShard}, crypto::merkle::MerkleProof, primitives::{block::{Block, BlockHeader}, transaction::Transaction}};
 use serde::{Serialize, Deserialize};
 use super::peer::Peer;
 
@@ -31,6 +31,10 @@ pub enum Message {
     ChainShardRequest,
     // response with the block headers
     ChainShardResponse(ChainShard),
+    // a request for proof over a transaction
+    TransactionProofRequest(TransactionStub),
+    // a reponse for the proof. includes block header for hash verification, and merkle proof
+    TransactionProofResponse(MerkleProof, BlockHeader),
     // error message
     Error(String)
 }
