@@ -147,7 +147,7 @@ impl Node {
     async fn broadcast_knowledge(self) -> Result<(), std::io::Error> {
         loop {
             // send a message to all peers
-            if let Some(pool) = &self.miner_pool {
+            if let Some(pool) = &self.miner_pool { // broadcast out of mining pool
                 while pool.block_count() > 0 {
                     self.broadcast(&Message::BlockTransmission(pool.pop_block().unwrap()))
                         .await?;
@@ -157,8 +157,7 @@ impl Node {
             while i < 10 && !self.broadcast_receiver.is_empty() {
                 // receive the transaction from the sender
                 let message = self.broadcast_receiver.recv().unwrap();
-                self.broadcast(&message)
-                    .await?;
+                self.broadcast(&message).await?;
                 i += 1; // We want to make sure we check back at the mineing pool
             }
         }

@@ -127,13 +127,13 @@ pub fn generate_tree(data: Vec<&Transaction>, hash_function: &mut impl HashFunct
 }
 
 /// Generate a Merkle proof for a specific transaction
-pub fn generate_proof_of_inclusion(merkle_tree: &MerkleTree, data: &Transaction, hash_function: &mut impl HashFunction) -> Option<MerkleProof> {
+pub fn generate_proof_of_inclusion(merkle_tree: &MerkleTree, data: [u8; 32], hash_function: &mut impl HashFunction) -> Option<MerkleProof> {
     let leaves = merkle_tree.leaves.as_ref()?;
     let nodes = &merkle_tree.nodes;
     let root_key = merkle_tree.root?;
 
     // Hash the data
-    hash_function.update(data.hash);
+    hash_function.update(data);
     let target_hash = hash_function.digest().expect("Hashing failed");
 
     // Find matching leaf
@@ -166,8 +166,8 @@ pub fn generate_proof_of_inclusion(merkle_tree: &MerkleTree, data: &Transaction,
 }
 
 /// Verify a Merkle proof
-pub fn verify_proof_of_inclusion(data: &Transaction, proof: &MerkleProof, root: [u8; 32], hash_function: &mut impl HashFunction) -> bool {
-    hash_function.update(data.hash);
+pub fn verify_proof_of_inclusion<T: Into<[u8; 32]>>(data: T, proof: &MerkleProof, root: [u8; 32], hash_function: &mut impl HashFunction) -> bool {
+    hash_function.update(data.into());
     let mut current_hash = hash_function.digest().expect("Hashing failed");
 
     for (hash, direction) in proof.hashes.iter().zip(proof.directions.iter()) {
@@ -298,7 +298,7 @@ mod tests {
 
         let data = vec![&transaction1, &transaction2, &transaction3, &transaction4];
         let mut merkle_tree = generate_tree(data, &mut hash_function).unwrap();
-        let proof = generate_proof_of_inclusion(&mut merkle_tree, &transaction1, &mut hash_function).unwrap();
+        let proof = generate_proof_of_inclusion(&mut merkle_tree, transaction1.hash, &mut hash_function).unwrap();
         assert_eq!(proof.hashes.len(), 2);
     }
 
@@ -340,12 +340,12 @@ mod tests {
 
         let data = vec![&transaction1, &transaction2, &transaction3, &transaction4];
         let mut merkle_tree = generate_tree(data, &mut hash_function).unwrap();
-        let proof = generate_proof_of_inclusion(&mut merkle_tree, &transaction3, &mut hash_function).unwrap();
+        let proof = generate_proof_of_inclusion(&mut merkle_tree, transaction3.hash, &mut hash_function).unwrap();
         assert_eq!(proof.hashes.len(), 2);
         // pass
-        assert!(verify_proof_of_inclusion(&transaction3, &proof, merkle_tree.nodes[merkle_tree.root.unwrap()].hash, &mut hash_function));
+        assert!(verify_proof_of_inclusion(transaction3, &proof, merkle_tree.nodes[merkle_tree.root.unwrap()].hash, &mut hash_function));
         // fail
-        assert!(!verify_proof_of_inclusion(&transaction1, &proof, merkle_tree.nodes[merkle_tree.root.unwrap()].hash, &mut hash_function));
+        assert!(!verify_proof_of_inclusion(transaction1, &proof, merkle_tree.nodes[merkle_tree.root.unwrap()].hash, &mut hash_function));
     }
     #[test]
     fn test_empty_tree() {
@@ -419,11 +419,11 @@ mod tests {
 
         let data = vec![&transaction1, &transaction2, &transaction3];
         let mut merkle_tree = generate_tree(data, &mut hash_function).unwrap();
-        let proof = generate_proof_of_inclusion(&mut merkle_tree, &transaction1, &mut hash_function).unwrap();
+        let proof = generate_proof_of_inclusion(&mut merkle_tree, transaction1.hash, &mut hash_function).unwrap();
         assert_eq!(proof.hashes.len(), 2);
         // test verification
-        assert!(verify_proof_of_inclusion(&transaction1, &proof, merkle_tree.nodes[merkle_tree.root.unwrap()].hash, &mut hash_function));
+        assert!(verify_proof_of_inclusion(transaction1, &proof, merkle_tree.nodes[merkle_tree.root.unwrap()].hash, &mut hash_function));
         // test failure
-        assert!(!verify_proof_of_inclusion(&transaction2, &proof, merkle_tree.nodes[merkle_tree.root.unwrap()].hash, &mut hash_function));
+        assert!(!verify_proof_of_inclusion(transaction2, &proof, merkle_tree.nodes[merkle_tree.root.unwrap()].hash, &mut hash_function));
     }
 }

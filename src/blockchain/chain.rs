@@ -90,15 +90,28 @@ impl Chain {
             }
             // return true;
             let total_sum: u64 = transactions.iter().map(|t| t.header.amount).sum();
-            if account.unwrap().lock().unwrap().balance < total_sum {
+            if account.as_ref().unwrap().lock().unwrap().balance < total_sum {
                 return false;
             }
+            let mut nonces = vec![];
             // now validate each individual transaction
             for transaction in transactions {
+                nonces.push(transaction.header.nonce);
                 let result = self.validate_transaction(transaction);
                 if !result {
                     return false;
                 }
+            }
+            // nonces need tto be contiguous
+            nonces.sort();
+            for i in 0..nonces.len() - 1 {
+                if nonces[i] + 1 != nonces[i + 1] {
+                    return false;
+                }
+            }
+            // and the first one needs to be the accounts nonce
+            if nonces[0] != account.unwrap().lock().unwrap().nonce {
+                return false;
             }
         }
 
@@ -159,10 +172,10 @@ impl Chain {
         if account.lock().unwrap().balance < transaction.header.amount {
             return false;
         } // @todo: If there are multiple transactions of the same sender in a block, we need to check if the balance is enough for all of them
-        // check nonce
-        if transaction.header.nonce != account.lock().unwrap().nonce {
-            return false;
-        }
+        // // check nonce
+        // if transaction.header.nonce != account.lock().unwrap().nonce {
+        //     return false;
+        // }
         return true;
     }
 

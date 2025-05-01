@@ -120,3 +120,9 @@ impl Hashable for Transaction {
         Ok(self.header.hash(hasher))
     }
 }
+
+impl Into<[u8; 32]> for Transaction {
+    fn into(self) -> [u8; 32] {
+        self.hash
+    }
+}

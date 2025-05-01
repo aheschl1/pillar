@@ -1,9 +1,17 @@
-use std::{collections::HashMap, sync::{Arc, Mutex}};
+use std::{cmp::Ordering, collections::HashMap, sync::{Arc, Mutex}};
 
+
+use sha3::digest::typenum::Cmp;
 
 use crate::primitives::block::Block;
 
-
+#[derive(Debug, Clone)]
+pub struct AccountHistory{
+    // The block hash of the block that created this account
+    pub block_hash: [u8; 32],
+    // The transaction hash of the transaction that created this account
+    pub transaction_hash: [u8; 32],
+}
 
 #[derive(Debug)]
 pub struct Account{
@@ -13,15 +21,30 @@ pub struct Account{
     pub balance: u64,
     // The nonce of the account, to prevent replay attacks
     pub nonce: u64,
+    // a tracking of blocks/transactions that lead to this balance
+    pub history: Vec<AccountHistory>, // (block hash, transaction hash)
 }
 
 impl Account{
     // Creates a new account with the given address and balance
     pub fn new(address: [u8; 32], balance: u64) -> Self {
+        // for now, this placeholder will work; however, in the long run we need a coinbase account for initial distribution
+        // TODO deal with coinbase
+        let history = match balance.cmp(&0){
+            Ordering::Equal => vec![],
+            Ordering::Greater => vec![
+                AccountHistory{
+                    transaction_hash: [0; 32],
+                    block_hash: [0; 32]
+                }
+            ],
+            _ => panic!()
+        };
         Account {
             address,
             balance,
             nonce: 0,
+            history: history
         }
     }
 }
@@ -76,9 +99,19 @@ impl AccountManager{
                 None => self.add_account(Account::new(transaction.header.receiver, 0)),
             };
             // sender always needs to exist, or the block would not pass verification
-            sender.lock().unwrap().balance -= transaction.header.amount;
-            receiver.lock().unwrap().balance += transaction.header.amount;
-            sender.lock().unwrap().nonce += 1;
+            let mut sender = sender.lock().unwrap();
+            let mut receiver = receiver.lock().unwrap();
+            // update balances
+            sender.balance -= transaction.header.amount;
+            sender.nonce += 1;
+            receiver.balance += transaction.header.amount;
+            // update history
+            let history = AccountHistory{
+                block_hash: block.hash.unwrap(),
+                transaction_hash: transaction.hash
+            };
+            sender.history.push(history.clone());
+            receiver.history.push(history);
         }
     }
 }

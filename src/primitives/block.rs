@@ -185,20 +185,20 @@ impl Block {
     }
 
     /// Creates the proof of inclusion for a transaction in the block
-    pub fn get_proof_for_transaction(&self, transaction: &Transaction) -> Option<MerkleProof> {
+    pub fn get_proof_for_transaction<T: Into<[u8; 32]>>(&self, transaction: T) -> Option<MerkleProof> {
         generate_proof_of_inclusion(
             &self.merkle_tree,
-            &transaction,
+            transaction.into(),
             &mut DefaultHash::new()
         )
     }
 
     /// Veerifies a transaction is in the block
-    pub fn validate_transaction(&self, transaction: &Transaction) -> bool{
-        let proof = self.get_proof_for_transaction(transaction);
+    pub fn validate_transaction<T: Into<[u8; 32]> + Clone>(&self, transaction: T) -> bool{
+        let proof = self.get_proof_for_transaction(transaction.clone());
         if let Some(proof) = proof {
             verify_proof_of_inclusion(
-                &transaction,
+                transaction.into(),
                 &proof,
                 self.header.merkle_root,
                 &mut DefaultHash::new()
@@ -206,5 +206,12 @@ impl Block {
         } else {
             false
         }
+    }
+}
+
+
+impl Into<[u8; 32]> for Block{
+    fn into(self) -> [u8; 32]{
+        self.hash.unwrap()
     }
 }
