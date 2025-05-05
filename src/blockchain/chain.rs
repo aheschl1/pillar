@@ -5,14 +5,11 @@ use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    crypto::hashing::{DefaultHash, HashFunction},
-    primitives::{
+    accounting::account::AccountManager, crypto::hashing::{DefaultHash, HashFunction}, primitives::{
         block::{Block, BlockHeader},
         transaction::Transaction,
-    }, protocol::chain::get_genesis_block,
+    }, protocol::chain::get_genesis_block
 };
-
-use super::account::AccountManager;
 
 /// Represents the state of the blockchain, including blocks, accounts, and chain parameters.
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -280,7 +277,7 @@ mod tests {
     use rand_core::OsRng;
 
     use super::*;
-    use crate::blockchain::account::Account;
+    use crate::accounting::account::Account;
     use crate::primitives::transaction::{self, Transaction};
     use crate::crypto::hashing::DefaultHash;
     use crate::protocol::pow::mine;

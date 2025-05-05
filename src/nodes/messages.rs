@@ -1,4 +1,4 @@
-use crate::{blockchain::{account::TransactionStub, chain::Chain, chain_shard::ChainShard}, crypto::merkle::MerkleProof, primitives::{block::{Block, BlockHeader}, transaction::Transaction}};
+use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, crypto::merkle::MerkleProof, primitives::{block::{Block, BlockHeader}, transaction::Transaction}};
 use serde::{Serialize, Deserialize};
 use super::peer::Peer;
 

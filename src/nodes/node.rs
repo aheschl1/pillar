@@ -1,7 +1,6 @@
 use super::peer::Peer;
 use flume::{Receiver, Sender};
-use rand::rand_core::block;
-use std::{collections::HashSet, net::IpAddr, sync::Arc};
+use std::{net::IpAddr, sync::Arc};
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::Mutex,
