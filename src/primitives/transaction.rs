@@ -3,9 +3,11 @@ use serde::{Deserialize, Serialize};
 use crate::crypto::hashing::{HashFunction, Hashable};
 use serde_with::{serde_as, Bytes};
 
+use super::block::Block;
+
 
 #[serde_as]
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct Transaction{
     // header is the header of the transaction
     pub header: TransactionHeader,
@@ -16,7 +18,7 @@ pub struct Transaction{
     pub signature: Option<[u8; 64]>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct TransactionHeader{
     // sender is the ed25519 public key of the sender
     pub sender: [u8; 32],
@@ -28,6 +30,74 @@ pub struct TransactionHeader{
     pub timestamp: u64,
     // the nonce is a random number used to prevent replay attacks
     pub nonce: u64
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+/// TransactionFilter is sent from lightweight nodes to full nodes in order to register a callback to receive 
+/// a proof of a transaction when it is incorporated into a block.
+pub struct TransactionFilter {
+    // sender is the ed25519 public key of the sender
+    pub sender: Option<[u8; 32]>,
+    // receiver is the ed25519 public key of the receiver
+    pub receiver: Option<[u8; 32]>,
+    // amount is the amount of tokens being transferred
+    pub amount: Option<u64>,
+}
+
+impl TransactionFilter{
+    /// Create a new transaction filter
+    /// 
+    /// # Arguments
+    /// 
+    /// * `sender` - The sender's public key
+    /// * `receiver` - The receiver's public key
+    /// * `amount` - The amount of tokens being transferred
+    pub fn new(sender: Option<[u8; 32]>, receiver: Option<[u8; 32]>, amount: Option<u64>) -> Self {
+        TransactionFilter {
+            sender,
+            receiver,
+            amount,
+        }
+    }
+}
+
+pub trait FilterMatch<T>{
+    fn matches(&self, other: &T) -> bool;
+}
+
+
+/// match a transaction to a transaction filter
+impl FilterMatch<Transaction> for TransactionFilter {
+    fn matches(&self, other: &Transaction) -> bool {
+        if let Some(sender) = self.sender {
+            if sender != other.header.sender {
+                return false;
+            }
+        }
+        if let Some(receiver) = self.receiver {
+            if receiver != other.header.receiver {
+                return false;
+            }
+        }
+        if let Some(amount) = self.amount {
+            if amount != other.header.amount {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// match a block to a transaction filter
+impl FilterMatch<Block> for TransactionFilter {
+    fn matches(&self, other: &Block) -> bool {
+        for transaction in &other.transactions {
+            if self.matches(transaction) {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 impl TransactionHeader {

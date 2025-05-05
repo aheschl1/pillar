@@ -1,4 +1,4 @@
-use super::peer::Peer;
+use super::peer::{self, Peer};
 use flume::{Receiver, Sender};
 use std::{net::IpAddr, sync::Arc};
 use tokio::{
@@ -11,7 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::{
     blockchain::chain::Chain,
-    primitives::{pool::MinerPool, transaction::Transaction}, protocol::chain::dicover_chain,
+    primitives::{pool::MinerPool, transaction::{FilterMatch, Transaction, TransactionFilter}}, protocol::chain::dicover_chain,
 };
 
 #[derive(Clone)]
@@ -33,6 +33,8 @@ pub struct Node {
     pub broadcast_receiver: Receiver<Message>,
     /// transaction input
     pub broadcast_sender: Sender<Message>,
+    // transaction filter queue
+    pub transaction_filters: Arc<Mutex<Vec<(TransactionFilter, Peer)>>>,
 }
 
 impl Node {
@@ -47,6 +49,7 @@ impl Node {
         transaction_pool: Option<MinerPool>,
     ) -> Self {
         let (broadcast_sender, broadcast_receiver) = flume::unbounded();
+        let transaction_filters = Arc::new(Mutex::new(Vec::new()));
         Node {
             public_key: public_key.into(),
             private_key: private_key.into(),
@@ -57,6 +60,7 @@ impl Node {
             miner_pool: transaction_pool.map(Arc::new),
             broadcast_receiver,
             broadcast_sender,
+            transaction_filters
         }
     }
 
@@ -191,6 +195,17 @@ impl Node {
                 Ok(Message::TransactionAck)
             }
             Message::BlockTransmission(block) => {
+                // spawn a new thread to match transaction requests against the bock
+                let filters = self.transaction_filters.clone();
+                let block_clone = block.clone();
+                let initpeer: Peer = self.clone().into();
+                tokio::spawn(async move {
+                    for ( filter, peer) in filters.lock().await.iter_mut() {
+                        if filter.matches(&block_clone){
+                            peer.communicate(&Message::TransactionFilterResponse(block_clone.header), &initpeer).await.unwrap();
+                        }
+                    }
+                });
                 if block.header.miner_address.unwrap() == *self.public_key {
                     // SKIP OWN BLOCK
                     return Ok(Message::BlockAck);
@@ -234,6 +249,20 @@ impl Node {
                 }else{
                     Ok(Message::Error("Chain not downloaded for peer".into()))
                 }
+            },
+            Message::TransactionFilterRequest(filter, peer) => {
+                // place into the transaction filter queue - if it is not already there
+                let mut transaction_filters = self.transaction_filters.lock().await;
+                if transaction_filters.iter().any(|(f, p)| f == filter && p == peer) {
+                    self.broadcast_sender.send(Message::TransactionFilterRequest(filter.to_owned(), peer.to_owned())).unwrap();
+                    transaction_filters.push((filter.to_owned(), peer.to_owned()));
+                }
+                // to be broadcasted
+                Ok(Message::TransactionFilterAck)
+            },
+            Message::TransactionFilterResponse(header) => {
+                // maybe a background thread should handle these types - some type of queue system
+                todo!("Transaction filter response implmentation");
             },
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,

@@ -11,7 +11,8 @@ new_key_type! {
     pub struct NodeKey;
 }
 
-#[derive(Debug, Clone)]
+
+#[derive(Debug, Clone, Copy)]
 pub struct TreeNode {
     pub left: Option<NodeKey>,
     pub right: Option<NodeKey>,

@@ -46,7 +46,7 @@ impl<'de> Deserialize<'de> for Block {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Copy)]
 pub struct BlockHeader{
     // previous_hash is the sha3_356 hash of the previous block in the chain
     pub previous_hash: [u8; 32],

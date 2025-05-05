@@ -1,4 +1,4 @@
-use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, crypto::merkle::MerkleProof, primitives::{block::{Block, BlockHeader}, transaction::Transaction}};
+use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, crypto::merkle::MerkleProof, primitives::{block::{Block, BlockHeader}, transaction::{Transaction, TransactionFilter}}};
 use serde::{Serialize, Deserialize};
 use super::peer::Peer;
 
@@ -35,6 +35,12 @@ pub enum Message {
     TransactionProofRequest(TransactionStub),
     // a reponse for the proof. includes block header for hash verification, and merkle proof
     TransactionProofResponse(MerkleProof, BlockHeader),
+    /// register a transaction filter
+    TransactionFilterRequest(TransactionFilter, Peer),
+    /// An acknowledgement of a transaction filter
+    TransactionFilterAck,
+    /// A response to a hit on the transaction filter - with the block header that contains the transaction
+    TransactionFilterResponse(BlockHeader),
     // error message
     Error(String)
 }
