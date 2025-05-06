@@ -40,7 +40,7 @@ pub enum Message {
     /// An acknowledgement of a transaction filter
     TransactionFilterAck,
     /// A response to a hit on the transaction filter - with the block header that contains the transaction
-    TransactionFilterResponse(BlockHeader),
+    TransactionFilterResponse(TransactionFilter, BlockHeader),
     // error message
     Error(String)
 }

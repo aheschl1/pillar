@@ -32,7 +32,7 @@ pub struct TransactionHeader{
     pub nonce: u64
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 /// TransactionFilter is sent from lightweight nodes to full nodes in order to register a callback to receive 
 /// a proof of a transaction when it is incorporated into a block.
 pub struct TransactionFilter {
@@ -97,6 +97,16 @@ impl FilterMatch<Block> for TransactionFilter {
             }
         }
         false
+    }
+}
+
+impl From<Transaction> for TransactionFilter{
+    fn from(transaction: Transaction) -> Self {
+        TransactionFilter {
+            sender: Some(transaction.header.sender),
+            receiver: Some(transaction.header.receiver),
+            amount: Some(transaction.header.amount),
+        }
     }
 }
 

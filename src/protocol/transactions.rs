@@ -1,6 +1,7 @@
 use ed25519_dalek::SigningKey;
+use flume::Receiver;
 
-use crate::{accounting::account::Account, crypto::hashing::{DefaultHash, HashFunction}, nodes::{messages::Message, node::{Broadcaster, Node}}, primitives::transaction::{self, Transaction}};
+use crate::{accounting::account::Account, crypto::hashing::{DefaultHash, HashFunction}, nodes::{messages::Message, node::{Broadcaster, Node}}, primitives::{block::BlockHeader, transaction::{self, Transaction, TransactionFilter}}};
 
 /// Submit a transaction to the network
 /// 
@@ -10,13 +11,20 @@ use crate::{accounting::account::Account, crypto::hashing::{DefaultHash, HashFun
 /// * `signer` - The signing key for the sender
 /// * `receiver` - The account address for which the transaction is intended
 /// * `amount` - The amount to send
+/// * `register_completion_callback` - Whether to register a callback to receive a proof of the transaction when it is incorporated into a block
+///     
+/// # Returns
+/// * `Ok(Some(receiver))` - If the transaction was acknowledged and a callback was registered
+/// * `Ok(None)` - If the transaction was acknowledged but no callback was registered
+/// * `Err(e)` - If the transaction was not acknowledged or an error occurred
 pub async fn submit_transaction(
-    node: &Node, 
+    node: &mut Node, 
     sender: &mut Account, 
     signer: SigningKey,
-    receiver: [u8; 32], 
-    amount: u64
-) -> Result<(), std::io::Error> {
+    receiver: [u8; 32],
+    amount: u64,
+    register_completion_callback: bool
+) -> Result<Option<Receiver<BlockHeader>>, std::io::Error> {
     let nonce = sender.nonce; sender.nonce += 1;
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -43,7 +51,12 @@ pub async fn submit_transaction(
     });
     match ok{
         true => {
-            Ok(())
+            if register_completion_callback {
+                let receiver = node.register_transaction_callback(transaction.into()).await;
+                Ok(Some(receiver))
+            }else{
+                Ok(None)
+            }
         },
         false => {
             Err(std::io::Error::new(

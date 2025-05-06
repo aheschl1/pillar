@@ -1,6 +1,6 @@
 use super::peer::{self, Peer};
 use flume::{Receiver, Sender};
-use std::{net::IpAddr, sync::Arc};
+use std::{collections::HashMap, net::IpAddr, sync::Arc};
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::Mutex,
@@ -11,7 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::{
     blockchain::chain::Chain,
-    primitives::{pool::MinerPool, transaction::{FilterMatch, Transaction, TransactionFilter}}, protocol::chain::dicover_chain,
+    primitives::{block::BlockHeader, pool::MinerPool, transaction::{FilterMatch, Transaction, TransactionFilter}}, protocol::chain::dicover_chain,
 };
 
 #[derive(Clone)]
@@ -35,6 +35,8 @@ pub struct Node {
     pub broadcast_sender: Sender<Message>,
     // transaction filter queue
     pub transaction_filters: Arc<Mutex<Vec<(TransactionFilter, Peer)>>>,
+    // registered filters for the local node - producer will be this node, and consumer will be some backgroung thread that polls
+    filter_callbacks: Arc<Mutex<HashMap<TransactionFilter, Sender<BlockHeader>>>>,
 }
 
 impl Node {
@@ -60,10 +62,12 @@ impl Node {
             miner_pool: transaction_pool.map(Arc::new),
             broadcast_receiver,
             broadcast_sender,
-            transaction_filters
+            transaction_filters,
+            filter_callbacks: Arc::new(Mutex::new(HashMap::new())), // initially no callbacks
         }
     }
 
+    
     /// when called, launches a new thread that listens for incoming connections
     pub fn serve(&self) {
         // spawn a new thread to handle the connection
@@ -71,7 +75,7 @@ impl Node {
         if let None = self.chain{
             let mut selfcloneclone = self_clone.clone();
             tokio::spawn(async move{
-                 // try to discover
+                // try to discover
                 let _ = dicover_chain(
                     &mut selfcloneclone
                 ).await;
@@ -87,66 +91,66 @@ impl Node {
     /// The response from serve_message is finally returned back to the peer
     async fn serve_peers(self) {
         let listener = TcpListener::bind(format!("{}:{}", self.ip_address, self.port))
-            .await
-            .unwrap();
-        loop {
-            // handle connection
-            let (mut stream, _) = listener.accept().await.unwrap();
-            // spawn a new thread to handle the connection
-            let mut self_clone = self.clone();
-            tokio::spawn(async move {
-                // first read the peer declaration
-                let mut buffer = [0; 2048];
-                let n = stream.read(&mut buffer).await.unwrap();
-                // deserialize with bincode
-                let declaration: Result<Message, Box<bincode::ErrorKind>> =
-                    bincode::deserialize(&buffer[..n]);
-                if declaration.is_err() {
-                    // halt communication
-                    return;
-                }
-                let declaration = declaration.unwrap();
-                match declaration {
-                    Message::Declaration(peer) => {
-                        // add the peer to the list if and only if it is not already in the list
-                        self_clone.maybe_update_peer(peer.clone()).await.unwrap();
-                        // send a response
+        .await
+        .unwrap();
+    loop {
+        // handle connection
+        let (mut stream, _) = listener.accept().await.unwrap();
+        // spawn a new thread to handle the connection
+        let mut self_clone = self.clone();
+        tokio::spawn(async move {
+            // first read the peer declaration
+            let mut buffer = [0; 2048];
+            let n = stream.read(&mut buffer).await.unwrap();
+            // deserialize with bincode
+            let declaration: Result<Message, Box<bincode::ErrorKind>> =
+            bincode::deserialize(&buffer[..n]);
+            if declaration.is_err() {
+                // halt communication
+                return;
+            }
+            let declaration = declaration.unwrap();
+            match declaration {
+                Message::Declaration(peer) => {
+                    // add the peer to the list if and only if it is not already in the list
+                    self_clone.maybe_update_peer(peer.clone()).await.unwrap();
+                    // send a response
                         peer
                     }
                     _ => {
                         self_clone
-                            .send_error_message(
-                                &mut stream,
-                                std::io::Error::new(
-                                    std::io::ErrorKind::InvalidInput,
-                                    "Expected peer delaration",
-                                ),
-                            )
-                            .await;
-                        return;
-                    }
-                };
+                        .send_error_message(
+                            &mut stream,
+                            std::io::Error::new(
+                                std::io::ErrorKind::InvalidInput,
+                                "Expected peer delaration",
+                            ),
+                        )
+                        .await;
+                    return;
+                }
+            };
                 // read actual the message
                 let n = stream.read(&mut buffer).await.unwrap();
                 let message: Result<Message, Box<bincode::ErrorKind>> =
                     bincode::deserialize(&buffer[..n]);
-                if message.is_err() {
-                    // halt
-                    return;
-                }
+                    if message.is_err() {
+                        // halt
+                        return;
+                    }
                 let message = message.unwrap();
                 let response = self_clone.serve_request(&message).await;
                 match response {
                     Err(e) => self_clone.send_error_message(&mut stream, e).await,
                     Ok(message) => stream
-                        .write_all(&bincode::serialize(&message).unwrap())
-                        .await
-                        .unwrap(),
+                    .write_all(&bincode::serialize(&message).unwrap())
+                    .await
+                    .unwrap(),
                 };
             });
         }
     }
-
+    
     /// Background process that consumes mined blocks, and transactions which must be forwarded
     async fn broadcast_knowledge(self) -> Result<(), std::io::Error> {
         loop {
@@ -154,7 +158,7 @@ impl Node {
             if let Some(pool) = &self.miner_pool { // broadcast out of mining pool
                 while pool.block_count() > 0 {
                     self.broadcast(&Message::BlockTransmission(pool.pop_block().unwrap()))
-                        .await?;
+                    .await?;
                 }
             }
             let mut i = 0;
@@ -165,6 +169,21 @@ impl Node {
                 i += 1; // We want to make sure we check back at the mineing pool
             }
         }
+    }
+
+    /// Register a transaction filter callback - adds the callback channel and adds it to the transaction filter queue
+    /// Sends a broadcast to request peers to also watch for the block - if a peer catches it, it will be sent back
+    pub async fn register_transaction_callback(&mut self, filter: TransactionFilter) -> Receiver<BlockHeader> {
+        // create a new channel
+        let (sender, receiver) = flume::bounded(1);
+        // add the filter to the list
+        self.filter_callbacks.lock().await.insert(filter.clone(), sender);
+        // add the filter to the transaction filters
+        self.transaction_filters.lock().await.push((filter.clone(), self.clone().into()));
+        // broadcast the filter to all peers
+        self.broadcast_sender.send(Message::TransactionFilterRequest(filter, self.clone().into())).unwrap();
+        // return the receiver
+        receiver
     }
 
     /// Derive the response to a request from a peer
@@ -199,10 +218,21 @@ impl Node {
                 let filters = self.transaction_filters.clone();
                 let block_clone = block.clone();
                 let initpeer: Peer = self.clone().into();
+                let selfclone = self.clone();
                 tokio::spawn(async move {
                     for ( filter, peer) in filters.lock().await.iter_mut() {
                         if filter.matches(&block_clone){
-                            peer.communicate(&Message::TransactionFilterResponse(block_clone.header), &initpeer).await.unwrap();
+                            peer.communicate(&Message::TransactionFilterResponse(filter.clone(), block_clone.header), &initpeer).await.unwrap();
+                            // check if there is a registered callback
+                            let mut callbacks = selfclone.filter_callbacks.lock().await;
+                            // TODO maybe this is not nececarry - some rework?
+                            if let Some(sender) = callbacks.get_mut(filter) {
+                                // send the block header to the sender
+                                sender.send(block_clone.header.clone()).unwrap();
+                                // remove the callback - one time only
+                                callbacks.remove(filter);
+                            } // we will get the callback here if and only if the current active node is the one that resgistered the callback
+                            // otherwise, it will come in the FilterResponse
                         }
                     }
                 });
@@ -260,9 +290,15 @@ impl Node {
                 // to be broadcasted
                 Ok(Message::TransactionFilterAck)
             },
-            Message::TransactionFilterResponse(header) => {
-                // maybe a background thread should handle these types - some type of queue system
-                todo!("Transaction filter response implmentation");
+            Message::TransactionFilterResponse(filter, header) => {
+                let mut callbacks = self.filter_callbacks.lock().await;
+                if let Some(sender) = callbacks.get_mut(filter) {
+                    // send the block header to the sender
+                    sender.send(*header).unwrap();
+                    // remove the callback - one time only
+                    callbacks.remove(filter);
+                }
+                Ok(Message::TransactionFilterAck)
             },
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
