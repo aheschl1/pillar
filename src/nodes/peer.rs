@@ -80,9 +80,10 @@ impl Peer{
 
 #[cfg(test)]
 mod tests{
+    use core::panic;
     use std::net::{IpAddr, Ipv4Addr};
 
-    use tokio::io::AsyncReadExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use crate::nodes::{messages::{get_declaration_length, Message, Versions}, peer::Peer};
 
@@ -135,6 +136,60 @@ mod tests{
         let _ = peer.send_initial(&message, &initializing_peer).await.unwrap(); // send to peer
         handle.await.unwrap(); // wait for the listener to finish
         
+    }
+
+    #[tokio::test]
+    async fn test_read_response(){
+        // setup a dummy socket, use it for the initializing_peer. read reponses
+        let initializing_peer = Peer::new([1u8; 32], IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let mut peer = Peer::new([2u8; 32], IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), 8081);
+        // bind to peer socket - we will receive the message here
+        let initializing_clone = initializing_peer.clone();
+        let listener = tokio::net::TcpListener::bind(format!("{}:{}", peer.ip_address, peer.port)).await.unwrap();
+        let handle = tokio::spawn(async move{
+            // wait for a connection
+            let (mut stream, _) = listener.accept().await.unwrap();
+            // read the message - expect a declaration and then a ping
+            let mut buffer = [0; get_declaration_length(Versions::V1V4) as usize];
+            let n = stream.read_exact(&mut buffer).await.unwrap();
+            // deserialize with bincode
+            let message: Message = bincode::deserialize(&buffer[..n]).unwrap();
+            let size;
+            match message{
+                Message::Declaration(peer, n) => {
+                    size = n;
+                    assert_eq!(peer.public_key, initializing_clone.public_key);
+                    assert_eq!(peer.ip_address, initializing_clone.ip_address);
+                    assert_eq!(peer.port, initializing_clone.port);
+                },
+                _ => panic!("Expected a declaration message")
+            }
+            // read the next message
+            let mut buffer = vec![0; size as usize];
+            let n = stream.read_exact(&mut buffer).await.unwrap();
+            let message: Message = bincode::deserialize(&buffer[..n]).unwrap();
+            match message{
+                Message::Ping => {},
+                _ => panic!("Expected a ping message")
+            }
+            // send a response
+            let response = Message::Ping;
+            // send n bytes of upcoming message
+            let serialized_response = bincode::serialize(&response).unwrap();
+            stream.write_all(&serialized_response.len().to_le_bytes()).await.unwrap();
+            stream.write_all(serialized_response.as_slice()).await.unwrap();
+        });
+        // check for the messages on listener
+        // comunicate with the peer
+        let message = Message::Ping;
+        let stream = peer.send_initial(&message, &initializing_peer).await.unwrap(); // send to peer
+        // read the response
+        let response = peer.read_response(stream).await.unwrap();
+        match response{
+            Message::Ping => {},
+            _ => panic!("Expected a ping message")
+        }
+        handle.await.unwrap(); // wait for the listener to finish
     }
 
 }

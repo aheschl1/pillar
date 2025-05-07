@@ -1,4 +1,4 @@
-use super::{messages::{get_declaration_length, Versions}, peer::{self, Peer}};
+use super::{messages::{get_declaration_length, Versions}, peer::Peer};
 use flume::{Receiver, Sender};
 use std::{collections::HashMap, net::IpAddr, sync::Arc};
 use tokio::{
@@ -11,7 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::{
     blockchain::chain::Chain,
-    primitives::{block::BlockHeader, pool::MinerPool, transaction::{FilterMatch, Transaction, TransactionFilter}}, protocol::chain::dicover_chain,
+    primitives::{block::BlockHeader, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::chain::dicover_chain,
 };
 
 #[derive(Clone)]
@@ -93,71 +93,71 @@ impl Node {
     /// The response from serve_message is finally returned back to the peer
     async fn serve_peers(self) {
         let listener = TcpListener::bind(format!("{}:{}", self.ip_address, self.port))
-        .await
-        .unwrap();
-    loop {
-        // handle connection
-        let (mut stream, _) = listener.accept().await.unwrap();
-        // spawn a new thread to handle the connection
-        let mut self_clone = self.clone();
-        tokio::spawn(async move {
-            // first read the peer declaration
-            let mut buffer = [0; get_declaration_length(Versions::V1V4) as usize];
-            let n = stream.read_exact(&mut buffer).await.unwrap();
-            // deserialize with bincode
-            let declaration: Result<Message, Box<bincode::ErrorKind>> =
-            bincode::deserialize(&buffer[..n]);
-            if declaration.is_err() {
-                // halt communication
-                return;
-            }
-            let declaration = declaration.unwrap();
-            let mut message_length;
-            match declaration {
-                Message::Declaration(peer, n) => {
-                    message_length = n;
-                    // add the peer to the list if and only if it is not already in the list
-                    self_clone.maybe_update_peer(peer.clone()).await.unwrap();
-                    // send a response
-                        peer
-                    }
-                    _ => {
-                        self_clone
-                        .send_error_message(
-                            &mut stream,
-                            std::io::Error::new(
-                                std::io::ErrorKind::InvalidInput,
-                                "Expected peer delaration",
-                            ),
-                        )
-                        .await;
+            .await
+            .unwrap();
+        loop {
+            // handle connection
+            let (mut stream, _) = listener.accept().await.unwrap();
+            // spawn a new thread to handle the connection
+            let mut self_clone = self.clone();
+            tokio::spawn(async move {
+                // first read the peer declaration
+                let mut buffer = [0; get_declaration_length(Versions::V1V4) as usize];
+                let n = stream.read_exact(&mut buffer).await.unwrap();
+                // deserialize with bincode
+                let declaration: Result<Message, Box<bincode::ErrorKind>> =
+                bincode::deserialize(&buffer[..n]);
+                if declaration.is_err() {
+                    // halt communication
                     return;
                 }
-            };
-            // read actual the message
-            let mut buffer = Vec::with_capacity(message_length as usize);
-            let n = stream.read_exact(&mut buffer).await.unwrap();
-            let message: Result<Message, Box<bincode::ErrorKind>> =bincode::deserialize(&buffer[..n]);
-            if message.is_err() {
-                // halt
-                return;
-            }
-            let message = message.unwrap();
-            let response = self_clone.serve_request(&message).await;
-            match response {
-                Err(e) => self_clone.send_error_message(&mut stream, e).await,
-                Ok(message) => {
-                    let nbytes = bincode::serialized_size(&message).unwrap() as u32;
-                    // write the size of the message as 4 bytes - 4 bytes because we are using u32
-                    stream.write(&nbytes.to_le_bytes()[..4]).await.unwrap();
-                    stream
-                        .write_all(&bincode::serialize(&message).unwrap())
-                        .await
-                        .unwrap()
+                let declaration = declaration.unwrap();
+                let message_length;
+                match declaration {
+                    Message::Declaration(peer, n) => {
+                        message_length = n;
+                        // add the peer to the list if and only if it is not already in the list
+                        self_clone.maybe_update_peer(peer.clone()).await.unwrap();
+                        // send a response
+                            peer
+                        }
+                        _ => {
+                            self_clone
+                            .send_error_message(
+                                &mut stream,
+                                std::io::Error::new(
+                                    std::io::ErrorKind::InvalidInput,
+                                    "Expected peer delaration",
+                                ),
+                            )
+                            .await;
+                        return;
+                    }
+                };
+                // read actual the message
+                let mut buffer = Vec::with_capacity(message_length as usize);
+                let n = stream.read_exact(&mut buffer).await.unwrap();
+                let message: Result<Message, Box<bincode::ErrorKind>> =bincode::deserialize(&buffer[..n]);
+                if message.is_err() {
+                    // halt
+                    return;
                 }
-            };
-        });
-    }
+                let message = message.unwrap();
+                let response = self_clone.serve_request(&message).await;
+                match response {
+                    Err(e) => self_clone.send_error_message(&mut stream, e).await,
+                    Ok(message) => {
+                        let nbytes = bincode::serialized_size(&message).unwrap() as u32;
+                        // write the size of the message as 4 bytes - 4 bytes because we are using u32
+                        stream.write(&nbytes.to_le_bytes()[..4]).await.unwrap();
+                        stream
+                            .write_all(&bincode::serialize(&message).unwrap())
+                            .await
+                            .unwrap()
+                    }
+                };
+            });
+        }
     }
     
     /// Background process that consumes mined blocks, and transactions which must be forwarded
