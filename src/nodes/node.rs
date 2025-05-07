@@ -1,17 +1,13 @@
-use super::{messages::{get_declaration_length, Versions}, peer::Peer};
+use super::peer::Peer;
 use flume::{Receiver, Sender};
 use std::{collections::HashMap, net::IpAddr, sync::Arc};
-use tokio::{
-    net::{TcpListener, TcpStream},
-    sync::Mutex,
-};
+use tokio::sync::Mutex;
 
 use super::messages::Message;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::{
     blockchain::chain::Chain,
-    primitives::{block::BlockHeader, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::chain::dicover_chain,
+    primitives::{block::BlockHeader, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::dicover_chain, communication::{broadcast_knowledge, serve_peers}},
 };
 
 #[derive(Clone)]
@@ -83,102 +79,11 @@ impl Node {
                 selfcloneclone.chain.lock().await.replace(chain);
             });
         }
-        tokio::spawn(self_clone.clone().serve_peers());
-        tokio::spawn(self_clone.broadcast_knowledge());
-    }
-
-    /// This function serves as a loop that accepts incoming requests, and handles the main protocol
-    /// For each connection, listens for a peer declaration. Then, it adds this peer to the peer list if not alteady there
-    /// After handling the peer, it reads for the actual message. Then, it calls off to the serve_message function.
-    /// The response from serve_message is finally returned back to the peer
-    async fn serve_peers(self) {
-        let listener = TcpListener::bind(format!("{}:{}", self.ip_address, self.port))
-            .await
-            .unwrap();
-        loop {
-            // handle connection
-            let (mut stream, _) = listener.accept().await.unwrap();
-            // spawn a new thread to handle the connection
-            let mut self_clone = self.clone();
-            tokio::spawn(async move {
-                // first read the peer declaration
-                let mut buffer = [0; get_declaration_length(Versions::V1V4) as usize];
-                let n = stream.read_exact(&mut buffer).await.unwrap();
-                // deserialize with bincode
-                let declaration: Result<Message, Box<bincode::ErrorKind>> =
-                bincode::deserialize(&buffer[..n]);
-                if declaration.is_err() {
-                    // halt communication
-                    return;
-                }
-                let declaration = declaration.unwrap();
-                let message_length;
-                match declaration {
-                    Message::Declaration(peer, n) => {
-                        message_length = n;
-                        // add the peer to the list if and only if it is not already in the list
-                        self_clone.maybe_update_peer(peer.clone()).await.unwrap();
-                        // send a response
-                            peer
-                        }
-                        _ => {
-                            self_clone
-                            .send_error_message(
-                                &mut stream,
-                                std::io::Error::new(
-                                    std::io::ErrorKind::InvalidInput,
-                                    "Expected peer delaration",
-                                ),
-                            )
-                            .await;
-                        return;
-                    }
-                };
-                // read actual the message
-                let mut buffer = Vec::with_capacity(message_length as usize);
-                let n = stream.read_exact(&mut buffer).await.unwrap();
-                let message: Result<Message, Box<bincode::ErrorKind>> =bincode::deserialize(&buffer[..n]);
-                if message.is_err() {
-                    // halt
-                    return;
-                }
-                let message = message.unwrap();
-                let response = self_clone.serve_request(&message).await;
-                match response {
-                    Err(e) => self_clone.send_error_message(&mut stream, e).await,
-                    Ok(message) => {
-                        let nbytes = bincode::serialized_size(&message).unwrap() as u32;
-                        // write the size of the message as 4 bytes - 4 bytes because we are using u32
-                        stream.write(&nbytes.to_le_bytes()[..4]).await.unwrap();
-                        stream
-                            .write_all(&bincode::serialize(&message).unwrap())
-                            .await
-                            .unwrap()
-                    }
-                };
-            });
-        }
+        tokio::spawn(serve_peers(self_clone.clone()));
+        tokio::spawn(broadcast_knowledge(self_clone));
     }
     
-    /// Background process that consumes mined blocks, and transactions which must be forwarded
-    async fn broadcast_knowledge(self) -> Result<(), std::io::Error> {
-        loop {
-            // send a message to all peers
-            if let Some(pool) = &self.miner_pool { // broadcast out of mining pool
-                while pool.block_count() > 0 {
-                    self.broadcast(&Message::BlockTransmission(pool.pop_block().unwrap()))
-                    .await?;
-                }
-            }
-            let mut i = 0;
-            while i < 10 && !self.broadcast_receiver.is_empty() {
-                // receive the transaction from the sender
-                let message = self.broadcast_receiver.recv().unwrap();
-                self.broadcast(&message).await?;
-                i += 1; // We want to make sure we check back at the mineing pool
-            }
-        }
-    }
+
 
     /// Register a transaction filter callback - adds the callback channel and adds it to the transaction filter queue
     /// Sends a broadcast to request peers to also watch for the block - if a peer catches it, it will be sent back
@@ -196,7 +101,7 @@ impl Node {
     }
 
     /// Derive the response to a request from a peer
-    async fn serve_request(&mut self, message: &Message) -> Result<Message, std::io::Error> {
+    pub async fn serve_request(&mut self, message: &Message) -> Result<Message, std::io::Error> {
         match message {
             Message::PeerRequest => {
                 // send all peers
@@ -315,20 +220,7 @@ impl Node {
         }
     }
 
-    /// sends an error response when given a string description
-    async fn send_error_message(&self, stream: &mut TcpStream, e: impl std::error::Error) {
-        // writye message size
-        let nbytes = bincode::serialized_size(&Message::Error(e.to_string())).unwrap() as u32;
-        // write the size of the message as 4 bytes - 4 bytes because we are using u32
-        stream.write(&nbytes.to_le_bytes()[..4]).await.unwrap();
-        // write the error message to the stream
-        stream
-            .write_all(&bincode::serialize(&Message::Error(e.to_string())).unwrap())
-            .await
-            .unwrap();
-    }
-
-    async fn maybe_update_peer(&self, peer: Peer) -> Result<(), std::io::Error> {
+    pub async fn maybe_update_peer(&self, peer: Peer) -> Result<(), std::io::Error> {
         // check if the peer is already in the list
         let mut peers = self.peers.lock().await;
         if !peers.iter().any(|p| p.public_key == peer.public_key) {
