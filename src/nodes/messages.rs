@@ -1,3 +1,5 @@
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
 use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, crypto::merkle::MerkleProof, primitives::{block::{Block, BlockHeader}, transaction::{Transaction, TransactionFilter}}};
 use serde::{Serialize, Deserialize};
 use super::peer::Peer;
@@ -5,6 +7,8 @@ use super::peer::Peer;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Message {
+    // dummy ping
+    Ping,
     // request full chain
     ChainRequest,
     // response with full chain
@@ -13,8 +17,8 @@ pub enum Message {
     PeerRequest,
     // response with all peers
     PeerResponse(Vec<Peer>),
-    // inform of who you are - always the first message
-    Declaration(Peer),
+    // inform of who you are and message length following - always the first message
+    Declaration(Peer, u32),
     // request for a transaction
     TransactionRequest(Transaction),
     // acknowledge a transaction has been received
@@ -43,4 +47,17 @@ pub enum Message {
     TransactionFilterResponse(TransactionFilter, BlockHeader),
     // error message
     Error(String)
+}
+
+pub enum Versions{
+    V1V4 = 1,
+    V1V6 = 2,
+}
+/// Returns the expected bincode-encoded size in bytes for a `Message::Declaration(Peer, u64)`
+/// under version-specific assumptions (IPv4 or IPv6). Assumes default bincode config.
+pub const fn get_declaration_length(version: Versions) -> u64 {
+    match version {
+        Versions::V1V4 => 50, // enum tag + public key + IP tag + IPv4 + port + u32
+        Versions::V1V6 => 1 + 32 + 1 + 16 + 2 + 4, // enum tag + public key + IP tag + IPv6 + port + u32
+    }
 }

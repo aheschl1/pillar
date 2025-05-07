@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::primitives::block::Block;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransactionStub{
     // The block hash of the block that created this account
     pub block_hash: [u8; 32],
@@ -12,7 +12,7 @@ pub struct TransactionStub{
     pub transaction_hash: [u8; 32],
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Account{
     // The address of the account is the public key
     pub address: [u8; 32],

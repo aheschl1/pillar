@@ -1,4 +1,4 @@
-use super::peer::{self, Peer};
+use super::{messages::{get_declaration_length, Versions}, peer::{self, Peer}};
 use flume::{Receiver, Sender};
 use std::{collections::HashMap, net::IpAddr, sync::Arc};
 use tokio::{
@@ -26,7 +26,7 @@ pub struct Node {
     // known peers
     pub peers: Arc<Mutex<Vec<Peer>>>,
     // the blockchain
-    pub chain: Option<Arc<Mutex<Chain>>>,
+    pub chain: Arc<Mutex<Option<Chain>>>,
     /// transactions to be serviced
     pub miner_pool: Option<Arc<MinerPool>>,
     /// transactions to be broadcasted
@@ -58,7 +58,7 @@ impl Node {
             ip_address,
             port: port.into(),
             peers: Mutex::new(peers).into(),
-            chain: chain.map(|c|Mutex::new(c).into()),
+            chain: Arc::new(Mutex::new(chain)),
             miner_pool: transaction_pool.map(Arc::new),
             broadcast_receiver,
             broadcast_sender,
@@ -69,16 +69,18 @@ impl Node {
 
     
     /// when called, launches a new thread that listens for incoming connections
-    pub fn serve(&self) {
+    pub async fn serve(&self) {
         // spawn a new thread to handle the connection
         let self_clone = self.clone();
-        if let None = self.chain{
+        if let None = self.chain.lock().await.as_ref(){
             let mut selfcloneclone = self_clone.clone();
             tokio::spawn(async move{
                 // try to discover
-                let _ = dicover_chain(
+                let chain = dicover_chain(
                     &mut selfcloneclone
-                ).await;
+                ).await.unwrap();
+                // asign the chain to the node
+                selfcloneclone.chain.lock().await.replace(chain);
             });
         }
         tokio::spawn(self_clone.clone().serve_peers());
@@ -100,8 +102,8 @@ impl Node {
         let mut self_clone = self.clone();
         tokio::spawn(async move {
             // first read the peer declaration
-            let mut buffer = [0; 2048];
-            let n = stream.read(&mut buffer).await.unwrap();
+            let mut buffer = [0; get_declaration_length(Versions::V1V4) as usize];
+            let n = stream.read_exact(&mut buffer).await.unwrap();
             // deserialize with bincode
             let declaration: Result<Message, Box<bincode::ErrorKind>> =
             bincode::deserialize(&buffer[..n]);
@@ -110,8 +112,10 @@ impl Node {
                 return;
             }
             let declaration = declaration.unwrap();
+            let mut message_length;
             match declaration {
-                Message::Declaration(peer) => {
+                Message::Declaration(peer, n) => {
+                    message_length = n;
                     // add the peer to the list if and only if it is not already in the list
                     self_clone.maybe_update_peer(peer.clone()).await.unwrap();
                     // send a response
@@ -130,25 +134,30 @@ impl Node {
                     return;
                 }
             };
-                // read actual the message
-                let n = stream.read(&mut buffer).await.unwrap();
-                let message: Result<Message, Box<bincode::ErrorKind>> =
-                    bincode::deserialize(&buffer[..n]);
-                    if message.is_err() {
-                        // halt
-                        return;
-                    }
-                let message = message.unwrap();
-                let response = self_clone.serve_request(&message).await;
-                match response {
-                    Err(e) => self_clone.send_error_message(&mut stream, e).await,
-                    Ok(message) => stream
-                    .write_all(&bincode::serialize(&message).unwrap())
-                    .await
-                    .unwrap(),
-                };
-            });
-        }
+            // read actual the message
+            let mut buffer = Vec::with_capacity(message_length as usize);
+            let n = stream.read_exact(&mut buffer).await.unwrap();
+            let message: Result<Message, Box<bincode::ErrorKind>> =bincode::deserialize(&buffer[..n]);
+            if message.is_err() {
+                // halt
+                return;
+            }
+            let message = message.unwrap();
+            let response = self_clone.serve_request(&message).await;
+            match response {
+                Err(e) => self_clone.send_error_message(&mut stream, e).await,
+                Ok(message) => {
+                    let nbytes = bincode::serialized_size(&message).unwrap() as u32;
+                    // write the size of the message as 4 bytes - 4 bytes because we are using u32
+                    stream.write(&nbytes.to_le_bytes()[..4]).await.unwrap();
+                    stream
+                        .write_all(&bincode::serialize(&message).unwrap())
+                        .await
+                        .unwrap()
+                }
+            };
+        });
+    }
     }
     
     /// Background process that consumes mined blocks, and transactions which must be forwarded
@@ -194,8 +203,8 @@ impl Node {
                 Ok(Message::PeerResponse(self.peers.lock().await.clone()))
             }
             Message::ChainRequest => {
-                if let Some(chain) = self.chain.as_ref(){
-                    Ok(Message::ChainResponse(chain.lock().await.clone()))
+                if let Some(chain) = self.chain.lock().await.as_ref(){
+                    Ok(Message::ChainResponse(chain.clone()))
                 }else{
                     Ok(Message::Error("Chain not downloaded for peer".into()))
                 }
@@ -241,8 +250,8 @@ impl Node {
                     return Ok(Message::BlockAck);
                 }
                 // add the block to the chain - first it is verified
-                if let Some(chain) = self.chain.as_ref(){
-                    chain.lock().await.add_new_block(block.clone())?;
+                if let Some(chain) = self.chain.lock().await.as_mut(){
+                    chain.add_new_block(block.clone())?;
                 }
                 // broadcast the block
                 self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap();
@@ -250,8 +259,8 @@ impl Node {
             },
             Message::BlockRequest(hash) => {
                 // send a block to the peer upon request
-                if let Some(chain) = self.chain.as_ref(){
-                    let block = chain.lock().await.get_block(hash).cloned();
+                if let Some(chain) = self.chain.lock().await.as_ref(){
+                    let block = chain.get_block(hash).cloned();
                     Ok(Message::BlockResponse(block))
                 }else{
                     Ok(Message::Error("Chain not downloaded for peer".into()))
@@ -259,16 +268,15 @@ impl Node {
             },
             Message::ChainShardRequest => {
                 // send the block headers to the peer
-                if let Some(chain) = self.chain.as_ref(){
-                    Ok(Message::ChainShardResponse(chain.lock().await.clone().into()))
+                if let Some(chain) = self.chain.lock().await.as_ref(){
+                    Ok(Message::ChainShardResponse(chain.clone().into()))
                 }else{
                     Ok(Message::Error("Chain not downloaded for peer".into()))
                 }
             },
             Message::TransactionProofRequest(stub) => {
-                if let Some(chain) = self.chain.as_ref(){
-                    let block = chain.lock().await;
-                    let block = block.get_block(&stub.block_hash);
+                if let Some(chain) = self.chain.lock().await.as_ref(){
+                    let block = chain.get_block(&stub.block_hash);
                     
                     if let Some(block) = block{
                         let proof = block.get_proof_for_transaction(stub.transaction_hash);
@@ -309,6 +317,11 @@ impl Node {
 
     /// sends an error response when given a string description
     async fn send_error_message(&self, stream: &mut TcpStream, e: impl std::error::Error) {
+        // writye message size
+        let nbytes = bincode::serialized_size(&Message::Error(e.to_string())).unwrap() as u32;
+        // write the size of the message as 4 bytes - 4 bytes because we are using u32
+        stream.write(&nbytes.to_le_bytes()[..4]).await.unwrap();
+        // write the error message to the stream
         stream
             .write_all(&bincode::serialize(&Message::Error(e.to_string())).unwrap())
             .await

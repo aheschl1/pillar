@@ -32,7 +32,7 @@ impl Miner{
     /// Starts monitoring of the pool in a background process
     /// and serves the node
     pub async fn serve(&self){
-        if self.node.chain.is_none(){
+        if self.node.chain.lock().await.is_none(){
             panic!("Cannot serve the miner before initial chain download.")
         }
         self.node.serve();
@@ -64,12 +64,12 @@ impl Miner{
                 transactions.len() >= transactions_to_mine {
                 // mine
                 let mut block = Block::new(
-                    self.node.chain.as_ref().unwrap().lock().await.get_top_block().unwrap().hash.unwrap(), // if it crahses, there is bug
+                    self.node.chain.as_ref().lock().await.as_mut().unwrap().get_top_block().unwrap().hash.unwrap(), // if it crahses, there is bug
                     0,
                     tokio::time::Instant::now().elapsed().as_secs(),
                     transactions,
                     Some(*self.node.public_key),
-                    self.node.chain.as_ref().unwrap().lock().await.depth + 1,
+                    self.node.chain.as_ref().lock().await.as_mut().unwrap().depth + 1,
                     &mut DefaultHash::new()
                 );
                 // spawn off the mining process
