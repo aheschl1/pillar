@@ -8,6 +8,7 @@ use super::chain::Chain;
 
 /// chain shard is used to build up a chain given a list of block headers
 /// It is responsible for the validation and construction of the chain from a new node.
+/// // chain shard is just a chain of headers
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChainShard {
     pub headers: HashMap<[u8; 32], BlockHeader>,
@@ -52,6 +53,7 @@ impl ChainShard{
         
         genesis_found // the last check
     }
+
 }
 
 impl From<Chain> for ChainShard{

@@ -17,7 +17,7 @@ pub async fn broadcast_knowledge(node: Node) -> Result<(), std::io::Error> {
             // receive the transaction from the sender
             let message = node.broadcast_receiver.recv().unwrap();
             node.broadcast(&message).await?;
-            i += 1; // We want to make sure we check back at the mineing pool
+            i += 1; // We want to make sure we check back at the mining pool
         }
     }
 }

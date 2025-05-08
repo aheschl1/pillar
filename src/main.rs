@@ -4,6 +4,7 @@ mod nodes;
 mod primitives;
 mod protocol;
 mod accounting;
+mod reputation;
 
 fn main() {
     println!("Hello, world!");

@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
 
-use crate::{crypto::hashing::{DefaultHash, HashFunction, Hashable}, primitives::block::Block, protocol::pow::mine};
+use crate::{crypto::hashing::{DefaultHash, HashFunction}, primitives::block::Block, protocol::pow::mine};
 
 use super::node::Node;
 
@@ -35,7 +34,7 @@ impl Miner{
         if self.node.chain.lock().await.is_none(){
             panic!("Cannot serve the miner before initial chain download.")
         }
-        self.node.serve();
+        self.node.serve().await;
         // start the miner
         let self_clone = self.clone();
         tokio::spawn(self_clone.monitor_pool());
@@ -62,6 +61,7 @@ impl Miner{
             }
             if (last_polled_at.is_some() && tokio::time::Instant::now().elapsed().as_secs() - last_polled_at.unwrap() > max_wait_time) ||
                 transactions.len() >= transactions_to_mine {
+                // mining time
                 // mine
                 let mut block = Block::new(
                     self.node.chain.as_ref().lock().await.as_mut().unwrap().get_top_block().unwrap().hash.unwrap(), // if it crahses, there is bug

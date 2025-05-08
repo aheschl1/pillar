@@ -138,7 +138,7 @@ impl Node {
                         if filter.matches(&block_clone){
                             peer.communicate(&Message::TransactionFilterResponse(filter.clone(), block_clone.header), &initpeer).await.unwrap();
                             // check if there is a registered callback
-                            let mut callbacks = selfclone.filter_callbacks.lock().await;
+                            let mut callbacks: tokio::sync::MutexGuard<'_, HashMap<TransactionFilter, Sender<BlockHeader>>> = selfclone.filter_callbacks.lock().await;
                             // TODO maybe this is not nececarry - some rework?
                             if let Some(sender) = callbacks.get_mut(filter) {
                                 // send the block header to the sender
@@ -248,12 +248,6 @@ impl Into<Peer> for &Node {
         Peer::new(*self.public_key, self.ip_address, *self.port)
     }
 }
-
-// impl Into<Peer> for &mut Node {
-//     fn into(self) -> Peer {
-//         Peer::new(*self.public_key, self.ip_address, *self.port)
-//     }
-// }
 
 pub trait Broadcaster {
     /// Broadcast a message to all peers
