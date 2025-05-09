@@ -3,8 +3,7 @@ use serde::{Deserialize, Serialize};
 use slotmap::{SlotMap, new_key_type};
 
 
-use crate::primitives::transaction::Transaction;
-use super::hashing::{HashFunction, DefaultHash};
+use super::hashing::{HashFunction, Hashable};
 
 // Define a key type for our nodes
 new_key_type! {
@@ -71,7 +70,7 @@ impl MerkleTree {
 }
 
 /// Generate a Merkle tree from the given data
-pub fn generate_tree(data: Vec<&Transaction>, hash_function: &mut impl HashFunction) -> Result<MerkleTree, std::io::Error> {
+pub fn generate_tree(data: Vec<&impl Hashable>, hash_function: &mut impl HashFunction) -> Result<MerkleTree, std::io::Error> {
     if data.is_empty() {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Data is empty"));
     }
@@ -79,8 +78,9 @@ pub fn generate_tree(data: Vec<&Transaction>, hash_function: &mut impl HashFunct
     let mut tree = MerkleTree::new();
 
     // Create leaves
-    let mut leaves: Vec<NodeKey> = data.into_iter().map(|transaction| {
-        hash_function.update(transaction.hash);
+    let mut leaves: Vec<NodeKey> = data.into_iter().map(|item| {
+        let item_hash = item.hash(hash_function).expect("hashing failed");
+        hash_function.update(item_hash);
         let node = TreeNode {
             left: None,
             right: None,

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use rand::{rng, seq::IndexedRandom};
 
 use crate::{blockchain::{chain::Chain, chain_shard::ChainShard}, crypto::{hashing::{DefaultHash, HashFunction}, merkle::generate_tree}, nodes::{messages::Message, node::{Broadcaster, Node}, peer::Peer}, primitives::{block::Block, transaction::Transaction}};
@@ -150,4 +152,58 @@ pub fn get_genesis_block() -> Block{
         0,
         &mut DefaultHash::new()
     )
+}
+
+/// Sync the chain in a node when it comes back online
+/// Avoids recomputing and entire chain when a node comes back online
+pub async fn sync_chain(node: &mut Node){
+    // the sync request
+    let leaves = node.chain.lock().await.as_ref().expect("No chain - discover chain instead").leaves.clone();
+    let request = Message::ChainSyncRequest(leaves.clone());
+    // broadcast the request
+    let responses = node.broadcast(&request).await.expect("Failed to broadcast sync request");
+    // sync up with the reponses
+    let mut extensions: HashMap<[u8; 32], (Chain, u64)> = HashMap::new();
+    for response in responses{
+        match response {
+            Message::ChainSyncResponse(shards) => {
+                // check each shard - validate it
+                for shard in shards.iter(){
+                    // figure out which leaf this connect to. we can start at any arbitrary leaf because they will all end up at the same place
+                    let leaf = &shard.deepest_hash;
+                    let mut curr = shard.blocks.get(leaf);
+                    while let Some(current_block) = curr{
+                        if shard.verify_block(current_block){
+                            // good, recurse
+                            if leaves.contains(&current_block.header.previous_hash){
+                                // we have reached it. record this verified shard
+                                if let Some((_, existing_depth)) = extensions.get(&current_block.header.previous_hash) {
+                                    // insert if this is deeper
+                                    if shard.depth > *existing_depth {
+                                        extensions.insert(current_block.header.previous_hash, (shard.clone(), shard.depth));
+                                    }
+                                } else {
+                                    // insert if this is the first
+                                    extensions.insert(current_block.header.previous_hash, (shard.clone(), shard.depth));
+                                }
+                                break;
+                            }
+                            curr = shard.blocks.get(&current_block.header.previous_hash);
+                        }else{
+                            // TODO maybe blacklist the peer
+                            break;
+                        }
+                    } 
+
+                }
+            }
+            _ => {}
+        }
+    }
+    // each response has been verified and we have the deepest for each leaf
+    // now we need to merge the chains
+    let mut chain = node.chain.lock().await.as_ref().unwrap().clone();
+    // we need to travel backwards again :()
+    
+
 }

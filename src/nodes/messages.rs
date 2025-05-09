@@ -1,4 +1,4 @@
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::{collections::HashSet, net::{IpAddr, Ipv4Addr, Ipv6Addr}};
 
 use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, crypto::merkle::MerkleProof, primitives::{block::{Block, BlockHeader}, transaction::{Transaction, TransactionFilter}}};
 use serde::{Serialize, Deserialize};
@@ -45,6 +45,10 @@ pub enum Message {
     TransactionFilterAck,
     /// A response to a hit on the transaction filter - with the block header that contains the transaction
     TransactionFilterResponse(TransactionFilter, BlockHeader),
+    // chain syncing request - the current leaf hashes of the chain
+    ChainSyncRequest(HashSet<[u8; 32]>),
+    // chain syncing response - the blocks that are missing. each chain is the child of leaves that shoudle be kept
+    ChainSyncResponse(Vec<Chain>),
     // error message
     Error(String)
 }
