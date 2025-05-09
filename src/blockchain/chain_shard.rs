@@ -54,6 +54,10 @@ impl ChainShard{
         genesis_found // the last check
     }
 
+    pub fn get_block(&self, hash: &[u8; 32]) -> Option<BlockHeader>{
+        self.headers.get(hash).cloned()
+    }
+
 }
 
 impl From<Chain> for ChainShard{

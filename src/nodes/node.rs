@@ -70,6 +70,8 @@ impl Node {
         let self_clone = self.clone();
         if let None = self.chain.lock().await.as_ref(){
             let mut selfcloneclone = self_clone.clone();
+            // TODO this should be for brand new nodes only
+            // After persistence use sync_chain
             tokio::spawn(async move{
                 // try to discover
                 let chain = dicover_chain(
