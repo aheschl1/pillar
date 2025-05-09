@@ -156,6 +156,8 @@ pub fn get_genesis_block() -> Block{
 
 /// Sync the chain in a node when it comes back online
 /// Avoids recomputing and entire chain when a node comes back online
+/// Includes verification of new blocks and trimming of synced blocks
+/// May take ownership of mutexed chain for a while
 pub async fn sync_chain(node: &mut Node){
     // the sync request
     let leaves = node.chain.lock().await.as_ref().expect("No chain - discover chain instead").leaves.clone();
@@ -203,7 +205,24 @@ pub async fn sync_chain(node: &mut Node){
     // each response has been verified and we have the deepest for each leaf
     // now we need to merge the chains
     let mut chain = node.chain.lock().await.as_ref().unwrap().clone();
-    // we need to travel backwards again :()
-    
-
+    for (_, (chain_extension, _)) in extensions.iter(){
+        // we need to find the block in the chain
+        for extension_leaf in chain_extension.leaves.iter(){ // include the forks
+            let mut to_add = vec![]; // record them in order to add deepest first
+            let mut curr = chain_extension.blocks.get(extension_leaf);
+            // we need to travel backwards again :()
+            while let Some(current_block) = curr{
+                to_add.push(current_block.clone());
+                // already been verified :()
+                curr = chain_extension.blocks.get(&current_block.header.previous_hash);
+            }
+            // now we add them to the chain
+            for block in to_add.iter().rev(){
+                // verifies again
+                chain.add_new_block(block.clone()).expect("Failed to add block");
+            }
+        }
+    }
+    chain.trim(); // cleanup any old forks
+    // done
 }
