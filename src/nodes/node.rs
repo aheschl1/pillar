@@ -7,7 +7,7 @@ use super::messages::Message;
 
 use crate::{
     blockchain::chain::Chain,
-    primitives::{block::BlockHeader, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::dicover_chain, communication::{broadcast_knowledge, serve_peers}},
+    primitives::{block::BlockHeader, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::dicover_chain, communication::{broadcast_knowledge, serve_peers}}, reputation::history::NodeHistory,
 };
 
 #[derive(Clone)]
@@ -31,7 +31,9 @@ pub struct Node {
     pub broadcast_sender: Sender<Message>,
     // transaction filter queue
     pub transaction_filters: Arc<Mutex<Vec<(TransactionFilter, Peer)>>>,
-    // registered filters for the local node - producer will be this node, and consumer will be some backgroung thread that polls
+    /// mapping of reputations for peers
+    pub reputations: Arc<Mutex<HashMap<[u8; 32], NodeHistory>>>,
+    /// registered filters for the local node - producer will be this node, and consumer will be some backgroung thread that polls
     filter_callbacks: Arc<Mutex<HashMap<TransactionFilter, Sender<BlockHeader>>>>,
 }
 
@@ -59,6 +61,7 @@ impl Node {
             broadcast_receiver,
             broadcast_sender,
             transaction_filters,
+            reputations: Arc::new(Mutex::new(HashMap::new())),
             filter_callbacks: Arc::new(Mutex::new(HashMap::new())), // initially no callbacks
         }
     }
@@ -159,6 +162,23 @@ impl Node {
                 // add the block to the chain - first it is verified
                 if let Some(chain) = self.chain.lock().await.as_mut(){
                     chain.add_new_block(block.clone())?;
+                    // update the reputation tracker with the block
+                    let mut reputations = self.reputations.lock().await;
+                    if let Some(history) = reputations.get_mut(&block.header.miner_address.unwrap()){
+                        // update the history
+                        history.settle_block(block.header);
+                    }else{
+                        // create a new history
+                        let history = NodeHistory::new(
+                            block.header.miner_address.unwrap(),
+                            vec![block.header.clone()],
+                            block.header.depth,
+                            None,
+                            None
+                        );
+                        // add it to the reputations
+                        reputations.insert(block.header.miner_address.unwrap(), history);
+                    }
                 }
                 // broadcast the block
                 self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap();

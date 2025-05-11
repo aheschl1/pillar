@@ -11,11 +11,15 @@ use crate::{
     }, protocol::chain::get_genesis_block
 };
 
+use super::TrimmableChain;
+
 /// Represents the state of the blockchain, including blocks, accounts, and chain parameters.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Chain {
     /// The blocks in the chain.
     pub blocks: HashMap<[u8; 32], Block>,
+    /// header cache
+    pub headers: HashMap<[u8; 32], BlockHeader>,
     /// The current depth (number of blocks) in the chain.
     pub depth: u64,
     /// the block at the deepest depth
@@ -33,6 +37,8 @@ impl Chain {
         let genesis_block = get_genesis_block();
         let mut blocks = HashMap::new();
         let genisis_hash = genesis_block.hash.unwrap();
+        let mut headers = HashMap::new();
+        headers.insert(genisis_hash, genesis_block.header.clone());
         let mut leaves = HashSet::new();
         leaves.insert(genisis_hash);
 
@@ -42,6 +48,7 @@ impl Chain {
             depth: 1,
             deepest_hash: genisis_hash,
             leaves: leaves,
+            headers: headers,
             account_manager: AccountManager::new(),
         }
     }
@@ -125,11 +132,8 @@ impl Chain {
         self.blocks.get(hash)
     }
 
-    pub fn get_block_headers(&self) -> Vec<BlockHeader> {
-        self.blocks
-            .values()
-            .map(|block| block.header.clone())
-            .collect()
+    pub fn get_block_headers(&self) -> Vec<&BlockHeader> {
+        self.headers.values().collect()
     }
 
     /// Validates an individual transaction for correctness.
@@ -189,6 +193,7 @@ impl Chain {
         self.blocks.insert(block.hash.unwrap(), block.clone());
         self.leaves.remove(&block.header.previous_hash);
         self.leaves.insert(block.hash.unwrap());
+        self.headers.insert(block.hash.unwrap(), block.header.clone());
         // update the depth - the depth of this block is checked in the verification
         // perhaps this is a fork deeper in the chain, so we do not always update 
         if block.header.depth > self.depth {
@@ -219,57 +224,72 @@ impl Chain {
         }
     } 
 
-    pub fn trim(&mut self){
-        let mut seen = HashMap::<[u8; 32], [u8; 32]>::new(); // node: leaf leading there
-        let mut forks_to_kill = HashSet::<[u8; 32]>::new();
-        let mut sorted_leaves : Vec::<&[u8; 32]> = self.leaves.iter().collect();
-        // visit deepest leaves first so that we can look back at deeper forks later
-        sorted_leaves.sort_by_key(|x| -(self.blocks[*x].header.depth as i64)); 
-        for leaf in sorted_leaves{
-            // iterate backwards, marking each node
-            // if the node is already seen, then check the leaf that saw it - can they coexist?
-            let current_fork_depth = self.blocks[leaf].header.depth;
-            let mut current_node = self.blocks.get(leaf);
-            while let Some(node) = current_node { // while there is a prevvious block
-                if seen.contains_key(&node.hash.unwrap()){ // already seen
-                    let fork = &seen[&node.hash.unwrap()]; // the biggest fork off so far 
-                    let fork = self.blocks.get(fork).unwrap();
-                    if fork.header.depth >= current_fork_depth + 10{
-                        // kill this current fork from the leaf
-                        forks_to_kill.insert(leaf.clone());
-                        break; // leave this fork early - everything downstream has been marked, and we kill eitherway
-                    }
-                }else{
-                    // indicate seen
-                    seen.insert(node.hash.unwrap(), *leaf);
-                }
-                current_node = self.blocks.get(&node.header.previous_hash);
-            }
-        }
-        // actully trim
-        let mut nodes_to_remove = Vec::new();
-        for fork in forks_to_kill.iter(){
-            let mut current_node = self.blocks.get(fork);
-            // update leaves
-            self.leaves.remove(fork);
-            // collect nodes to remove until the seen is no longer the fork
-            while let Some(node) = current_node {
-                if seen[&node.hash.unwrap()] == *fork {
-                    nodes_to_remove.push(node.hash.unwrap());
-                }else{
-                    // we have reached the end of this fork
-                    break;
-                }
-                current_node = self.blocks.get(&node.header.previous_hash);
-            }
-        }
-        // perform removal after collecting nodes
-        for hash in nodes_to_remove {
-            self.blocks.remove(&hash);
-        }
-    }
+    // -======= moved to trait ========
+    // pub fn trim(&mut self){
+    //     let mut seen = HashMap::<[u8; 32], [u8; 32]>::new(); // node: leaf leading there
+    //     let mut forks_to_kill = HashSet::<[u8; 32]>::new();
+    //     let mut sorted_leaves : Vec::<&[u8; 32]> = self.leaves.iter().collect();
+    //     // visit deepest leaves first so that we can look back at deeper forks later
+    //     sorted_leaves.sort_by_key(|x| -(self.blocks[*x].header.depth as i64)); 
+    //     for leaf in sorted_leaves{
+    //         // iterate backwards, marking each node
+    //         // if the node is already seen, then check the leaf that saw it - can they coexist?
+    //         let current_fork_depth = self.blocks[leaf].header.depth;
+    //         let mut current_node = self.blocks.get(leaf);
+    //         while let Some(node) = current_node { // while there is a prevvious block
+    //             if seen.contains_key(&node.hash.unwrap()){ // already seen
+    //                 let fork = &seen[&node.hash.unwrap()]; // the biggest fork off so far 
+    //                 let fork = self.blocks.get(fork).unwrap();
+    //                 if fork.header.depth >= current_fork_depth + 10{
+    //                     // kill this current fork from the leaf
+    //                     forks_to_kill.insert(leaf.clone());
+    //                     break; // leave this fork early - everything downstream has been marked, and we kill eitherway
+    //                 }
+    //             }else{
+    //                 // indicate seen
+    //                 seen.insert(node.hash.unwrap(), *leaf);
+    //             }
+    //             current_node = self.blocks.get(&node.header.previous_hash);
+    //         }
+    //     }
+    //     // actully trim
+    //     let mut nodes_to_remove = Vec::new();
+    //     for fork in forks_to_kill.iter(){
+    //         let mut current_node = self.blocks.get(fork);
+    //         // update leaves
+    //         self.leaves.remove(fork);
+    //         // collect nodes to remove until the seen is no longer the fork
+    //         while let Some(node) = current_node {
+    //             if seen[&node.hash.unwrap()] == *fork {
+    //                 nodes_to_remove.push(node.hash.unwrap());
+    //             }else{
+    //                 // we have reached the end of this fork
+    //                 break;
+    //             }
+    //             current_node = self.blocks.get(&node.header.previous_hash);
+    //         }
+    //     }
+    //     // perform removal after collecting nodes
+    //     for hash in nodes_to_remove {
+    //         self.blocks.remove(&hash);
+    //     }
+    // }
 }
 
+
+impl TrimmableChain for Chain {
+    fn get_headers(&self) -> &HashMap<[u8; 32], BlockHeader> {
+        &self.headers   
+    }
+
+    fn get_leaves_mut(&mut self) -> &mut HashSet<[u8; 32]> {
+        &mut self.leaves
+    }
+
+    fn remove_header(&mut self, hash: &[u8; 32]) {
+        self.blocks.remove(hash);
+    }
+}
 
 #[cfg(test)]
 mod tests {

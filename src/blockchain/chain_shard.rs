@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{crypto::hashing::{DefaultHash, HashFunction}, primitives::block::BlockHeader, protocol::chain::get_genesis_block};
 
-use super::chain::Chain;
+use super::{chain::Chain, TrimmableChain};
 
 /// chain shard is used to build up a chain given a list of block headers
 /// It is responsible for the validation and construction of the chain from a new node.
@@ -72,5 +72,20 @@ impl From<Chain> for ChainShard{
         let leaves = chain.leaves;
 
         Self { headers, leaves }
+    }
+}
+
+
+impl TrimmableChain for ChainShard {
+    fn get_headers(&self) -> &HashMap<[u8; 32], BlockHeader> {
+        &self.headers
+    }
+
+    fn get_leaves_mut(&mut self) -> &mut HashSet<[u8; 32]> {
+        &mut self.leaves
+    }
+
+    fn remove_header(&mut self, hash: &[u8; 32]) {
+        self.headers.remove(hash);
     }
 }
