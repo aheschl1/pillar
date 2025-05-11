@@ -48,23 +48,22 @@ pub async fn serve_peers(node: Node) {
             }
             let declaration = declaration.unwrap();
             let message_length;
-            match declaration {
+            let declaring_peer = match declaration {
                 Message::Declaration(peer, n) => {
                     message_length = n;
                     // add the peer to the list if and only if it is not already in the list
                     self_clone.maybe_update_peer(peer.clone()).await.unwrap();
                     // send a response
-                        peer
-                    }
-                    _ => {
-                        send_error_message(
-                            &mut stream,
-                            std::io::Error::new(
-                                std::io::ErrorKind::InvalidInput,
-                                "Expected peer delaration",
-                            ),
-                        )
-                        .await;
+                    peer
+                }
+                _ => {
+                    send_error_message(
+                        &mut stream,
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "Expected peer delaration",
+                        ),
+                    ).await;
                     return;
                 }
             };
@@ -77,7 +76,7 @@ pub async fn serve_peers(node: Node) {
                 return;
             }
             let message = message.unwrap();
-            let response = self_clone.serve_request(&message).await;
+            let response = self_clone.serve_request(&message, declaring_peer).await;
             match response {
                 Err(e) => send_error_message(&mut stream, e).await,
                 Ok(message) => {

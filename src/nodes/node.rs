@@ -106,7 +106,7 @@ impl Node {
     }
 
     /// Derive the response to a request from a peer
-    pub async fn serve_request(&mut self, message: &Message) -> Result<Message, std::io::Error> {
+    pub async fn serve_request(&mut self, message: &Message, declared_peer: Peer) -> Result<Message, std::io::Error> {
         match message {
             Message::PeerRequest => {
                 // send all peers
@@ -139,6 +139,7 @@ impl Node {
                 let initpeer: Peer = self.clone().into();
                 let selfclone = self.clone();
                 tokio::spawn(async move {
+                    // check filters for callback
                     for ( filter, peer) in filters.lock().await.iter_mut() {
                         if filter.matches(&block_clone){
                             peer.communicate(&Message::TransactionFilterResponse(filter.clone(), block_clone.header), &initpeer).await.unwrap();
@@ -161,24 +162,16 @@ impl Node {
                 }
                 // add the block to the chain - first it is verified
                 if let Some(chain) = self.chain.lock().await.as_mut(){
-                    chain.add_new_block(block.clone())?;
-                    // update the reputation tracker with the block
+                    chain.add_new_block(block.clone())?; // if we pass this line, valid block
+                    // update the reputation tracker with the block to rwared the miner
+                    self.maybe_create_history(block.header.miner_address.unwrap()).await;
                     let mut reputations = self.reputations.lock().await;
-                    if let Some(history) = reputations.get_mut(&block.header.miner_address.unwrap()){
-                        // update the history
-                        history.settle_block(block.header);
-                    }else{
-                        // create a new history
-                        let history = NodeHistory::new(
-                            block.header.miner_address.unwrap(),
-                            vec![block.header.clone()],
-                            block.header.depth,
-                            None,
-                            None
-                        );
-                        // add it to the reputations
-                        reputations.insert(block.header.miner_address.unwrap(), history);
-                    }
+                    let miner_history = reputations.get_mut(&block.header.miner_address.unwrap()).unwrap();
+                    miner_history.settle_block(block.header.clone());
+                    // reward the broadcaster
+                    self.maybe_create_history(declared_peer.public_key).await;
+                    let broadcaster_history = reputations.get_mut(&declared_peer.public_key).unwrap();
+                    broadcaster_history.reward_block_transmission();
                 }
                 // broadcast the block
                 self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap();
@@ -257,8 +250,24 @@ impl Node {
             self.maybe_update_peer(peer).await.unwrap();
         }
     }
-}
 
+    /// create a new history for the node if it does not exist
+    async fn maybe_create_history(&self, public_key: [u8; 32]) {
+        // get the history of the node
+        let mut reputations = self.reputations.lock().await;
+        if let None = reputations.get_mut(&public_key) {
+            // create a new history
+            let history = NodeHistory::new(
+                public_key,
+                vec![],
+                0,
+                vec![],
+                vec![]
+            );
+            reputations.insert(public_key, history); // create new
+        }
+    }
+}
 impl Into<Peer> for Node {
     fn into(self) -> Peer {
         Peer::new(*self.public_key, self.ip_address, *self.port)

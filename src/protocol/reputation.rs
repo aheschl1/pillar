@@ -3,6 +3,7 @@ use core::f64;
 
 const MINING_WORTH_HALF_LIFE: f64 = 8f64;
 const MINING_WORTH_MAX: f64 = 1f64;
+const BLOCK_TRANSMISION_WORTH: f64 = 0.01f64;
 
 /// this function will scale the worth of a block over time
 /// the worth of a block is 1 at the time of mining

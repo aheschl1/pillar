@@ -14,9 +14,9 @@ pub struct NodeHistory{
     /// the max chain depth at the time of computation
     pub max_chain_depth: u64,
     /// peer distributions - timestamps
-    pub peer_distribution: Option<Vec<u64>>,
+    pub peer_distribution: Vec<u64>,
     /// timestamps of block distributions to new nodes - without errors
-    pub block_distributions: Option<Vec<u64>>
+    pub block_distributions: Vec<u64>
 }
 
 impl NodeHistory{
@@ -24,8 +24,8 @@ impl NodeHistory{
         public_key: [u8; 32],
         blocks_mined: Vec<BlockHeader>,
         max_chain_depth: u64,
-        peer_distribution: Option<Vec<u64>>,
-        block_distributions: Option<Vec<u64>>
+        peer_distribution: Vec<u64>,
+        block_distributions: Vec<u64>
     ) -> Self {
         NodeHistory {
             public_key,
@@ -68,8 +68,8 @@ impl NodeHistory{
             public_key: miner,
             blocks_mined,
             max_chain_depth,
-            peer_distribution: None,
-            block_distributions: None
+            peer_distribution: vec![],
+            block_distributions: vec![]
         }
     }
 
@@ -82,6 +82,10 @@ impl NodeHistory{
         self.blocks_mined.push(block);
         // update the max chain depth
         self.max_chain_depth = max(self.max_chain_depth, block.depth);
+    }
+
+    pub fn reward_block_transmission(&mut self){
+
     }
 
     pub fn compute_mining_reputation(
