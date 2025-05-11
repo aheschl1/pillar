@@ -89,3 +89,204 @@ impl TrimmableChain for ChainShard {
         self.headers.remove(hash);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use ed25519_dalek::SigningKey;
+    use rand_core::OsRng;
+
+    use super::*;
+    use crate::accounting::account::Account;
+    use crate::primitives::block::Block;
+    use crate::crypto::hashing::DefaultHash;
+    use crate::primitives::transaction::Transaction;
+    use crate::protocol::pow::mine;
+
+    #[tokio::test]
+    async fn test_trim_removes_short_fork() {
+        let mut chain = Chain::new_with_genesis();
+        
+        let signing_key = SigningKey::generate(&mut OsRng);
+        // public
+        let sender = signing_key.verifying_key().to_bytes();
+
+        chain.account_manager.add_account(Account::new(sender, 1000));
+
+        let mut parent_hash = chain.deepest_hash;
+        let genesis_hash = parent_hash.clone();
+        for depth in 1..=11 {
+            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth-1, &mut DefaultHash::new());
+            transaction.sign(&signing_key).unwrap();
+            let mut block = Block::new(
+                parent_hash,
+                0,
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth,
+                vec![transaction],
+                Some(sender),
+                depth,
+                &mut DefaultHash::new(),
+            );
+            mine(&mut block, sender, DefaultHash::new()).await;
+            parent_hash = block.hash.unwrap();
+            chain.add_new_block(block).unwrap();
+        }
+
+        let long_chain_leaf = parent_hash;
+
+        // Create shorter fork from genesis (only 1 block)
+        let mut trans = Transaction::new(sender, [2; 32], 10, 0, 11, &mut DefaultHash::new());
+        trans.sign(&signing_key).unwrap();
+        let mut fork_block = Block::new(
+            genesis_hash, // same genesis
+            0,
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()+30,
+            vec![trans],
+            Some(sender),
+            1,
+            &mut DefaultHash::new(),
+        );
+        mine(&mut fork_block, sender, DefaultHash::new()).await;
+        chain.add_new_block(fork_block.clone()).unwrap();
+
+        assert!(chain.blocks.contains_key(&fork_block.hash.unwrap()));
+
+        // Trim should remove the short fork
+        let mut shard: ChainShard = chain.into();
+        shard.trim();
+        assert!(!shard.headers.contains_key(&fork_block.hash.unwrap()));
+        assert!(shard.headers.contains_key(&long_chain_leaf));
+        assert!(shard.headers.contains_key(&shard.headers[&long_chain_leaf].previous_hash));
+    }
+
+    #[tokio::test]
+    async fn test_trim_keeps_close_forks() {
+        let mut chain = Chain::new_with_genesis();
+        let signing_key = SigningKey::generate(&mut OsRng);
+        // public
+        let sender = signing_key.verifying_key().to_bytes();
+
+        chain.account_manager.add_account(Account::new(sender, 1000));
+
+        let mut parent_hash = chain.deepest_hash;
+        let genesis_hash = parent_hash;
+
+        // Build a main chain of depth 9
+        for depth in 1..=9 {
+            let time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth;
+            let mut transaction = Transaction::new(sender, [2; 32], 10, time, depth-1, &mut DefaultHash::new());
+            transaction.sign(&signing_key).unwrap();
+            let mut block = Block::new(
+                parent_hash,
+                0,
+                time,
+                vec![transaction],
+                Some(sender),
+                depth,
+                &mut DefaultHash::new(),
+            );
+            mine(&mut block, sender, DefaultHash::new()).await;
+            parent_hash = block.hash.unwrap();
+            chain.add_new_block(block).unwrap();
+        }
+
+        let mut trans = Transaction::new(sender, [2; 32], 10, 0, 9, &mut DefaultHash::new());
+        trans.sign(&signing_key).unwrap();
+        // Add a 1-block fork off the genesis (difference = 9)
+        let mut fork_block = Block::new(
+            genesis_hash,
+            0,
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 50,
+            vec![trans],
+            Some(sender),
+            1,
+            &mut DefaultHash::new(),
+        );
+        mine(&mut fork_block, sender, DefaultHash::new()).await;
+        let fork_hash = fork_block.hash.unwrap();
+        chain.add_new_block(fork_block).unwrap();
+
+        // This fork is <10 behind, so it should NOT be trimmed
+        let mut shard: ChainShard = chain.into();
+        shard.trim();
+        assert!(shard.headers.contains_key(&fork_hash));
+    }
+
+    #[tokio::test]
+    async fn test_trim_multiple_short_forks() {
+        let mut chain = Chain::new_with_genesis();
+        let signing_key = SigningKey::generate(&mut OsRng);
+        // public
+        let sender = signing_key.verifying_key().to_bytes();
+        chain.account_manager.add_account(Account::new(sender, 2000));
+
+        let mut main_hash = chain.deepest_hash;
+        let genesis_hash = main_hash;
+
+        // Extend the main chain to depth 12
+        for depth in 1..=12 {
+            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth-1, &mut DefaultHash::new());
+            transaction.sign(&signing_key).unwrap();
+            let mut block = Block::new(
+                main_hash,
+                0,
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth,
+                vec![transaction],
+                Some(sender),
+                depth,
+                &mut DefaultHash::new(),
+            );
+            mine(&mut block, sender, DefaultHash::new()).await;
+            main_hash = block.hash.unwrap();
+            chain.add_new_block(block).unwrap();
+        }
+
+        // Create two short forks from genesis (depth 1)
+        let mut fork_hashes = vec![];
+        for offset in 0..2 {
+            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, offset+12, &mut DefaultHash::new());
+            transaction.sign(&signing_key).unwrap();
+            let mut fork_block = Block::new(
+                genesis_hash,
+                0,
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 20 + offset,
+                vec![transaction],
+                Some(sender),
+                1,
+                &mut DefaultHash::new(),
+            );
+            mine(&mut fork_block, sender, DefaultHash::new()).await;
+            let hash = fork_block.hash.unwrap();
+            fork_hashes.push(hash);
+            chain.add_new_block(fork_block).unwrap();
+        }
+
+        // Verify they were added
+        for hash in &fork_hashes {
+            assert!(chain.blocks.contains_key(hash));
+            assert!(chain.leaves.contains(hash));
+        }
+
+        // Run trim — both forks should be removed
+        let mut shard: ChainShard = chain.into();
+        shard.trim();
+
+        for hash in &fork_hashes {
+            assert!(!shard.headers.contains_key(hash));
+            assert!(!shard.leaves.contains(hash));
+        }
+
+        assert_eq!(shard.leaves.len(), 1); // only the longest chain remains
+        assert!(shard.headers.contains_key(&main_hash));
+        // check that the right number of blocks remain
+        assert_eq!(shard.headers.len(), 13); // 12 from main chain + genesis
+        // actually count the number of blocks in the main chain
+        let mut current_hash = main_hash;
+        let mut count = 0;
+        while let Some(block) = shard.headers.get(&current_hash) {
+            count += 1;
+            current_hash = block.previous_hash;
+        }
+        assert_eq!(count, 13); // 12 blocks in the main chain
+    }
+
+}

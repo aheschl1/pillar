@@ -28,7 +28,7 @@ pub struct Chain {
     pub leaves: HashSet<[u8; 32]>,
     /// The account manager for tracking account balances and nonces.
     #[serde(skip)]
-    account_manager: AccountManager,
+    pub account_manager: AccountManager,
 }
 
 impl Chain {
