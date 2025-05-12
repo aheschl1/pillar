@@ -1,6 +1,6 @@
 use std::{cmp::max, collections::HashSet};
 
-use crate::{blockchain::{chain_shard::ChainShard, TrimmableChain}, crypto::hashing::{HashFunction, Hashable}, nodes::node::Node, primitives::block::BlockHeader, protocol::reputation::block_worth_scaling_fn};
+use crate::{blockchain::{chain_shard::ChainShard, TrimmableChain}, crypto::hashing::{HashFunction, Hashable}, nodes::node::Node, primitives::block::BlockHeader, protocol::reputation::{block_worth_scaling_fn, BLOCK_TRANSMISION_SCALING}};
 
 /// This is a TODO module
 
@@ -85,7 +85,12 @@ impl NodeHistory{
     }
 
     pub fn reward_block_transmission(&mut self){
-
+        self.block_distributions.push(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        );
     }
 
     pub fn compute_mining_reputation(
@@ -98,6 +103,20 @@ impl NodeHistory{
         let mut reputation: f64 = 0.0;
         for block in self.blocks_mined.iter() {
             reputation += block_worth_scaling_fn(block.timestamp);
+        }
+        reputation
+    }
+
+    pub fn compute_block_transmission_reputation(
+        &self
+    ) -> f64{
+        // we have the blocks mined by the miner
+        // reputation will be built on the number of blocks mined and the number of transactions in the blocks
+        // furthermore, timestamp is taken into account
+        // a brand new block is worth 1 reputation - it reduces exponentially over time
+        let mut reputation: f64 = 0.0;
+        for block in self.block_distributions.iter() {
+            reputation += block_worth_scaling_fn(*block)*BLOCK_TRANSMISION_SCALING;
         }
         reputation
     }
