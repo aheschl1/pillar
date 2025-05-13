@@ -1,8 +1,6 @@
 use std::{cmp::max, collections::HashSet};
 
-use crate::{blockchain::{chain_shard::ChainShard, TrimmableChain}, crypto::hashing::{HashFunction, Hashable}, nodes::node::Node, primitives::block::BlockHeader, protocol::reputation::{block_worth_scaling_fn, BLOCK_TRANSMISION_SCALING}};
-
-/// This is a TODO module
+use crate::{blockchain::{chain_shard::ChainShard, TrimmableChain}, crypto::hashing::{HashFunction, Hashable}, primitives::block::BlockHeader, protocol::reputation::{block_worth_scaling_fn, BLOCK_STAMP_SCALING}};
 
 /// The reputation structure holds all the information needed to compute the reputation of a node
 /// This information should be stored by each node, and each node can add it to a side chain
@@ -11,28 +9,24 @@ pub struct NodeHistory{
     pub public_key: [u8; 32],
     /// The blocks that have been mined by the node - could be empty if the node does not mine
     pub blocks_mined: Vec<BlockHeader>,
+    /// the blocks that have been stamped by the node - could be empty if the node does not stamp
+    pub blocks_stamped: Vec<BlockHeader>,
     /// the max chain depth at the time of computation
     pub max_chain_depth: u64,
-    /// peer distributions - timestamps
-    pub peer_distribution: Vec<u64>,
-    /// timestamps of block distributions to new nodes - without errors
-    pub block_distributions: Vec<u64>
 }
 
 impl NodeHistory{
     pub fn new(
         public_key: [u8; 32],
         blocks_mined: Vec<BlockHeader>,
+        blocks_stamped: Vec<BlockHeader>,
         max_chain_depth: u64,
-        peer_distribution: Vec<u64>,
-        block_distributions: Vec<u64>
     ) -> Self {
         NodeHistory {
             public_key,
             max_chain_depth,
-            blocks_mined,
-            peer_distribution,
-            block_distributions
+            blocks_stamped,
+            blocks_mined
         }
     }
     /// Returns the reputation of the node
@@ -67,9 +61,8 @@ impl NodeHistory{
         NodeHistory { 
             public_key: miner,
             blocks_mined,
+            blocks_stamped: vec![], // TODO: add this
             max_chain_depth,
-            peer_distribution: vec![],
-            block_distributions: vec![]
         }
     }
 
@@ -82,15 +75,6 @@ impl NodeHistory{
         self.blocks_mined.push(block);
         // update the max chain depth
         self.max_chain_depth = max(self.max_chain_depth, block.depth);
-    }
-
-    pub fn reward_block_transmission(&mut self){
-        self.block_distributions.push(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
-        );
     }
 
     pub fn compute_mining_reputation(
@@ -115,8 +99,8 @@ impl NodeHistory{
         // furthermore, timestamp is taken into account
         // a brand new block is worth 1 reputation - it reduces exponentially over time
         let mut reputation: f64 = 0.0;
-        for block in self.block_distributions.iter() {
-            reputation += block_worth_scaling_fn(*block)*BLOCK_TRANSMISION_SCALING;
+        for block in self.blocks_stamped.iter() {
+            reputation += block_worth_scaling_fn(block.timestamp)*BLOCK_STAMP_SCALING;
         }
         reputation
     }

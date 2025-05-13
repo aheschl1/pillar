@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 
-use crate::{crypto::hashing::{DefaultHash, HashFunction}, primitives::block::Block, protocol::pow::mine};
+use crate::{crypto::hashing::{DefaultHash, HashFunction}, primitives::block::Block, protocol::{pow::mine, reputation::N_TRANSMISSION_SIGNATURES}};
 
 use super::node::Node;
 
@@ -69,6 +69,7 @@ impl Miner{
                     tokio::time::Instant::now().elapsed().as_secs(),
                     transactions,
                     Some(*self.node.public_key),
+                    [[0; 32]; N_TRANSMISSION_SIGNATURES],
                     self.node.chain.as_ref().lock().await.as_mut().unwrap().depth + 1,
                     &mut DefaultHash::new()
                 );
@@ -94,7 +95,7 @@ impl Miner{
 mod test{
     use std::{net::{IpAddr, Ipv4Addr}, str::FromStr};
 
-    use crate::{blockchain::chain::Chain, crypto::hashing::{DefaultHash, HashFunction}, primitives::{block::Block, pool::MinerPool, transaction::Transaction}, protocol::pow::mine};
+    use crate::{blockchain::chain::Chain, crypto::hashing::{DefaultHash, HashFunction}, primitives::{block::Block, pool::MinerPool, transaction::Transaction}, protocol::{pow::mine, reputation::N_TRANSMISSION_SIGNATURES}};
     use crate::nodes::miner::Miner;
     use super::Node;
 
@@ -124,7 +125,11 @@ mod test{
         ];
         let miner_address = None;
 
-        let mut block = Block::new(previous_hash, nonce, timestamp, transactions, miner_address, 1, &mut hasher);
+        let mut block = Block::new(
+            previous_hash, nonce, 
+            timestamp, transactions, 
+            miner_address, [[0; 32]; N_TRANSMISSION_SIGNATURES],
+            1, &mut hasher);
 
         // mine the block
         mine(&mut block, *miner.node.public_key, hasher).await;

@@ -4,6 +4,7 @@ use crate::crypto::hashing::{HashFunction, Hashable, DefaultHash};
 use crate::crypto::merkle::{generate_proof_of_inclusion, generate_tree, verify_proof_of_inclusion, MerkleProof, MerkleTree};
 use crate::protocol::difficulty::get_difficulty_from_depth;
 use crate::protocol::pow::is_valid_hash;
+use crate::protocol::reputation::N_TRANSMISSION_SIGNATURES;
 use super::transaction::Transaction;
 
 #[derive(Debug, Serialize, Clone)]
@@ -14,6 +15,8 @@ pub struct Block{
     pub transactions: Vec<Transaction>,
     // hash is the sha3_256 hash of the block header - is none if it hasnt been mined
     pub hash: Option<[u8; 32]>,
+    // tail is the tail of the block which can contain stamps
+    pub tail: BlockTail,
     // the merkle tree
     #[serde(skip)]
     pub merkle_tree: MerkleTree,
@@ -30,6 +33,8 @@ impl<'de> Deserialize<'de> for Block {
             pub transactions: Vec<Transaction>,
             // hash is the sha3_256 hash of the block header - is none if it hasnt been mined
             pub hash: Option<[u8; 32]>,
+            // tail is the tail of the block which can contain stamps
+            pub tail: BlockTail,
         }
 
         let helper = PartialBlock::deserialize(deserializer)?;
@@ -40,10 +45,19 @@ impl<'de> Deserialize<'de> for Block {
             helper.header.timestamp,
             helper.transactions,
             helper.header.miner_address,
+            helper.tail.stamps,
             helper.header.depth,
             &mut DefaultHash::new()
         ))
     }
+}
+
+/// A block tail tracks the signatures of people who have broadcasted the block
+/// This is used for immutibility of participation reputation
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Eq)]
+pub struct BlockTail{
+    // the signatures of the people who have broadcasted the block
+    pub stamps: [[u8; 32]; N_TRANSMISSION_SIGNATURES]
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Copy, Eq)]
@@ -163,6 +177,7 @@ impl Block {
         timestamp: u64,
         transactions: Vec<Transaction>,
         miner_address: Option<[u8; 32]>,
+        stamps: [[u8; 32]; N_TRANSMISSION_SIGNATURES],
         depth: u64,
         hasher: &mut impl HashFunction,
     ) -> Self {
@@ -176,10 +191,14 @@ impl Block {
             depth
         );
         let hash = header.hash(hasher);
+        let tail = BlockTail {
+            stamps: stamps
+        };
         Block {
             header,
             transactions,
-            hash: if hash.is_ok() {Some(hash.unwrap())} else {None}, 
+            hash: if hash.is_ok() {Some(hash.unwrap())} else {None},
+            tail,
             merkle_tree
         }
     }

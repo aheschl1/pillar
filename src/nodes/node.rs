@@ -7,7 +7,7 @@ use super::messages::Message;
 
 use crate::{
     blockchain::chain::Chain,
-    primitives::{block::BlockHeader, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::dicover_chain, communication::{broadcast_knowledge, serve_peers}}, reputation::history::NodeHistory,
+    primitives::{block::{Block, BlockHeader}, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::dicover_chain, communication::{broadcast_knowledge, serve_peers}}, reputation::history::NodeHistory,
 };
 
 #[derive(Clone)]
@@ -133,34 +133,11 @@ impl Node {
                 Ok(Message::TransactionAck)
             }
             Message::BlockTransmission(block) => {
-                // spawn a new thread to match transaction requests against the bock
-                let filters = self.transaction_filters.clone();
-                let block_clone = block.clone();
-                let initpeer: Peer = self.clone().into();
-                let selfclone = self.clone();
-                tokio::spawn(async move {
-                    // check filters for callback
-                    for ( filter, peer) in filters.lock().await.iter_mut() {
-                        if filter.matches(&block_clone){
-                            peer.communicate(&Message::TransactionFilterResponse(filter.clone(), block_clone.header), &initpeer).await.unwrap();
-                            // check if there is a registered callback
-                            let mut callbacks: tokio::sync::MutexGuard<'_, HashMap<TransactionFilter, Sender<BlockHeader>>> = selfclone.filter_callbacks.lock().await;
-                            // TODO maybe this is not nececarry - some rework?
-                            if let Some(sender) = callbacks.get_mut(filter) {
-                                // send the block header to the sender
-                                sender.send(block_clone.header.clone()).unwrap();
-                                // remove the callback - one time only
-                                callbacks.remove(filter);
-                            } // we will get the callback here if and only if the current active node is the one that resgistered the callback
-                            // otherwise, it will come in the FilterResponse
-                        }
-                    }
-                });
                 if block.header.miner_address.unwrap() == *self.public_key {
                     // SKIP OWN BLOCK
                     return Ok(Message::BlockAck);
                 }
-                // add the block to the chain - first it is verified
+                // add the block to the chain if we have downloaded it already - first it is verified TODO add to a queue to be added later
                 if let Some(chain) = self.chain.lock().await.as_mut(){
                     chain.add_new_block(block.clone())?; // if we pass this line, valid block
                     // update the reputation tracker with the block to rwared the miner
@@ -169,10 +146,12 @@ impl Node {
                     let miner_history = reputations.get_mut(&block.header.miner_address.unwrap()).unwrap();
                     miner_history.settle_block(block.header.clone());
                     // reward the broadcaster
-                    self.maybe_create_history(declared_peer.public_key).await;
-                    let broadcaster_history = reputations.get_mut(&declared_peer.public_key).unwrap();
-                    broadcaster_history.reward_block_transmission();
+                    // self.maybe_create_history(declared_peer.public_key).await;
+                    // let broadcaster_history = reputations.get_mut(&declared_peer.public_key).unwrap();
+                    // broadcaster_history.reward_block_transmission();
                 }
+                // handle callback
+                self.handle_callbacks(block).await;
                 // broadcast the block
                 self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap();
                 Ok(Message::BlockAck)
@@ -235,6 +214,32 @@ impl Node {
         }
     }
 
+    /// spawn a new thread to match transaction callback requests against the bock
+    async fn handle_callbacks(&self, block: &Block){
+        let filters = self.transaction_filters.clone();
+        let block_clone = block.clone();
+        let initpeer: Peer = self.clone().into();
+        let selfclone = self.clone();
+        tokio::spawn(async move {
+            // check filters for callback
+            for ( filter, peer) in filters.lock().await.iter_mut() {
+                if filter.matches(&block_clone){
+                    peer.communicate(&Message::TransactionFilterResponse(filter.clone(), block_clone.header), &initpeer).await.unwrap();
+                    // check if there is a registered callback
+                    let mut callbacks: tokio::sync::MutexGuard<'_, HashMap<TransactionFilter, Sender<BlockHeader>>> = selfclone.filter_callbacks.lock().await;
+                    // TODO maybe this is not nececarry - some rework?
+                    if let Some(sender) = callbacks.get_mut(filter) {
+                        // send the block header to the sender
+                        sender.send(block_clone.header.clone()).unwrap();
+                        // remove the callback - one time only
+                        callbacks.remove(filter);
+                    } // we will get the callback here if and only if the current active node is the one that resgistered the callback
+                    // otherwise, it will come in the FilterResponse
+                }
+            }
+        });
+    }
+
     pub async fn maybe_update_peer(&self, peer: Peer) -> Result<(), std::io::Error> {
         // check if the peer is already in the list
         let mut peers = self.peers.lock().await;
@@ -260,9 +265,8 @@ impl Node {
             let history = NodeHistory::new(
                 public_key,
                 vec![],
-                0,
                 vec![],
-                vec![]
+                0,
             );
             reputations.insert(public_key, history); // create new
         }

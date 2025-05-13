@@ -101,6 +101,7 @@ mod tests {
     use crate::crypto::hashing::DefaultHash;
     use crate::primitives::transaction::Transaction;
     use crate::protocol::pow::mine;
+    use crate::protocol::reputation::N_TRANSMISSION_SIGNATURES;
 
     #[tokio::test]
     async fn test_trim_removes_short_fork() {
@@ -123,6 +124,7 @@ mod tests {
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth,
                 vec![transaction],
                 Some(sender),
+                [[0; 32]; N_TRANSMISSION_SIGNATURES],
                 depth,
                 &mut DefaultHash::new(),
             );
@@ -142,6 +144,7 @@ mod tests {
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()+30,
             vec![trans],
             Some(sender),
+            [[0; 32]; N_TRANSMISSION_SIGNATURES],
             1,
             &mut DefaultHash::new(),
         );
@@ -181,6 +184,7 @@ mod tests {
                 time,
                 vec![transaction],
                 Some(sender),
+                [[0; 32]; N_TRANSMISSION_SIGNATURES],
                 depth,
                 &mut DefaultHash::new(),
             );
@@ -198,6 +202,7 @@ mod tests {
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 50,
             vec![trans],
             Some(sender),
+            [[0; 32]; N_TRANSMISSION_SIGNATURES],
             1,
             &mut DefaultHash::new(),
         );
@@ -232,6 +237,7 @@ mod tests {
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth,
                 vec![transaction],
                 Some(sender),
+                [[0; 32]; N_TRANSMISSION_SIGNATURES],
                 depth,
                 &mut DefaultHash::new(),
             );
@@ -251,6 +257,7 @@ mod tests {
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 20 + offset,
                 vec![transaction],
                 Some(sender),
+                [[0; 32]; N_TRANSMISSION_SIGNATURES],
                 1,
                 &mut DefaultHash::new(),
             );
