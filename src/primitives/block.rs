@@ -52,12 +52,31 @@ impl<'de> Deserialize<'de> for Block {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq)]
+pub struct Stamp{
+    // the signature of the person who broadcasted the block
+    pub signature: [u8; 32],
+    // the address of the person who stamped the block
+    pub address: [u8; 32]
+}
+
 /// A block tail tracks the signatures of people who have broadcasted the block
 /// This is used for immutibility of participation reputation
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Eq)]
 pub struct BlockTail{
     // the signatures of the people who have broadcasted the block
-    pub stamps: [[u8; 32]; N_TRANSMISSION_SIGNATURES]
+    pub stamps: [Stamp; N_TRANSMISSION_SIGNATURES]
+}
+
+impl Default for BlockTail {
+    fn default() -> Self {
+        BlockTail {
+            stamps: [Stamp {
+                signature: [0; 32],
+                address: [0; 32]
+            }; N_TRANSMISSION_SIGNATURES]
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Copy, Eq)]
@@ -177,7 +196,7 @@ impl Block {
         timestamp: u64,
         transactions: Vec<Transaction>,
         miner_address: Option<[u8; 32]>,
-        stamps: [[u8; 32]; N_TRANSMISSION_SIGNATURES],
+        stamps: [Stamp; N_TRANSMISSION_SIGNATURES],
         depth: u64,
         hasher: &mut impl HashFunction,
     ) -> Self {

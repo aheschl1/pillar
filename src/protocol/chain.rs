@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use rand::{rng, seq::IndexedRandom};
 
-use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, crypto::{hashing::{DefaultHash, HashFunction}, merkle::generate_tree}, nodes::{messages::Message, node::{Broadcaster, Node}, peer::Peer}, primitives::{block::Block, transaction::Transaction}};
+use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, crypto::{hashing::{DefaultHash, HashFunction}, merkle::generate_tree}, nodes::{messages::Message, node::{Broadcaster, Node}, peer::Peer}, primitives::{block::{Block, BlockTail}, transaction::Transaction}};
 
 use super::{peers::discover_peers, reputation::N_TRANSMISSION_SIGNATURES};
 
@@ -149,7 +149,7 @@ pub fn get_genesis_block() -> Block{
             Transaction::new([0; 32], [0;32], 0, 0, 0, &mut DefaultHash::new())
         ], 
         Some([0; 32]),
-        [[0; 32]; N_TRANSMISSION_SIGNATURES],
+        BlockTail::default().stamps,
         0,
         &mut DefaultHash::new()
     )
