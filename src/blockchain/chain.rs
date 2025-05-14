@@ -132,6 +132,10 @@ impl Chain {
         self.blocks.get(hash)
     }
 
+    pub fn get_block_mut(&mut self, hash: &[u8; 32]) -> Option<&mut Block> {
+        self.blocks.get_mut(hash)
+    }
+
     pub fn get_block_headers(&self) -> Vec<&BlockHeader> {
         self.headers.values().collect()
     }

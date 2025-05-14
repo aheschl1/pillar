@@ -1,6 +1,6 @@
 use std::{cmp::max, collections::HashSet};
 
-use crate::{blockchain::{chain_shard::ChainShard, TrimmableChain}, crypto::hashing::{HashFunction, Hashable}, primitives::block::BlockHeader, protocol::reputation::{block_worth_scaling_fn, BLOCK_STAMP_SCALING}};
+use crate::{blockchain::{chain_shard::ChainShard, TrimmableChain}, crypto::hashing::{HashFunction, Hashable}, primitives::block::{BlockHeader, BlockTail}, protocol::reputation::{block_worth_scaling_fn, BLOCK_STAMP_SCALING}};
 
 /// The reputation structure holds all the information needed to compute the reputation of a node
 /// This information should be stored by each node, and each node can add it to a side chain
@@ -68,13 +68,26 @@ impl NodeHistory{
 
     /// Settle a new block into the history of the node
     /// This is used when the node is a miner and has mined a new block
-    pub fn settle_block(&mut self, block: BlockHeader){
+    pub fn settle_head(&mut self, block: BlockHeader){
         if block.miner_address.is_none() || block.miner_address.unwrap() != self.public_key{
             panic!("Block does not belong to this miner");
         }
         self.blocks_mined.push(block);
         // update the max chain depth
         self.max_chain_depth = max(self.max_chain_depth, block.depth);
+    }
+
+    /// Settle a new block into the history of the node
+    /// This is used when the node has stamped a new block
+    pub fn settle_tail(&mut self, tail: &BlockTail, head: BlockHeader){
+        let stampers = tail.get_stampers();
+        if !stampers.contains(&self.public_key){
+            panic!("Block does not belong to this peer");
+        }
+        // now push the block into the history
+        self.blocks_stamped.push(head);
+        // update the max chain depth
+        self.max_chain_depth = max(self.max_chain_depth, head.depth);
     }
 
     pub fn compute_mining_reputation(
@@ -91,7 +104,7 @@ impl NodeHistory{
         reputation
     }
 
-    pub fn compute_block_transmission_reputation(
+    pub fn compute_block_stamp_reputation(
         &self
     ) -> f64{
         // we have the blocks mined by the miner
@@ -105,4 +118,14 @@ impl NodeHistory{
         reputation
     }
 
+    /// Compute the reputation of the node
+    /// This is the sum of the mining reputation and the stamping reputation
+    pub fn compute_reputation(
+        &self
+    ) -> f64{
+        let mining_reputation = self.compute_mining_reputation();
+        let stamping_reputation = self.compute_block_stamp_reputation();
+        // the reputation is the sum of the two
+        mining_reputation + stamping_reputation
+    }
 }

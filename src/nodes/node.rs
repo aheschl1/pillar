@@ -1,13 +1,14 @@
 use super::peer::Peer;
+use ed25519::signature::SignerMut;
+use ed25519_dalek::SigningKey;
 use flume::{Receiver, Sender};
-use std::{collections::HashMap, net::IpAddr, sync::Arc};
+use std::{collections::{HashMap, HashSet}, net::IpAddr, sync::Arc};
 use tokio::sync::Mutex;
 
 use super::messages::Message;
 
 use crate::{
-    blockchain::chain::Chain,
-    primitives::{block::{Block, BlockHeader}, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::dicover_chain, communication::{broadcast_knowledge, serve_peers}}, reputation::history::NodeHistory,
+    blockchain::chain::Chain, crypto::hashing::{DefaultHash, HashFunction, Hashable}, primitives::{block::{Block, BlockHeader, Stamp}, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::dicover_chain, communication::{broadcast_knowledge, serve_peers}, reputation::N_TRANSMISSION_SIGNATURES}, reputation::history::NodeHistory
 };
 
 #[derive(Clone)]
@@ -143,21 +144,60 @@ impl Node {
                 }
                 // add the block to the chain if we have downloaded it already - first it is verified TODO add to a queue to be added later
                 if let Some(chain) = self.chain.lock().await.as_mut(){
+                    let existing_block = chain.get_block(&block.hash.unwrap()).cloned(); // we will compare for changes to stamps
                     chain.add_new_block(block.clone())?; // if we pass this line, valid block
                     // update the reputation tracker with the block to rwared the miner
                     self.maybe_create_history(block.header.miner_address.unwrap()).await;
                     let mut reputations = self.reputations.lock().await;
                     let miner_history = reputations.get_mut(&block.header.miner_address.unwrap()).unwrap();
-                    miner_history.settle_block(block.header.clone());
+                    miner_history.settle_head(block.header.clone()); // SETTLE TO REWARD MINING
                     // reward the broadcaster
                     // self.maybe_create_history(declared_peer.public_key).await;
                     // let broadcaster_history = reputations.get_mut(&declared_peer.public_key).unwrap();
                     // broadcaster_history.reward_block_transmission();
+                    // ================================================
+                    // 1. check for stamp differences
+                    let existing_stamps = match existing_block { // what was there before
+                        Some(block) => HashSet::from(block.tail.stamps),
+                        None => HashSet::new(),
+                    };
+                    let has_our_stamp = existing_stamps.iter().any(|stamp| stamp.address == *self.public_key);
+                    // 2. start mutation by adding our own if relevant
+                    let block = chain.get_block_mut(&block.hash.unwrap()).unwrap();
+                    // stamp if we have not already
+                    if !has_our_stamp {
+                        let signature = self.signature_for(&block.header)?;
+                        let stamp = Stamp {
+                            address: *self.public_key,
+                            signature,
+                        };
+                        let _ = block.tail.stamp(stamp); // if failure, then full
+                    }
+                    let new_stamps = HashSet::from(block.tail.stamps); // what is there now
+                    let added_stamps = new_stamps.difference(&existing_stamps).cloned().collect::<HashSet<_>>(); // the new ones
+                    // 3. reward reputation for the new stamps
+                    for stamp in added_stamps.iter() {
+                        self.maybe_create_history(stamp.address).await;
+                        let history = reputations.get_mut(&stamp.address).unwrap();
+                        history.settle_tail(&block.tail, block.header); // SETTLE TO REWARD
+                    }
+                    // 4. if changes have been made - broadcast the block
+                    if !added_stamps.is_empty() { // if it is, we simply broadcast the block
+                        // broadcast the block to all peers
+                        self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap();
+                        // TODO maybe we should not do this here - but rather in the broadcast thread
+                        // self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap();
+                    }
+                }else{
+                    // TODO is it ok to ignore rep here?
+                    // if we do not have the chain, just forward the block if there is room in the stamps
+                    if block.tail.n_stamps() < N_TRANSMISSION_SIGNATURES {
+                        let _ = self.stamp_block(&mut block.clone());
+                        self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap();
+                    }
                 }
                 // handle callback
                 self.handle_callbacks(block).await;
-                // broadcast the block
-                self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap();
                 Ok(Message::BlockAck)
             },
             Message::BlockRequest(hash) => {
@@ -242,6 +282,26 @@ impl Node {
                 }
             }
         });
+    }
+
+    fn stamp_block(&self, block: &mut Block) -> Result<(), std::io::Error> {
+        // sign the block with the private key
+        let signature = self.signature_for(&block.header)?;
+        // add the stamp to the block
+        let stamp = Stamp {
+            address: *self.public_key,
+            signature: signature,
+        };
+        block.tail.stamp(stamp)
+    }
+
+    /// ed25519 signature for the node over the hash of some data
+    fn signature_for<T: Hashable>(&self, sign: &T) -> Result<[u8; 64], std::io::Error> {
+        // sign the data with the private key
+        let mut signer = SigningKey::from_bytes(&self.private_key);
+        let signature = signer.sign(&sign.hash(&mut DefaultHash::new())?);
+        // return the signature
+        Ok(signature.to_bytes())
     }
 
     pub async fn maybe_update_peer(&self, peer: Peer) -> Result<(), std::io::Error> {

@@ -1,4 +1,7 @@
+use std::collections::{HashSet, VecDeque};
+
 use serde::{Deserialize, Deserializer, Serialize};
+use serde_with::{serde_as, Bytes};
 
 use crate::crypto::hashing::{HashFunction, Hashable, DefaultHash};
 use crate::crypto::merkle::{generate_proof_of_inclusion, generate_tree, verify_proof_of_inclusion, MerkleProof, MerkleTree};
@@ -52,30 +55,87 @@ impl<'de> Deserialize<'de> for Block {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq)]
+#[serde_as]
+#[derive(Debug, PartialEq, Clone, Copy, Eq, Hash, Serialize, Deserialize)]
 pub struct Stamp{
     // the signature of the person who broadcasted the block
-    pub signature: [u8; 32],
+    #[serde_as(as = "Bytes")]
+    pub signature: [u8; 64],
     // the address of the person who stamped the block
     pub address: [u8; 32]
 }
 
+impl Default for Stamp {
+    fn default() -> Self {
+        Stamp {
+            signature: [0; 64],
+            address: [0; 32]
+        }
+    }
+}
+
+
 /// A block tail tracks the signatures of people who have broadcasted the block
 /// This is used for immutibility of participation reputation
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Eq, Default)]
 pub struct BlockTail{
     // the signatures of the people who have broadcasted the block
     pub stamps: [Stamp; N_TRANSMISSION_SIGNATURES]
 }
 
-impl Default for BlockTail {
-    fn default() -> Self {
+impl BlockTail {
+    pub fn new(stamps: [Stamp; N_TRANSMISSION_SIGNATURES]) -> Self {
         BlockTail {
-            stamps: [Stamp {
-                signature: [0; 32],
-                address: [0; 32]
-            }; N_TRANSMISSION_SIGNATURES]
+            stamps
         }
+    }
+
+    pub fn n_stamps(&self) -> usize {
+        self.stamps.iter().filter(|s| s.signature != [0; 64]).count()
+    }
+
+    /// remove space between the signatures to ensure all empty space is at the end
+    pub fn collapse(&mut self){
+        let mut empty = VecDeque::new();
+        for i in 0..N_TRANSMISSION_SIGNATURES {
+            if self.stamps[i].signature == [0; 64] {
+                empty.push_back(i);
+            }else if empty.len() > 0 {
+                self.stamps.swap(i, empty.pop_front().unwrap());
+                empty.push_back(i);
+            }
+        }
+    }
+
+    /// Stamp the block with a signature
+    /// Collapses the tail to remove empty space
+    /// 
+    /// # Arguments
+    /// * `stamp` - The stamp to add to the block
+    /// 
+    /// # Returns
+    /// * `Ok(())` if the stamp was added successfully
+    /// * `Err(std::io::Error)` if the stamp was not added successfully
+    pub fn stamp(&mut self, stamp: Stamp) -> Result<(), std::io::Error>{
+        self.collapse();
+        if self.n_stamps() >= N_TRANSMISSION_SIGNATURES {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Too many stamps"
+            ));
+        }
+        self.stamps[self.n_stamps()] = stamp;
+        Ok(())
+    }
+
+    pub fn get_stampers(&self) -> HashSet<[u8; 32]> {
+        let mut stampers = HashSet::new();
+        for i in 0..N_TRANSMISSION_SIGNATURES {
+            if self.stamps[i].signature != [0; 64] {
+                stampers.insert(self.stamps[i].address);
+            }
+        }
+        stampers
     }
 }
 
@@ -251,5 +311,110 @@ impl Block {
 impl Into<[u8; 32]> for Block{
     fn into(self) -> [u8; 32]{
         self.hash.unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tail() {
+        let mut tail = BlockTail::default();
+        assert_eq!(tail.n_stamps(), 0);
+        tail.stamps[0] = Stamp {
+            signature: [1; 64],
+            address: [1; 32]
+        };
+        assert_eq!(tail.n_stamps(), 1);
+        tail.collapse();
+        assert_eq!(tail.n_stamps(), 1);
+    }
+
+    #[test]
+    fn test_complex_collapse() {
+        let mut tail = BlockTail::default();
+        tail.stamps[0] = Stamp {
+            signature: [1; 64],
+            address: [1; 32]
+        };
+        tail.stamps[1] = Stamp {
+            signature: [2; 64],
+            address: [2; 32]
+        };
+        tail.stamps[2] = Stamp {
+            signature: [3; 64],
+            address: [3; 32]
+        };
+        tail.stamps[3] = Stamp {
+            signature: [0; 64],
+            address: [0; 32]
+        };
+        tail.collapse();
+        assert_eq!(tail.n_stamps(), 3);
+    }
+
+    #[test]
+    fn test_collapse_with_move(){
+        let mut tail = BlockTail::default();
+        tail.stamps[0] = Stamp {
+            signature: [1; 64],
+            address: [1; 32]
+        };
+        tail.stamps[1] = Stamp {
+            signature: [2; 64],
+            address: [2; 32]
+        };
+        tail.stamps[2] = Stamp {
+            signature: [3; 64],
+            address: [3; 32]
+        };
+        tail.stamps[4] = Stamp {
+            signature: [4; 64],
+            address: [4; 32]
+        };
+        tail.collapse();
+        assert_eq!(tail.n_stamps(), 4);
+        // make sure the empty space is at the end
+        assert_eq!(tail.stamps[3].signature, [4; 64]);
+    }
+
+    #[test]
+    fn test_very_compelx_collapse(){
+        // test case with multiple gaps
+        let mut tail = BlockTail::default();
+        tail.stamps[0] = Stamp {
+            signature: [1; 64],
+            address: [1; 32]
+        };
+        tail.stamps[1] = Stamp {
+            signature: [2; 64],
+            address: [2; 32]
+        };
+        tail.stamps[3] = Stamp {
+            signature: [3; 64],
+            address: [3; 32]
+        };
+        tail.stamps[5] = Stamp {
+            signature: [4; 64],
+            address: [4; 32]
+        };
+        tail.stamps[8] = Stamp {
+            signature: [5; 64],
+            address: [5; 32]
+        };
+        // collapse the tail
+        tail.collapse();
+        // check the number of stamps
+        assert_eq!(tail.n_stamps(), 5);
+        // check the order of the stamps
+        assert_eq!(tail.stamps[0].signature, [1; 64]);
+        assert_eq!(tail.stamps[1].signature, [2; 64]);
+        assert_eq!(tail.stamps[2].signature, [3; 64]);
+        assert_eq!(tail.stamps[3].signature, [4; 64]);
+        assert_eq!(tail.stamps[4].signature, [5; 64]);
+        // check the empty space is at the end
+        // assert_eq!(tail.stamps[5].signature, [0; 64]);
+        // assert_eq!(tail.stamps[6].signature, [0; 64]);
     }
 }
