@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use rand::{rng, seq::IndexedRandom};
+use rand::{rng, seq::{IndexedRandom, IteratorRandom}};
 
 use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, crypto::{hashing::{DefaultHash, HashFunction}, merkle::generate_tree}, nodes::{messages::Message, node::{Broadcaster, Node}, peer::Peer}, primitives::{block::{Block, BlockTail}, transaction::Transaction}};
 
@@ -58,7 +58,7 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std
         let sender = tx.clone();
         let handle = tokio::spawn(async move{
             loop{ // keep asking for the node until we pass
-                let mut peer = nodeclone.clone().peers.lock().await.choose(&mut rng()).unwrap().clone(); // random peer
+                let mut peer = nodeclone.clone().peers.lock().await.values().choose(&mut rng()).unwrap().clone(); // random peer
                 let block = query_block_from_peer(&mut peer, &nodeclone.clone().into(), hash).await;
                 match block{
                     Ok(block)=>{
@@ -88,7 +88,7 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std
         loop{ // we need to keep going until it passes full validation
             match chain.add_new_block(block){
                 Err(_) => { // failed validation
-                    let mut peer = node.peers.lock().await.choose(&mut rng()).unwrap().clone(); // random peer
+                    let mut peer = node.peers.lock().await.values().choose(&mut rng()).unwrap().clone(); // random peer
                     block = query_block_from_peer(&mut peer, &node.clone().into(), hash).await?; // one more attempt, then fail.
                 }
                 _ => {break;} // passed validation
@@ -105,7 +105,7 @@ pub async fn dicover_chain(node: &mut Node) -> Result<Chain, std::io::Error> {
     // broadcast the chain shard request to all peers
     let mut peers = node.peers.lock().await;
     let mut chain_shards = Vec::new();
-    for peer in peers.iter_mut() {
+    for (_, peer) in peers.iter_mut() {
         // send the chain shard request to the peer
         let response = peer.communicate(&Message::ChainShardRequest, &node.clone().into()).await?;
         match response {

@@ -20,7 +20,7 @@ pub struct Node {
     /// The port of the node
     pub port: Arc<u16>,
     // known peers
-    pub peers: Arc<Mutex<Vec<Peer>>>,
+    pub peers: Arc<Mutex<HashMap<[u8; 32], Peer>>>,
     // the blockchain
     pub chain: Arc<Mutex<Option<Chain>>>,
     /// transactions to be serviced
@@ -50,12 +50,16 @@ impl Node {
     ) -> Self {
         let (broadcast_sender, broadcast_receiver) = flume::unbounded();
         let transaction_filters = Arc::new(Mutex::new(Vec::new()));
+        let peer_map = peers
+            .iter()
+            .map(|peer| (peer.public_key, peer.clone()))
+            .collect::<HashMap<_, _>>();
         Node {
             public_key: public_key.into(),
             private_key: private_key.into(),
             ip_address,
             port: port.into(),
-            peers: Mutex::new(peers).into(),
+            peers: Arc::new(Mutex::new(peer_map)),
             chain: Arc::new(Mutex::new(chain)),
             miner_pool: transaction_pool.map(Arc::new),
             broadcast_receiver,
@@ -106,11 +110,11 @@ impl Node {
     }
 
     /// Derive the response to a request from a peer
-    pub async fn serve_request(&mut self, message: &Message, declared_peer: Peer) -> Result<Message, std::io::Error> {
+    pub async fn serve_request(&mut self, message: &Message, _declared_peer: Peer) -> Result<Message, std::io::Error> {
         match message {
             Message::PeerRequest => {
                 // send all peers
-                Ok(Message::PeerResponse(self.peers.lock().await.clone()))
+                Ok(Message::PeerResponse(self.peers.lock().await.values().cloned().collect()))
             }
             Message::ChainRequest => {
                 if let Some(chain) = self.chain.lock().await.as_ref(){
@@ -243,9 +247,9 @@ impl Node {
     pub async fn maybe_update_peer(&self, peer: Peer) -> Result<(), std::io::Error> {
         // check if the peer is already in the list
         let mut peers = self.peers.lock().await;
-        if !peers.iter().any(|p| p.public_key == peer.public_key) {
+        if !peers.iter().any(|(public_key, _)| public_key == &peer.public_key) {
             // add the peer to the list
-            peers.push(peer);
+            peers.insert(peer.public_key, peer);
         }
         Ok(())
     }
@@ -293,7 +297,7 @@ impl Broadcaster for Node {
     async fn broadcast(&self, message: &Message) -> Result<Vec<Message>, std::io::Error> {
         // send a message to all peers
         let mut responses = Vec::new();
-        for peer in self.peers.lock().await.iter_mut() {
+        for (_, peer) in self.peers.lock().await.iter_mut() {
             responses.push(peer.communicate(message, &self.into()).await?);
         }
         Ok(responses)
