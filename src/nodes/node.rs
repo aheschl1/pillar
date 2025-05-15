@@ -144,50 +144,7 @@ impl Node {
                 }
                 // add the block to the chain if we have downloaded it already - first it is verified TODO add to a queue to be added later
                 if let Some(chain) = self.chain.lock().await.as_mut(){
-                    let existing_block = chain.get_block(&block.hash.unwrap()).cloned(); // we will compare for changes to stamps
-                    chain.add_new_block(block.clone())?; // if we pass this line, valid block
-                    // update the reputation tracker with the block to rwared the miner
-                    self.maybe_create_history(block.header.miner_address.unwrap()).await;
-                    let mut reputations = self.reputations.lock().await;
-                    let miner_history = reputations.get_mut(&block.header.miner_address.unwrap()).unwrap();
-                    miner_history.settle_head(block.header.clone()); // SETTLE TO REWARD MINING
-                    // reward the broadcaster
-                    // self.maybe_create_history(declared_peer.public_key).await;
-                    // let broadcaster_history = reputations.get_mut(&declared_peer.public_key).unwrap();
-                    // broadcaster_history.reward_block_transmission();
-                    // ================================================
-                    // 1. check for stamp differences
-                    let existing_stamps = match existing_block { // what was there before
-                        Some(block) => HashSet::from(block.tail.stamps),
-                        None => HashSet::new(),
-                    };
-                    let has_our_stamp = existing_stamps.iter().any(|stamp| stamp.address == *self.public_key);
-                    // 2. start mutation by adding our own if relevant
-                    let block = chain.get_block_mut(&block.hash.unwrap()).unwrap();
-                    // stamp if we have not already
-                    if !has_our_stamp {
-                        let signature = self.signature_for(&block.header)?;
-                        let stamp = Stamp {
-                            address: *self.public_key,
-                            signature,
-                        };
-                        let _ = block.tail.stamp(stamp); // if failure, then full
-                    }
-                    let new_stamps = HashSet::from(block.tail.stamps); // what is there now
-                    let added_stamps = new_stamps.difference(&existing_stamps).cloned().collect::<HashSet<_>>(); // the new ones
-                    // 3. reward reputation for the new stamps
-                    for stamp in added_stamps.iter() {
-                        self.maybe_create_history(stamp.address).await;
-                        let history = reputations.get_mut(&stamp.address).unwrap();
-                        history.settle_tail(&block.tail, block.header); // SETTLE TO REWARD
-                    }
-                    // 4. if changes have been made - broadcast the block
-                    if !added_stamps.is_empty() { // if it is, we simply broadcast the block
-                        // broadcast the block to all peers
-                        self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap();
-                        // TODO maybe we should not do this here - but rather in the broadcast thread
-                        // self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap();
-                    }
+                    self.settle_block(block, chain).await?;
                 }else{
                     // TODO is it ok to ignore rep here?
                     // if we do not have the chain, just forward the block if there is room in the stamps
@@ -256,6 +213,56 @@ impl Node {
                 "Expected a request",
             )),
         }
+    }
+
+    /// After receiving a block - settle it to the chain
+    /// Includes the tracking of reputation, braodcasting, and responding to callbacks
+    async fn settle_block(&self, block: &Block, chain: &mut Chain) -> Result<(), std::io::Error> {
+        let existing_block = chain.get_block(&block.hash.unwrap()).cloned(); // we will compare for changes to stamps
+        chain.add_new_block(block.clone())?; // if we pass this line, valid block
+        // update the reputation tracker with the block to rwared the miner
+        self.maybe_create_history(block.header.miner_address.unwrap()).await;
+        let mut reputations = self.reputations.lock().await;
+        let miner_history = reputations.get_mut(&block.header.miner_address.unwrap()).unwrap();
+        miner_history.settle_head(block.header.clone()); // SETTLE TO REWARD MINING
+        // reward the broadcaster
+        // self.maybe_create_history(declared_peer.public_key).await;
+        // let broadcaster_history = reputations.get_mut(&declared_peer.public_key).unwrap();
+        // broadcaster_history.reward_block_transmission();
+        // ================================================
+        // 1. check for stamp differences
+        let existing_stamps = match existing_block { // what was there before
+            Some(block) => HashSet::from(block.tail.stamps),
+            None => HashSet::new(),
+        };
+        let has_our_stamp = existing_stamps.iter().any(|stamp| stamp.address == *self.public_key);
+        // 2. start mutation by adding our own if relevant
+        let block = chain.get_block_mut(&block.hash.unwrap()).unwrap();
+        // stamp if we have not already
+        if !has_our_stamp {
+            let signature = self.signature_for(&block.header)?;
+            let stamp = Stamp {
+                address: *self.public_key,
+                signature,
+            };
+            let _ = block.tail.stamp(stamp); // if failure, then full
+        }
+        let new_stamps = HashSet::from(block.tail.stamps); // what is there now
+        let added_stamps = new_stamps.difference(&existing_stamps).cloned().collect::<HashSet<_>>(); // the new ones
+        // 3. reward reputation for the new stamps
+        for stamp in added_stamps.iter() {
+            self.maybe_create_history(stamp.address).await;
+            let history = reputations.get_mut(&stamp.address).unwrap();
+            history.settle_tail(&block.tail, block.header); // SETTLE TO REWARD
+        }
+        // 4. if changes have been made - broadcast the block
+        if !added_stamps.is_empty() { // if it is, we simply broadcast the block
+            // broadcast the block to all peers
+            self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap();
+            // TODO maybe we should not do this here - but rather in the broadcast thread
+            // self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap();
+        }
+        Ok(())
     }
 
     /// spawn a new thread to match transaction callback requests against the bock

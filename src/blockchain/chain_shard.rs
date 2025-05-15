@@ -101,7 +101,6 @@ mod tests {
     use crate::crypto::hashing::DefaultHash;
     use crate::primitives::transaction::Transaction;
     use crate::protocol::pow::mine;
-    use crate::protocol::reputation::N_TRANSMISSION_SIGNATURES;
 
     #[tokio::test]
     async fn test_trim_removes_short_fork() {
