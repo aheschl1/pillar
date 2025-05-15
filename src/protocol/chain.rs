@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use rand::{rng, seq::{IndexedRandom, IteratorRandom}};
 
-use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, crypto::{hashing::{DefaultHash, HashFunction}, merkle::generate_tree}, nodes::{messages::Message, node::{Broadcaster, Node}, peer::Peer}, primitives::{block::{Block, BlockTail}, transaction::Transaction}};
+use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, crypto::{hashing::{DefaultHash, HashFunction}, merkle::generate_tree}, nodes::{messages::Message, node::{Broadcaster, Node}, peer::Peer}, primitives::{block::{Block, BlockHeader, BlockTail}, transaction::Transaction}, reputation::history::NodeHistory};
 
 use super::{peers::discover_peers, reputation::N_TRANSMISSION_SIGNATURES};
 
@@ -82,8 +82,12 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std
     blocks.sort_by_key(|x| x.header.depth);
     // note: we know that there is exactly one genesis from shard validation
     let mut chain = Chain::new_with_genesis();
+    let mut reputations = node.reputations.lock().await;
     for block in &blocks[1..]{ // skip the first - genesis
         let mut block = block.to_owned();
+        let miner = block.header.miner_address.unwrap();
+        let tail = block.tail.clone();
+        let head = block.header.clone();
         let hash = block.hash.unwrap();
         loop{ // we need to keep going until it passes full validation
             match chain.add_new_block(block){
@@ -91,11 +95,46 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std
                     let mut peer = node.peers.lock().await.values().choose(&mut rng()).unwrap().clone(); // random peer
                     block = query_block_from_peer(&mut peer, &node.clone().into(), hash).await?; // one more attempt, then fail.
                 }
-                _ => {break;} // passed validation
+                _ => {
+                    // we need to update the reputations
+                    settle_reputations(&mut reputations, miner, &tail, head);
+                    break;
+                }
             }
         }
     }
     Ok(chain)
+}
+
+/// This function takes a header and a tail of a block, as well as its miner.
+/// Then, it updates a reputations map to reflect new knowledge
+fn settle_reputations(reputations: &mut HashMap<[u8; 32], NodeHistory>, miner: [u8; 32], tail: &BlockTail, head: BlockHeader){
+    // passed validation - we need to record reputations
+    match reputations.get_mut(&miner){
+        Some(history) => {
+            // update the history
+            history.settle_head(head);
+        }
+        None => {
+            // create new history
+            reputations.insert(miner.clone(), NodeHistory::default());
+            reputations.get_mut(&miner).unwrap().settle_head(head);
+        }
+    }
+    // now each signature gets an award
+    for stamper in tail.get_stampers(){
+        match reputations.get_mut(&stamper){
+            Some(history) => {
+                // update the history
+                history.settle_tail(&tail, head);
+            }
+            None => {
+                // create new history
+                reputations.insert(miner.clone(), NodeHistory::default());
+                reputations.get_mut(&miner).unwrap().settle_tail(&tail, head);
+            }
+        }
+    }
 }
 
 /// Discovery algorithm for the chain
@@ -221,6 +260,12 @@ pub async fn sync_chain(node: &mut Node){
             for block in to_add.iter().rev(){
                 // verifies again
                 chain.add_new_block(block.clone()).expect("Failed to add block");
+                // and record the reputations
+                let miner = block.header.miner_address.unwrap();
+                let tail = block.tail.clone();
+                let head = block.header.clone();
+                let mut reputations = node.reputations.lock().await;
+                settle_reputations(&mut reputations, miner, &tail, head);
             }
         }
     }

@@ -333,13 +333,7 @@ impl Node {
         let mut reputations = self.reputations.lock().await;
         if let None = reputations.get_mut(&public_key) {
             // create a new history
-            let history = NodeHistory::new(
-                public_key,
-                vec![],
-                vec![],
-                0,
-            );
-            reputations.insert(public_key, history); // create new
+            reputations.insert(public_key, NodeHistory::default()); // create new
         }
     }
 }

@@ -95,14 +95,23 @@ impl BlockTail {
     }
 
     /// remove space between the signatures to ensure all empty space is at the end
+    /// remove duplicate signatures
     pub fn collapse(&mut self){
+        let mut seen: HashSet<[u8; 32]> = HashSet::new();
         let mut empty = VecDeque::new();
         for i in 0..N_TRANSMISSION_SIGNATURES {
-            if self.stamps[i].signature == [0; 64] {
+            if self.stamps[i].address == [0; 32] {
                 empty.push_back(i);
             }else if empty.len() > 0 {
-                self.stamps.swap(i, empty.pop_front().unwrap());
-                empty.push_back(i);
+                if seen.contains(&self.stamps[i].address) {
+                    // if the address is already seen, remove it
+                    self.stamps[i] = Stamp::default();
+                    empty.push_back(i);
+                }else{
+                    seen.insert(self.stamps[i].address); // record the address
+                    self.stamps.swap(i, empty.pop_front().unwrap());
+                    empty.push_back(i);
+                }
             }
         }
     }
