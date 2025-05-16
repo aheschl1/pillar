@@ -1,5 +1,8 @@
 
 use core::f64;
+use std::collections::HashMap;
+
+use crate::reputation::history::NodeHistory;
 
 const MINING_WORTH_HALF_LIFE: f64 = 8f64;
 const MINING_WORTH_MAX: f64 = 1f64;
@@ -27,6 +30,31 @@ pub fn block_worth_scaling_fn(block_time: u64) -> f64 {
     let diff = block_time - current_time;
     let worth = (0.5f64).powf(-diff / MINING_WORTH_HALF_LIFE);
     f64::min(worth, MINING_WORTH_MAX)
+}
+
+/// Given a reputation map, return which peers are between the lower_n-th and upper_n-th percentile
+/// ex: lower_n = 0.1, upper_n = 0.9 return all peers that are at least 10th percentile, but no better than 90th percentile
+/// Recommended usage is to serve addreses to external clients.
+/// 
+/// # Arguments
+/// * `n` - the percentile to compute
+/// * `reputations` - the reputation map
+/// 
+/// # Returns
+/// * A vector of peers that are in the n-th percentile
+pub fn nth_percentile_peer(lower_n: f32, upper_n: f32, reputations: &HashMap<[u8; 32], NodeHistory>) -> Vec<[u8; 32]>{
+    if lower_n > 1.0 || lower_n < 0.0  || upper_n > 1.0 || upper_n < 0.0 {
+        panic!("n must be between 0 and 1");
+    }
+    let mut reputations = reputations.iter().map(|(a, h)|{(a, h.compute_reputation())}).collect::<Vec<_>>();
+    reputations.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap()); // this is ordering in ascending order
+    let lower_n = (lower_n * reputations.len() as f32).round() as usize;
+    let upper_n = (upper_n * reputations.len() as f32).round() as usize;
+    let mut peers = Vec::new();
+    for i in lower_n..upper_n {
+        peers.push(*reputations[i].0);
+    }
+    peers
 }
 
 #[cfg(test)]
@@ -82,4 +110,5 @@ mod tests {
         let worth = block_worth_scaling_fn(block_time as u64);
         assert_eq!(worth, MINING_WORTH_MAX / 4.0);
     }
+
 }

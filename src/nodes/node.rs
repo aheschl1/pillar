@@ -138,10 +138,10 @@ impl Node {
                 Ok(Message::TransactionAck)
             }
             Message::BlockTransmission(block) => {
-                if block.header.miner_address.unwrap() == *self.public_key {
-                    // SKIP OWN BLOCK
-                    return Ok(Message::BlockAck);
-                }
+                // if block.header.miner_address.unwrap() == *self.public_key {
+                //     // SKIP OWN BLOCK 
+                //     return Ok(Message::BlockAck);
+                // }
                 // add the block to the chain if we have downloaded it already - first it is verified TODO add to a queue to be added later
                 if let Some(chain) = self.chain.lock().await.as_mut(){
                     self.settle_block(block, chain).await?;

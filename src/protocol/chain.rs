@@ -8,7 +8,7 @@ use super::{peers::discover_peers, reputation::N_TRANSMISSION_SIGNATURES};
 
 /// Queries a peer to send a block.
 async fn query_block_from_peer(
-    peer: &mut Peer, 
+    peer: &mut Peer,
     initializing_peer: &Peer,
     hash: [u8; 32]
 ) -> Result<Block, std::io::Error>{
