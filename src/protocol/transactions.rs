@@ -1,7 +1,6 @@
-use ed25519_dalek::SigningKey;
 use flume::Receiver;
 
-use crate::{accounting::account::Account, crypto::hashing::{DefaultHash, HashFunction}, nodes::{messages::Message, node::{Broadcaster, Node}}, primitives::{block::BlockHeader, transaction::{self, Transaction, TransactionFilter}}};
+use crate::{accounting::account::Account, crypto::{hashing::{DefaultHash, HashFunction}, signing::{SigFunction, Signable}}, nodes::{messages::Message, node::{Broadcaster, Node}}, primitives::{block::BlockHeader, transaction::{self, Transaction, TransactionFilter}}};
 
 /// Submit a transaction to the network
 /// 
@@ -17,10 +16,10 @@ use crate::{accounting::account::Account, crypto::hashing::{DefaultHash, HashFun
 /// * `Ok(Some(receiver))` - If the transaction was acknowledged and a callback was registered
 /// * `Ok(None)` - If the transaction was acknowledged but no callback was registered
 /// * `Err(e)` - If the transaction was not acknowledged or an error occurred
-pub async fn submit_transaction(
+pub async fn submit_transaction<const K: usize, const P: usize>(
     node: &mut Node, 
     sender: &mut Account, 
-    signer: SigningKey,
+    signer: &mut impl SigFunction<K, P, 64>,
     receiver: [u8; 32],
     amount: u64,
     register_completion_callback: bool
@@ -39,7 +38,7 @@ pub async fn submit_transaction(
         &mut DefaultHash::new()
     );
     // sign with the signer
-    transaction.sign(&signer)?;
+    transaction.sign(signer);
     // broadcast and wait for peer responses
     let results = node.broadcast(&Message::TransactionRequest(transaction.clone())).await?;
     // check if the transaction was acknowledged at least once

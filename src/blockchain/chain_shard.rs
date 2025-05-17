@@ -92,11 +92,11 @@ impl TrimmableChain for ChainShard {
 
 #[cfg(test)]
 mod tests {
-    use ed25519_dalek::SigningKey;
     use rand_core::OsRng;
 
     use super::*;
     use crate::accounting::account::Account;
+    use crate::crypto::signing::{DefaultSigner, SigFunction, SigVerFunction, Signable};
     use crate::primitives::block::{Block, BlockTail};
     use crate::crypto::hashing::DefaultHash;
     use crate::primitives::transaction::Transaction;
@@ -106,9 +106,9 @@ mod tests {
     async fn test_trim_removes_short_fork() {
         let mut chain = Chain::new_with_genesis();
         
-        let signing_key = SigningKey::generate(&mut OsRng);
+        let mut signing_key = DefaultSigner::generate_random();
         // public
-        let sender = signing_key.verifying_key().to_bytes();
+        let sender = signing_key.get_verifying_function().to_bytes();
 
         chain.account_manager.add_account(Account::new(sender, 1000));
 
@@ -116,7 +116,7 @@ mod tests {
         let genesis_hash = parent_hash.clone();
         for depth in 1..=11 {
             let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth-1, &mut DefaultHash::new());
-            transaction.sign(&signing_key).unwrap();
+            transaction.sign(&mut signing_key);
             let mut block = Block::new(
                 parent_hash,
                 0,
@@ -136,7 +136,7 @@ mod tests {
 
         // Create shorter fork from genesis (only 1 block)
         let mut trans = Transaction::new(sender, [2; 32], 10, 0, 11, &mut DefaultHash::new());
-        trans.sign(&signing_key).unwrap();
+        trans.sign(&mut signing_key);
         let mut fork_block = Block::new(
             genesis_hash, // same genesis
             0,
@@ -163,9 +163,9 @@ mod tests {
     #[tokio::test]
     async fn test_trim_keeps_close_forks() {
         let mut chain = Chain::new_with_genesis();
-        let signing_key = SigningKey::generate(&mut OsRng);
+        let mut signing_key = DefaultSigner::generate_random();
         // public
-        let sender = signing_key.verifying_key().to_bytes();
+        let sender = signing_key.get_verifying_function().to_bytes();
 
         chain.account_manager.add_account(Account::new(sender, 1000));
 
@@ -176,7 +176,7 @@ mod tests {
         for depth in 1..=9 {
             let time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth;
             let mut transaction = Transaction::new(sender, [2; 32], 10, time, depth-1, &mut DefaultHash::new());
-            transaction.sign(&signing_key).unwrap();
+            transaction.sign(&mut signing_key);
             let mut block = Block::new(
                 parent_hash,
                 0,
@@ -193,7 +193,7 @@ mod tests {
         }
 
         let mut trans = Transaction::new(sender, [2; 32], 10, 0, 9, &mut DefaultHash::new());
-        trans.sign(&signing_key).unwrap();
+        trans.sign(&mut signing_key);
         // Add a 1-block fork off the genesis (difference = 9)
         let mut fork_block = Block::new(
             genesis_hash,
@@ -218,9 +218,9 @@ mod tests {
     #[tokio::test]
     async fn test_trim_multiple_short_forks() {
         let mut chain = Chain::new_with_genesis();
-        let signing_key = SigningKey::generate(&mut OsRng);
+        let mut signing_key = DefaultSigner::generate_random();
         // public
-        let sender = signing_key.verifying_key().to_bytes();
+        let sender = signing_key.get_verifying_function().to_bytes();
         chain.account_manager.add_account(Account::new(sender, 2000));
 
         let mut main_hash = chain.deepest_hash;
@@ -229,7 +229,7 @@ mod tests {
         // Extend the main chain to depth 12
         for depth in 1..=12 {
             let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth-1, &mut DefaultHash::new());
-            transaction.sign(&signing_key).unwrap();
+            transaction.sign(&mut signing_key);
             let mut block = Block::new(
                 main_hash,
                 0,
@@ -249,7 +249,7 @@ mod tests {
         let mut fork_hashes = vec![];
         for offset in 0..2 {
             let mut transaction = Transaction::new(sender, [2; 32], 10, 0, offset+12, &mut DefaultHash::new());
-            transaction.sign(&signing_key).unwrap();
+            transaction.sign(&mut signing_key);
             let mut fork_block = Block::new(
                 genesis_hash,
                 0,

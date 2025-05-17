@@ -5,6 +5,7 @@ use serde_with::{serde_as, Bytes};
 
 use crate::crypto::hashing::{HashFunction, Hashable, DefaultHash};
 use crate::crypto::merkle::{generate_proof_of_inclusion, generate_tree, verify_proof_of_inclusion, MerkleProof, MerkleTree};
+use crate::crypto::signing::Signable;
 use crate::protocol::difficulty::get_difficulty_from_depth;
 use crate::protocol::pow::is_valid_hash;
 use crate::protocol::reputation::N_TRANSMISSION_SIGNATURES;
@@ -313,6 +314,16 @@ impl Block {
         } else {
             false
         }
+    }
+}
+
+impl Signable<64> for BlockHeader {
+    fn get_signing_bytes(&self) -> impl AsRef<[u8]> {
+        self.hash(&mut DefaultHash::new()).unwrap()
+    }
+    
+    fn sign<const K: usize, const P: usize>(&mut self, signing_function: &mut impl crate::crypto::signing::SigFunction<K, P, 64>) -> [u8; 64] {
+        signing_function.sign(self)
     }
 }
 

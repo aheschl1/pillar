@@ -4,8 +4,7 @@ pub mod pool;
 
 #[cfg(test)]
 mod tests{
-    use crate::{primitives::{block::BlockHeader, transaction::{Transaction, TransactionHeader}}, crypto::hashing::{HashFunction, Hashable, DefaultHash}};
-    use ed25519_dalek::{Verifier, Signature, SigningKey};
+    use crate::{crypto::{hashing::{DefaultHash, HashFunction, Hashable}, signing::{DefaultSigner, SigFunction, SigVerFunction, Signable}}, primitives::{block::BlockHeader, transaction::{Transaction, TransactionHeader}}};
     use rand_core::OsRng;
     // use rand::rngs::OsRng;
 
@@ -50,17 +49,14 @@ mod tests{
         let mut transaction = Transaction::new(sender, receiver, amount, timestamp, nonce, &mut hash_function);
         assert!(transaction.signature.is_none());
         
-        let signing_key = SigningKey::generate(&mut OsRng);
+        let mut signing_key = DefaultSigner::generate_random();
 
-        transaction.sign(&signing_key).unwrap();
+        transaction.sign(&mut signing_key);
         assert!(transaction.signature.is_some());
         // Verify the signature
-        signing_key.verifying_key()
-            .verify(&transaction.hash, &Signature::from_bytes(&transaction.signature.unwrap()))
-            .expect("Signature verification failed");
+        signing_key.get_verifying_function().verify(&transaction.signature.unwrap(), &transaction);
+
         let transaction2 = Transaction::new(sender, receiver, amount, timestamp, nonce+1, &mut hash_function);
-        signing_key.verifying_key()
-            .verify(&transaction2.hash, &Signature::from_bytes(&transaction.signature.unwrap()))
-            .expect_err("Signature verification failed");
+        assert!(!signing_key.get_verifying_function().verify(&transaction.signature.unwrap(), &transaction2));
     }
 }

@@ -1,6 +1,5 @@
-use ed25519::signature::Signer;
 use serde::{Deserialize, Serialize};
-use crate::crypto::hashing::{HashFunction, Hashable};
+use crate::crypto::{hashing::{HashFunction, Hashable}, signing::Signable};
 use serde_with::{serde_as, Bytes};
 
 use super::block::Block;
@@ -172,27 +171,6 @@ impl Transaction {
             signature: None,
         }
     }
-    /// Sign the transaction with the given signer
-    /// 
-    /// # Arguments
-    /// 
-    /// * `signer` - The signer to use to sign the transaction
-    /// 
-    /// # Returns
-    /// 
-    /// * `Ok(())` if the transaction was signed successfully
-    /// * `Err(std::io::Error)` if the transaction was already signed
-    pub fn sign(&mut self, signer: & impl Signer<ed25519::Signature>) -> Result<(), std::io::Error> {
-        if let Some(_) = self.signature {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::AlreadyExists,
-                "Transaction already signed",
-            ));
-        }
-        let signature = signer.sign(&self.hash);
-        self.signature = Some(signature.to_bytes());
-        Ok(())
-    }
 }
 
 impl Hashable for Transaction {
@@ -204,5 +182,35 @@ impl Hashable for Transaction {
 impl Into<[u8; 32]> for Transaction {
     fn into(self) -> [u8; 32] {
         self.hash
+    }
+}
+
+
+/**
+ * if let Some(_) = self.signature {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "Transaction already signed",
+            ));
+        }
+        let signature = signer.sign(&self.hash);
+        self.signature = Some(signature.to_bytes());
+        Ok(())
+ */
+
+
+impl Signable<64> for Transaction {
+    
+    fn get_signing_bytes(&self) -> impl AsRef<[u8]> {
+        &self.hash
+    }
+    
+    fn sign<const K: usize, const P: usize>(&mut self, signing_function: &mut impl crate::crypto::signing::SigFunction<K, P, 64>) -> [u8; 64]{
+        if let Some(_) = self.signature {
+            panic!("Transaction already signed");
+        }
+        let signature = signing_function.sign(self);
+        self.signature = Some(signature);
+        self.signature.unwrap()
     }
 }

@@ -1,6 +1,4 @@
 use super::peer::Peer;
-use ed25519::signature::SignerMut;
-use ed25519_dalek::SigningKey;
 use flume::{Receiver, Sender};
 use std::{collections::{HashMap, HashSet}, net::IpAddr, sync::Arc};
 use tokio::sync::Mutex;
@@ -8,7 +6,7 @@ use tokio::sync::Mutex;
 use super::messages::Message;
 
 use crate::{
-    blockchain::chain::Chain, crypto::hashing::{DefaultHash, HashFunction, Hashable}, primitives::{block::{Block, BlockHeader, Stamp}, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::dicover_chain, communication::{broadcast_knowledge, serve_peers}, reputation::N_TRANSMISSION_SIGNATURES}, reputation::history::NodeHistory
+    blockchain::chain::Chain, crypto::{hashing::{DefaultHash, HashFunction, Hashable}, signing::{DefaultSigner, SigFunction, Signable}}, primitives::{block::{Block, BlockHeader, Stamp}, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::dicover_chain, communication::{broadcast_knowledge, serve_peers}, reputation::N_TRANSMISSION_SIGNATURES}, reputation::history::NodeHistory
 };
 
 #[derive(Clone)]
@@ -303,12 +301,12 @@ impl Node {
     }
 
     /// ed25519 signature for the node over the hash of some data
-    fn signature_for<T: Hashable>(&self, sign: &T) -> Result<[u8; 64], std::io::Error> {
+    fn signature_for<T: Signable<64>>(&self, sign: &T) -> Result<[u8; 64], std::io::Error> {
         // sign the data with the private key
-        let mut signer = SigningKey::from_bytes(&self.private_key);
-        let signature = signer.sign(&sign.hash(&mut DefaultHash::new())?);
+        let mut signer = DefaultSigner::new(*self.private_key);
+        let signature = signer.sign(sign);
         // return the signature
-        Ok(signature.to_bytes())
+        Ok(signature)
     }
 
     pub async fn maybe_update_peer(&self, peer: Peer) -> Result<(), std::io::Error> {
