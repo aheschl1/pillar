@@ -87,7 +87,7 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std
     for block in &blocks[1..]{ // skip the first - genesis
         let mut block = block.to_owned();
         let miner = block.header.miner_address.unwrap();
-        let tail = block.tail.clone();
+        let tail = block.header.tail.clone();
         let head = block.header.clone();
         let hash = block.hash.unwrap();
         loop{ // we need to keep going until it passes full validation
@@ -263,7 +263,7 @@ pub async fn sync_chain(node: &mut Node){
                 chain.add_new_block(block.clone()).expect("Failed to add block");
                 // and record the reputations
                 let miner = block.header.miner_address.unwrap();
-                let tail = block.tail.clone();
+                let tail = block.header.tail.clone();
                 let head = block.header.clone();
                 let mut reputations = node.reputations.lock().await;
                 settle_reputations(&mut reputations, miner, &tail, head);

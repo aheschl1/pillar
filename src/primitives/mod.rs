@@ -4,7 +4,7 @@ pub mod pool;
 
 #[cfg(test)]
 mod tests{
-    use crate::{crypto::{hashing::{DefaultHash, HashFunction, Hashable}, signing::{DefaultSigner, SigFunction, SigVerFunction, Signable}}, primitives::{block::BlockHeader, transaction::{Transaction, TransactionHeader}}};
+    use crate::{crypto::{hashing::{DefaultHash, HashFunction, Hashable}, signing::{DefaultSigner, SigFunction, SigVerFunction, Signable}}, primitives::{block::{BlockHeader, BlockTail}, transaction::{Transaction, TransactionHeader}}};
     use rand_core::OsRng;
     // use rand::rngs::OsRng;
 
@@ -16,7 +16,7 @@ mod tests{
         let nonce = 12345;
         let timestamp = 1622547800;
 
-        let block_header = BlockHeader::new(previous_hash, merkle_root, nonce, timestamp, Some(miner_address), 0);
+        let block_header = BlockHeader::new(previous_hash, merkle_root, nonce, timestamp, Some(miner_address), BlockTail::default(), 0);
         let hash = block_header.hash(&mut DefaultHash::new());
 
         assert_eq!(hash.unwrap().len(), 32);

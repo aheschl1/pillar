@@ -10,9 +10,12 @@ pub struct MinerPool {
     transaction_receiver: Receiver<Transaction>,
     // sender channel
     transaction_sender: Sender<Transaction>,
+    // proposition blocks
+    block_proposition_sender: Sender<Block>,
+    block_poroposition_receiver: Receiver<Block>,
     // ready blocks
-    block_sender: Sender<Block>,
-    block_receiver: Receiver<Block>,
+    block_ready_sender: Sender<Block>,
+    block_ready_receiver: Receiver<Block>,
 }
 
 /// Transaction pool for now is just a vector of transactions
@@ -22,11 +25,14 @@ impl MinerPool{
     pub fn new() -> Self {
         let (transaction_sender, transaction_receiver) = flume::unbounded();
         let (block_sender, block_receiver) = flume::unbounded();
+        let (block_ready_sender, block_ready_receiver) = flume::unbounded();
         MinerPool {
             transaction_receiver,
             transaction_sender,
-            block_sender,
-            block_receiver,
+            block_proposition_sender: block_sender,
+            block_poroposition_receiver: block_receiver,
+            block_ready_sender,
+            block_ready_receiver,
         }
     }
 
@@ -46,23 +52,40 @@ impl MinerPool{
     }
 
     /// Returns the block at the front of the pool
-    pub fn pop_block(&self) -> Option<Block> {
+    pub fn pop_block_preposition(&self) -> Option<Block> {
         // receive the block from the sender
-        match self.block_receiver.recv() {
+        match self.block_poroposition_receiver.recv() {
             Ok(block) => Some(block),
             Err(_) => None,
         }
     }
 
     /// Adds a block to the pool
-    pub fn add_block(&self, block: Block) {
+    pub fn add_block_proposition(&self, block: Block) {
         // send the block to the receiver
-        self.block_sender.send(block).unwrap();
+        self.block_proposition_sender.send(block).unwrap();
     }
 
-    /// Returns the number of blocks in the pool
-    pub fn block_count(&self) -> usize {
-        // get the number of blocks in the pool
-        self.block_receiver.len()
+    pub fn add_ready_block(&self, block: Block) {
+        // send the block to the receiver
+        self.block_ready_sender.send(block).unwrap();
+    }
+    
+    pub fn pop_ready_block(&self) -> Option<Block> {
+        // receive the block from the sender
+        match self.block_ready_receiver.recv() {
+            Ok(block) => Some(block),
+            Err(_) => None,
+        }
+    }
+
+    pub fn ready_block_count(&self) -> usize {
+        // read the block count
+        self.block_poroposition_receiver.len()
+    }
+
+    pub fn proposed_block_count(&self) -> usize {
+        // read the block count
+        self.block_ready_receiver.len()
     }
 }

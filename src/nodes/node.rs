@@ -90,8 +90,6 @@ impl Node {
         tokio::spawn(serve_peers(self_clone.clone()));
         tokio::spawn(broadcast_knowledge(self_clone));
     }
-    
-
 
     /// Register a transaction filter callback - adds the callback channel and adds it to the transaction filter queue
     /// Sends a broadcast to request peers to also watch for the block - if a peer catches it, it will be sent back
@@ -141,18 +139,19 @@ impl Node {
                 //     return Ok(Message::BlockAck);
                 // }
                 // add the block to the chain if we have downloaded it already - first it is verified TODO add to a queue to be added later
+                let mut block = block.clone();
                 if let Some(chain) = self.chain.lock().await.as_mut(){
-                    self.settle_block(block, chain).await?;
+                    self.settle_block(&mut block, chain).await?;
                 }else{
                     // TODO is it ok to ignore rep here?
                     // if we do not have the chain, just forward the block if there is room in the stamps
-                    if block.tail.n_stamps() < N_TRANSMISSION_SIGNATURES {
+                    if block.header.tail.n_stamps() < N_TRANSMISSION_SIGNATURES {
                         let _ = self.stamp_block(&mut block.clone());
                         self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap();
                     }
                 }
                 // handle callback
-                self.handle_callbacks(block).await;
+                self.handle_callbacks(&block).await;
                 Ok(Message::BlockAck)
             },
             Message::BlockRequest(hash) => {
@@ -225,50 +224,59 @@ impl Node {
 
     /// After receiving a block - settle it to the chain
     /// Includes the tracking of reputation, braodcasting, and responding to callbacks
-    async fn settle_block(&self, block: &Block, chain: &mut Chain) -> Result<(), std::io::Error> {
-        let existing_block = chain.get_block(&block.hash.unwrap()).cloned(); // we will compare for changes to stamps
-        chain.add_new_block(block.clone())?; // if we pass this line, valid block
-        // update the reputation tracker with the block to rwared the miner
-        self.maybe_create_history(block.header.miner_address.unwrap()).await;
-        let mut reputations = self.reputations.lock().await;
-        let miner_history = reputations.get_mut(&block.header.miner_address.unwrap()).unwrap();
-        miner_history.settle_head(block.header.clone()); // SETTLE TO REWARD MINING
-        // reward the broadcaster
-        // self.maybe_create_history(declared_peer.public_key).await;
-        // let broadcaster_history = reputations.get_mut(&declared_peer.public_key).unwrap();
-        // broadcaster_history.reward_block_transmission();
+    async fn settle_block(&self, block: &mut Block, chain: &mut Chain) -> Result<(), std::io::Error> {
+        if block.header.miner_address.is_some(){ // meaning it is reqrd time
+            // the idea here is that blocks should not be mined until 
+            // the stamping process is done. do, if there is a miner address, then stamping is done on this block.
+
+            // update the reputation tracker with the block to rwared the miner
+            self.maybe_create_history(block.header.miner_address.unwrap()).await;
+            let mut reputations = self.reputations.lock().await;
+            let miner_history = reputations.get_mut(&block.header.miner_address.unwrap()).unwrap();
+            miner_history.settle_head(block.header.clone()); // SETTLE TO REWARD MINING
+            // REWARD STAMPERS
+            // 3. reward reputation for the new stamps
+            for stamp in block.header.tail.stamps.iter() {
+                self.maybe_create_history(stamp.address).await;
+                let history = reputations.get_mut(&stamp.address).unwrap();
+                history.settle_tail(&block.header.tail, block.header); // SETTLE TO REWARD
+            }
+            chain.add_new_block(block.clone())?; // if we pass this line, valid block
+            return Ok(());
+        }
         // ================================================
-        // 1. check for stamp differences
-        let existing_stamps = match existing_block { // what was there before
-            Some(block) => HashSet::from(block.tail.stamps),
-            None => HashSet::new(),
-        };
-        let has_our_stamp = existing_stamps.iter().any(|stamp| stamp.address == *self.public_key);
-        // 2. start mutation by adding our own if relevant
-        let block = chain.get_block_mut(&block.hash.unwrap()).unwrap();
-        // stamp if we have not already
-        if !has_our_stamp {
+        // stamp and transmit
+        let n_stamps = block.header.tail.n_stamps();
+        let has_our_stamp = block.header.tail.stamps.iter().any(|stamp| stamp.address == *self.public_key);
+        if n_stamps < N_TRANSMISSION_SIGNATURES && !has_our_stamp {
             let signature = self.signature_for(&block.header)?;
             let stamp = Stamp {
                 address: *self.public_key,
                 signature,
             };
-            let _ = block.tail.stamp(stamp); // if failure, then full
+            let _ = block.header.tail.stamp(stamp); // if failure, then full - doesnt matter anyways
         }
-        let new_stamps = HashSet::from(block.tail.stamps); // what is there now
-        let added_stamps = new_stamps.difference(&existing_stamps).cloned().collect::<HashSet<_>>(); // the new ones
-        // 3. reward reputation for the new stamps
-        for stamp in added_stamps.iter() {
-            self.maybe_create_history(stamp.address).await;
-            let history = reputations.get_mut(&stamp.address).unwrap();
-            history.settle_tail(&block.tail, block.header); // SETTLE TO REWARD
-        }
-        // 4. if changes have been made - broadcast the block
-        if !added_stamps.is_empty() { // if it is, we simply broadcast the block
-            // broadcast the block to all peers
-            self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap();
-            // TODO maybe we should not do this here - but rather in the broadcast thread
-            // self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap();
+        if has_our_stamp && n_stamps == N_TRANSMISSION_SIGNATURES{
+            // this means that it was already full - do NOT transmit just assign to mine
+            match self.miner_pool{
+                None => {},
+                Some(ref pool) => {
+                    // add the block to the pool
+                    pool.add_ready_block(block.clone());
+                }
+            }
+        }else if n_stamps == N_TRANSMISSION_SIGNATURES - 1{
+            // this means that we were the last to sign. forward and assign to mine
+            self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap(); // forward
+            match self.miner_pool{
+                None => {},
+                Some(ref pool) => {
+                    // add the block to the pool
+                    pool.add_ready_block(block.clone());
+                }
+            }
+        }else{
+            self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap(); // forward
         }
         Ok(())
     }
@@ -307,7 +315,7 @@ impl Node {
             address: *self.public_key,
             signature: signature,
         };
-        block.tail.stamp(stamp)
+        block.header.tail.stamp(stamp)
     }
 
     /// ed25519 signature for the node over the hash of some data
