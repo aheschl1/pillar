@@ -15,12 +15,12 @@ use super::transaction::Transaction;
 pub struct Block{
     // header is the header of the block
     pub header: BlockHeader,
+    // tail is the tail of the block which can contain stamps
+    pub tail: BlockTail,
     // transactions is a vector of transactions in this block
     pub transactions: Vec<Transaction>,
     // hash is the sha3_256 hash of the block header - is none if it hasnt been mined
     pub hash: Option<[u8; 32]>,
-    // tail is the tail of the block which can contain stamps
-    pub tail: BlockTail,
     // the merkle tree
     #[serde(skip)]
     pub merkle_tree: MerkleTree,
@@ -146,6 +146,21 @@ impl BlockTail {
             }
         }
         stampers
+    }
+}
+
+impl Hashable for BlockTail{
+    /// Hash the block tail using SHA3-256
+    /// 
+    /// # Returns
+    /// 
+    /// * The SHA3-256 hash of the block tail
+    fn hash(&self, hash_function: &mut impl HashFunction) -> Result<[u8; 32], std::io::Error>{
+        for i in 0..N_TRANSMISSION_SIGNATURES {
+            hash_function.update(self.stamps[i].signature);
+            hash_function.update(self.stamps[i].address);
+        }
+        Ok(hash_function.digest().unwrap())
     }
 }
 

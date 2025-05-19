@@ -52,6 +52,7 @@ async fn query_block_from_peer(
 /// Given a shard (validated) uses the node to get the chain
 async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std::io::Error> {
     let mut threads = Vec::new();
+    // get many blocks simultaneously
     let (tx, block_channel) = flume::unbounded();
     for (hash, _) in shard.headers{
         let nodeclone = node.clone();

@@ -1,8 +1,8 @@
 
 use core::f64;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use crate::reputation::history::NodeHistory;
+use crate::{nodes::{messages::Message, node::{Broadcaster, Node}, peer::Peer}, reputation::history::NodeHistory};
 
 const MINING_WORTH_HALF_LIFE: f64 = 8f64;
 const MINING_WORTH_MAX: f64 = 1f64;
@@ -55,6 +55,31 @@ pub fn nth_percentile_peer(lower_n: f32, upper_n: f32, reputations: &HashMap<[u8
         peers.push(*reputations[i].0);
     }
     peers
+}
+
+/// Given a node, query all peers for their reputations
+/// This will return a vector of peers that are between the lower_n-th and upper_n-th percentile
+/// Only takes the inetrsection of all peer responses
+pub async fn query_for_peers_by_reputation(node: Node, lower_n: f32, upper_n: f32) -> Result<Vec<Peer>, std::io::Error>{
+    let request = Message::PercentileFilteredPeerRequest(lower_n, upper_n);
+    let responses = node.broadcast(&request).await?;
+    // get the peer PROPOSALS
+    let responses: Vec<HashSet<&Peer>> = responses.iter().map(|m|{
+        match m{
+            Message::PercentileFilteredPeerResponse(peers) => {
+                peers.iter().collect::<HashSet<_>>()
+            },
+            _ => {
+                panic!("Expected PercentileFilteredPeerResponse, got {:?}", m); // TODO dont just panic here
+            }
+        }
+    }).collect();
+    // the final response is the intersection of all responses
+    let mut final_response = responses[0].clone();
+    for i in 1..responses.len() {
+        final_response = final_response.intersection(&responses[i]).cloned().collect();
+    }
+    Ok(final_response.iter().cloned().cloned().collect::<Vec<Peer>>()) // super sus souble clone here
 }
 
 #[cfg(test)]

@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 use super::messages::Message;
 
 use crate::{
-    blockchain::chain::Chain, crypto::{hashing::{DefaultHash, HashFunction, Hashable}, signing::{DefaultSigner, SigFunction, Signable}}, primitives::{block::{Block, BlockHeader, Stamp}, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::dicover_chain, communication::{broadcast_knowledge, serve_peers}, reputation::N_TRANSMISSION_SIGNATURES}, reputation::history::NodeHistory
+    blockchain::chain::Chain, crypto::signing::{DefaultSigner, SigFunction, Signable}, primitives::{block::{Block, BlockHeader, Stamp}, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::dicover_chain, communication::{broadcast_knowledge, serve_peers}, reputation::{self, nth_percentile_peer, N_TRANSMISSION_SIGNATURES}}, reputation::history::NodeHistory
 };
 
 #[derive(Clone)]
@@ -206,6 +206,16 @@ impl Node {
                 }
                 Ok(Message::TransactionFilterAck)
             },
+            Message::PercentileFilteredPeerRequest(lower_n, upper_n) => {
+                let reputations = self.reputations.lock().await;
+                let peers = nth_percentile_peer(*lower_n, *upper_n, &reputations);
+                let peers_map = self.peers.lock().await.clone();
+                // find the peer objects in the address list 
+                let filtered_peers = peers.iter().filter_map(|peer| {
+                    peers_map.get(peer).cloned()
+                }).collect::<Vec<_>>();
+                Ok(Message::PercentileFilteredPeerResponse(filtered_peers))
+            }
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "Expected a request",

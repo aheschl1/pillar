@@ -49,6 +49,10 @@ pub enum Message {
     ChainSyncRequest(HashSet<[u8; 32]>),
     // chain syncing response - the blocks that are missing. each chain is the child of leaves that shoudle be kept
     ChainSyncResponse(Vec<Chain>),
+    // request for peers filtered between a lower percentile and an upper percentile based on reputation
+    PercentileFilteredPeerRequest(f32, f32),
+    // response with peers filtered between a lower percentile and an upper percentile based on reputation
+    PercentileFilteredPeerResponse(Vec<Peer>),
     // error message
     Error(String)
 }

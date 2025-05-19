@@ -5,7 +5,7 @@ use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream};
 
 use super::messages::Message;
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash)]
 pub struct Peer{
     /// The public key of the peer
     pub public_key: [u8; 32],
