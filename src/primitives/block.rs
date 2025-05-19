@@ -5,7 +5,7 @@ use serde_with::{serde_as, Bytes};
 
 use crate::crypto::hashing::{HashFunction, Hashable, DefaultHash};
 use crate::crypto::merkle::{generate_proof_of_inclusion, generate_tree, verify_proof_of_inclusion, MerkleProof, MerkleTree};
-use crate::crypto::signing::Signable;
+use crate::crypto::signing::{DefaultVerifier, SigVerFunction, Signable};
 use crate::protocol::difficulty::get_difficulty_from_depth;
 use crate::protocol::pow::is_valid_hash;
 use crate::protocol::reputation::N_TRANSMISSION_SIGNATURES;
@@ -15,8 +15,6 @@ use super::transaction::Transaction;
 pub struct Block{
     // header is the header of the block
     pub header: BlockHeader,
-    // tail is the tail of the block which can contain stamps
-    pub tail: BlockTail,
     // transactions is a vector of transactions in this block
     pub transactions: Vec<Transaction>,
     // hash is the sha3_256 hash of the block header - is none if it hasnt been mined
@@ -78,7 +76,7 @@ impl Default for Stamp {
 
 /// A block tail tracks the signatures of people who have broadcasted the block
 /// This is used for immutibility of participation reputation
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Eq, Default)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq, Default)]
 pub struct BlockTail{
     // the signatures of the people who have broadcasted the block
     pub stamps: [Stamp; N_TRANSMISSION_SIGNATURES]
@@ -117,6 +115,18 @@ impl BlockTail {
         }
     }
 
+
+    /// removes any stamps with invalid signatures
+    pub fn clean(&mut self, target: &impl Signable<64>) {
+        for i in 0..self.n_stamps() {
+            let sigver = DefaultVerifier::from_bytes(&self.stamps[i].address);
+            if !sigver.verify(&self.stamps[i].signature, target) {
+                self.stamps[i] = Stamp::default();
+            }
+        }
+        self.collapse();
+    }
+
     /// Stamp the block with a signature
     /// Collapses the tail to remove empty space
     /// 
@@ -149,22 +159,7 @@ impl BlockTail {
     }
 }
 
-impl Hashable for BlockTail{
-    /// Hash the block tail using SHA3-256
-    /// 
-    /// # Returns
-    /// 
-    /// * The SHA3-256 hash of the block tail
-    fn hash(&self, hash_function: &mut impl HashFunction) -> Result<[u8; 32], std::io::Error>{
-        for i in 0..N_TRANSMISSION_SIGNATURES {
-            hash_function.update(self.stamps[i].signature);
-            hash_function.update(self.stamps[i].address);
-        }
-        Ok(hash_function.digest().unwrap())
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Copy, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq)]
 pub struct BlockHeader{
     // previous_hash is the sha3_356 hash of the previous block in the chain
     pub previous_hash: [u8; 32],
@@ -177,20 +172,9 @@ pub struct BlockHeader{
     // the address of the miner is the sha3_256 hash of the miner address
     pub miner_address: Option<[u8; 32]>,
     // the depth is a depth of the block in the chain
-    pub depth: u64
-}
-
-impl Clone for BlockHeader {
-    fn clone(&self) -> Self {
-        BlockHeader {
-            previous_hash: self.previous_hash,
-            merkle_root: self.merkle_root,
-            nonce: self.nonce,
-            timestamp: self.timestamp,
-            miner_address: self.miner_address,
-            depth: self.depth
-        }
-    }
+    pub depth: u64,
+    // tail is the tail of the block which can contain stamps
+    pub tail: BlockTail,
 }
 
 impl BlockHeader {
@@ -199,6 +183,7 @@ impl BlockHeader {
         merkle_root: [u8; 32], 
         nonce: u64, timestamp: u64,
         miner_address: Option<[u8; 32]>,
+        tail: BlockTail,
         depth: u64
     ) -> Self {
         BlockHeader {
@@ -207,7 +192,8 @@ impl BlockHeader {
             nonce,
             timestamp,
             miner_address,
-            depth
+            depth,
+            tail
         }
     }
 
@@ -237,6 +223,16 @@ impl BlockHeader {
         if !is_valid_hash(get_difficulty_from_depth(self.depth), &self.hash(hasher).unwrap()) {
             return false;
         }
+        // check that all the signatures work in the tail
+        let tail = &mut self.tail.clone();
+        tail.collapse();
+        for i in 0..tail.n_stamps() {
+            let stamp = tail.stamps[i];
+            let sigver = DefaultVerifier::from_bytes(&stamp.address);
+            if !sigver.verify(&stamp.signature, self) {
+                return false;
+            }
+        }
         // check the time is not too far in the future
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -247,6 +243,26 @@ impl BlockHeader {
             return false;
         }
         true
+    }
+
+    /// A hashing function that doesnt rely on any moving pieces like the miner address
+    /// This is used for stamping - so that you can stamp before the miner address is set, and it doesnt change based on future stamps.
+    fn hash_clean(
+        &self,
+        hasher: &mut impl HashFunction
+    ) -> Result<[u8; 32], std::io::Error>{
+        if let None = self.miner_address {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Miner address is not set"
+            ));
+        }
+        hasher.update(self.previous_hash);
+        hasher.update(self.merkle_root);
+        hasher.update(self.nonce.to_le_bytes());
+        hasher.update(self.timestamp.to_le_bytes());
+        hasher.update(self.depth.to_le_bytes());
+        Ok(hasher.digest().unwrap())
     }
 }
 
@@ -269,6 +285,10 @@ impl Hashable for BlockHeader {
         hash_function.update(self.nonce.to_le_bytes());
         hash_function.update(self.timestamp.to_le_bytes());
         hash_function.update(self.depth.to_le_bytes());
+        for i in 0..N_TRANSMISSION_SIGNATURES {
+            hash_function.update(self.tail.stamps[i].signature);
+            hash_function.update(self.tail.stamps[i].address);
+        }
         Ok(hash_function.digest().unwrap())
     }
 }
@@ -286,23 +306,23 @@ impl Block {
         hasher: &mut impl HashFunction,
     ) -> Self {
         let merkle_tree = generate_tree(transactions.iter().collect(), hasher).unwrap();
+        let tail = BlockTail {
+            stamps: stamps
+        };
         let header = BlockHeader::new(
             previous_hash, 
             merkle_tree.nodes.get(merkle_tree.root.unwrap()).unwrap().hash,
             nonce, 
             timestamp,
             miner_address,
-            depth
+            tail,
+            depth,
         );
         let hash = header.hash(hasher);
-        let tail = BlockTail {
-            stamps: stamps
-        };
         Block {
             header,
             transactions,
             hash: if hash.is_ok() {Some(hash.unwrap())} else {None},
-            tail,
             merkle_tree
         }
     }
@@ -334,7 +354,7 @@ impl Block {
 
 impl Signable<64> for BlockHeader {
     fn get_signing_bytes(&self) -> impl AsRef<[u8]> {
-        self.hash(&mut DefaultHash::new()).unwrap()
+        self.hash_clean(&mut DefaultHash::new()).unwrap()
     }
     
     fn sign<const K: usize, const P: usize>(&mut self, signing_function: &mut impl crate::crypto::signing::SigFunction<K, P, 64>) -> [u8; 64] {

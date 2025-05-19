@@ -1,6 +1,6 @@
 use std::{cmp::max, collections::HashSet};
 
-use crate::{blockchain::{chain_shard::ChainShard, TrimmableChain}, crypto::hashing::{HashFunction, Hashable}, primitives::block::{BlockHeader, BlockTail}, protocol::reputation::{block_worth_scaling_fn, BLOCK_STAMP_SCALING}};
+use crate::{blockchain::{chain_shard::ChainShard, TrimmableChain}, crypto::hashing::{HashFunction, Hashable}, primitives::block::{BlockHeader, BlockTail}, protocol::reputation::{block_worth_scaling_fn, BLOCK_STAMP_SCALING, N_TRANSMISSION_SIGNATURES}};
 
 /// The reputation structure holds all the information needed to compute the reputation of a node
 /// This information should be stored by each node, and each node can add it to a side chain
@@ -100,7 +100,9 @@ impl NodeHistory{
         // a brand new block is worth 1 reputation - it reduces exponentially over time
         let mut reputation: f64 = 0.0;
         for block in self.blocks_mined.iter() {
-            reputation += block_worth_scaling_fn(block.timestamp);
+            let n: f64 = N_TRANSMISSION_SIGNATURES as f64;
+            let stamp_boost_fn = (block.tail.n_stamps() as f64 + n) / n; // extra reward for mining when there are stamps
+            reputation += block_worth_scaling_fn(block.timestamp) * stamp_boost_fn;
         }
         reputation
     }

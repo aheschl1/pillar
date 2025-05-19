@@ -7,8 +7,13 @@ pub async fn broadcast_knowledge(node: Node) -> Result<(), std::io::Error> {
     loop {
         // send a message to all peers
         if let Some(pool) = &node.miner_pool { // broadcast out of mining pool
-            while pool.block_count() > 0 {
-                node.broadcast(&Message::BlockTransmission(pool.pop_block().unwrap()))
+            // while pool.ready_block_count() > 0 {
+            //     node.broadcast(&Message::BlockTransmission(pool.pop_ready_block().unwrap()))
+            //     .await?;
+            // }
+
+            while pool.proposed_block_count() > 0 {
+                node.broadcast(&Message::BlockTransmission(pool.pop_block_preposition().unwrap()))
                 .await?;
             }
         }
