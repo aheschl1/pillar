@@ -5,7 +5,7 @@ use serde::{Serialize, Deserialize};
 use super::peer::Peer;
 
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Message {
     // dummy ping
     Ping,

@@ -147,7 +147,7 @@ pub async fn dicover_chain(node: &mut Node) -> Result<Chain, std::io::Error> {
     let mut chain_shards = Vec::new();
     for (_, peer) in peers.iter_mut() {
         // send the chain shard request to the peer
-        let response = peer.communicate(&Message::ChainShardRequest, &node.clone().into()).await?;
+        let response = peer.communicate(&Message::ChainShardRequest, &(node.clone().into())).await?;
         match response {
             Message::ChainShardResponse(shard) => {
                 // add the shard to the chain
@@ -161,14 +161,14 @@ pub async fn dicover_chain(node: &mut Node) -> Result<Chain, std::io::Error> {
     }
     drop(peers);
     // find deepest out of peers
-    let shard = deepest_shard(chain_shards)?;
+    let shard = deepest_shard(&chain_shards)?;
     // now we have valid shards
-    shard_to_chain(node, shard).await
+    shard_to_chain(node, shard.clone()).await
 }
 
 /// Find the deepest chain shard - they shoudl in theory be the same but we want the longest
 /// TODO: Maybe we should check agreement of hashes and such, but with POW deepest should be accurate
-pub fn deepest_shard(shards: Vec<ChainShard>) -> Result<ChainShard, std::io::Error> {
+pub fn deepest_shard(shards: &Vec<ChainShard>) -> Result<ChainShard, std::io::Error> {
     let shard = shards.iter().max_by_key(|shard| shard.leaves.iter().max_by_key(|leaf| shard.headers[*leaf].depth).unwrap());
     match shard {
         Some(shard) => Ok(shard.clone()),

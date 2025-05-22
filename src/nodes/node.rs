@@ -380,3 +380,43 @@ impl Broadcaster for Node {
         Ok(responses)
     }
 }
+
+#[cfg(test)]
+mod tests{
+    use super::Node;
+    use std::net::{IpAddr, Ipv4Addr};
+
+    #[tokio::test]
+    async fn test_create_empty_node() {
+        let public_key = [0u8; 32];
+        let private_key = [1u8; 32];
+        let ip_address = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        let port = 8080;
+        let peers = vec![];
+        let chain = None;
+        let transaction_pool = None;
+
+        let node = Node::new(
+            public_key,
+            private_key,
+            ip_address,
+            port,
+            peers,
+            chain,
+            transaction_pool,
+        );
+
+        assert_eq!(*node.public_key, public_key);
+        assert_eq!(*node.private_key, private_key);
+        assert_eq!(node.ip_address, ip_address);
+        assert_eq!(*node.port, port);
+        assert!(node.peers.lock().await.is_empty());
+        assert!(node.chain.lock().await.is_none());
+        assert!(node.miner_pool.is_none());
+        assert!(node.chain.lock().await.is_none());
+        assert!(node.transaction_filters.lock().await.is_empty());
+        assert!(node.reputations.lock().await.is_empty());
+        assert!(node.filter_callbacks.lock().await.is_empty());
+    }
+        
+}
