@@ -28,6 +28,8 @@ pub struct Node {
     pub broadcast_receiver: Receiver<Message>,
     /// transaction input
     pub broadcast_sender: Sender<Message>,
+    // a collection of things already broadcasted
+    pub broadcasted_already: Arc<Mutex<HashSet<[u8; 32]>>>,
     // transaction filter queue
     pub transaction_filters: Arc<Mutex<Vec<(TransactionFilter, Peer)>>>,
     /// mapping of reputations for peers
@@ -49,6 +51,7 @@ impl Node {
     ) -> Self {
         let (broadcast_sender, broadcast_receiver) = flume::unbounded();
         let transaction_filters = Arc::new(Mutex::new(Vec::new()));
+        let broadcasted_already = Arc::new(Mutex::new(HashSet::new()));
         let peer_map = peers
             .iter()
             .map(|peer| (peer.public_key, peer.clone()))
@@ -61,6 +64,7 @@ impl Node {
             peers: Arc::new(Mutex::new(peer_map)),
             chain: Arc::new(Mutex::new(chain)),
             miner_pool: transaction_pool.map(Arc::new),
+            broadcasted_already,
             broadcast_receiver,
             broadcast_sender,
             transaction_filters,
@@ -121,10 +125,6 @@ impl Node {
                 }
             },
             Message::TransactionRequest(transaction) => {
-                // IF IT HAS OUR PUBLIC KEY< DROP
-                if transaction.header.sender == *self.public_key {
-                    return Ok(Message::TransactionAck);
-                }
                 // add the transaction to the pool
                 if let Some(ref pool) = self.miner_pool {
                     pool.add_transaction(transaction.clone());
@@ -134,10 +134,6 @@ impl Node {
                 Ok(Message::TransactionAck)
             }
             Message::BlockTransmission(block) => {
-                // if block.header.miner_address.unwrap() == *self.public_key {
-                //     // SKIP OWN BLOCK 
-                //     return Ok(Message::BlockAck);
-                // }
                 // add the block to the chain if we have downloaded it already - first it is verified TODO add to a queue to be added later
                 let mut block = block.clone();
                 if let Some(chain) = self.chain.lock().await.as_mut(){
@@ -242,6 +238,7 @@ impl Node {
                 history.settle_tail(&block.header.tail, block.header); // SETTLE TO REWARD
             }
             chain.add_new_block(block.clone())?; // if we pass this line, valid block
+            self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap(); // forward
             return Ok(());
         }
         // ================================================

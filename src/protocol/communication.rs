@@ -1,9 +1,11 @@
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::{TcpListener, TcpStream}};
 
-use crate::nodes::{messages::{get_declaration_length, Message, Versions}, node::{Broadcaster, Node}};
+use crate::{crypto::hashing::{DefaultHash, HashFunction, Hashable}, nodes::{messages::{get_declaration_length, Message, Versions}, node::{Broadcaster, Node}}};
 
 /// Background process that consumes mined blocks, and transactions which must be forwarded
 pub async fn broadcast_knowledge(node: Node) -> Result<(), std::io::Error> {
+    let mut broadcasted_already = node.broadcasted_already.lock().await;
+    let mut hasher = DefaultHash::new();
     loop {
         // send a message to all peers
         if let Some(pool) = &node.miner_pool { // broadcast out of mining pool
@@ -21,7 +23,14 @@ pub async fn broadcast_knowledge(node: Node) -> Result<(), std::io::Error> {
         while i < 10 && !node.broadcast_receiver.is_empty() {
             // receive the transaction from the sender
             let message = node.broadcast_receiver.recv().unwrap();
+            let hash = message.hash(&mut hasher).unwrap();
+            // do not broadcast if already broadcasted
+            if broadcasted_already.contains(&hash) {
+                continue;
+            }
             node.broadcast(&message).await?;
+            // add the message to the broadcasted list
+            broadcasted_already.insert(hash);
             i += 1; // We want to make sure we check back at the mining pool
         }
     }

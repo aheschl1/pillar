@@ -11,7 +11,7 @@ new_key_type! {
 }
 
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct TreeNode {
     pub left: Option<NodeKey>,
     pub right: Option<NodeKey>,
@@ -19,13 +19,13 @@ pub struct TreeNode {
     pub hash: [u8; 32],
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Hash, PartialEq, Eq)]
 pub enum HashDirection {
     Left,
     Right,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Hash, PartialEq, Eq)]
 pub struct MerkleProof {
     pub hashes: Vec<[u8; 32]>,
     pub directions: Vec<HashDirection>,
@@ -37,6 +37,28 @@ pub struct MerkleTree {
     pub nodes: SlotMap<NodeKey, TreeNode>,
     pub root: Option<NodeKey>,
     pub leaves: Option<Vec<NodeKey>>,
+}
+
+impl Hash for MerkleTree{
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        for (key, node) in self.nodes.iter() {
+            node.hash(state);
+            key.hash(state);
+        }
+        self.root.hash(state);
+        self.leaves.hash(state);
+    }
+}
+
+impl PartialEq for MerkleTree {
+    fn eq(&self, other: &Self) -> bool {
+        // compare hash
+        self.get_root_hash() == other.get_root_hash()
+    }
+}
+
+impl Eq for MerkleTree {
+    
 }
 
 impl Default for MerkleTree {

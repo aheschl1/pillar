@@ -1,6 +1,7 @@
-use std::{collections::HashSet, net::{IpAddr, Ipv4Addr, Ipv6Addr}};
+use core::hash;
+use std::{collections::HashSet, hash::Hash, net::{IpAddr, Ipv4Addr, Ipv6Addr}};
 
-use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, crypto::merkle::MerkleProof, primitives::{block::{Block, BlockHeader}, transaction::{Transaction, TransactionFilter}}};
+use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, crypto::{hashing::{DefaultHash, HashFunction, Hashable}, merkle::MerkleProof}, primitives::{block::{Block, BlockHeader}, transaction::{Transaction, TransactionFilter}}};
 use serde::{Serialize, Deserialize};
 use super::peer::Peer;
 
@@ -55,6 +56,14 @@ pub enum Message {
     PercentileFilteredPeerResponse(Vec<Peer>),
     // error message
     Error(String)
+}
+
+impl Hashable for Message{
+    fn hash(&self, hasher: &mut impl HashFunction) -> Result<[u8; 32], std::io::Error> {
+        let bin = bincode::serialize(self).unwrap();
+        hasher.update(bin);
+        hasher.digest()
+    }
 }
 
 pub enum Versions{

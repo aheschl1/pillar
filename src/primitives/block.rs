@@ -11,7 +11,7 @@ use crate::protocol::pow::is_valid_hash;
 use crate::protocol::reputation::N_TRANSMISSION_SIGNATURES;
 use super::transaction::Transaction;
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, Hash, PartialEq, Eq)]
 pub struct Block{
     // header is the header of the block
     pub header: BlockHeader,
@@ -76,7 +76,7 @@ impl Default for Stamp {
 
 /// A block tail tracks the signatures of people who have broadcasted the block
 /// This is used for immutibility of participation reputation
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq, Default)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq, Default, Hash)]
 pub struct BlockTail{
     // the signatures of the people who have broadcasted the block
     pub stamps: [Stamp; N_TRANSMISSION_SIGNATURES]
@@ -159,7 +159,7 @@ impl BlockTail {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq, Hash)]
 pub struct BlockHeader{
     // previous_hash is the sha3_356 hash of the previous block in the chain
     pub previous_hash: [u8; 32],

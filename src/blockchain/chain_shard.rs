@@ -9,7 +9,7 @@ use super::{chain::Chain, TrimmableChain};
 /// chain shard is used to build up a chain given a list of block headers
 /// It is responsible for the validation and construction of the chain from a new node.
 /// // chain shard is just a chain of headers
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChainShard {
     pub headers: HashMap<[u8; 32], BlockHeader>,
     pub leaves: HashSet<[u8; 32]>
