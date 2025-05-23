@@ -222,9 +222,10 @@ impl Node {
     /// Includes the tracking of reputation, braodcasting, and responding to callbacks
     async fn settle_block(&self, block: &mut Block, chain: &mut Chain) -> Result<(), std::io::Error> {
         if block.header.miner_address.is_some(){ // meaning it is reqrd time
-            // the idea here is that blocks should not be mined until 
+            chain.add_new_block(block.clone())?; // if we pass this line, valid block
+            // initialize broadcast
+            self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap(); // forward
             // the stamping process is done. do, if there is a miner address, then stamping is done on this block.
-
             // update the reputation tracker with the block to rwared the miner
             self.maybe_create_history(block.header.miner_address.unwrap()).await;
             let mut reputations = self.reputations.lock().await;
@@ -237,8 +238,6 @@ impl Node {
                 let history = reputations.get_mut(&stamp.address).unwrap();
                 history.settle_tail(&block.header.tail, block.header); // SETTLE TO REWARD
             }
-            chain.add_new_block(block.clone())?; // if we pass this line, valid block
-            self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap(); // forward
             return Ok(());
         }
         // ================================================
