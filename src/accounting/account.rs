@@ -114,3 +114,108 @@ impl AccountManager{
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::primitives::block::Block;
+    use crate::primitives::transaction::{Transaction, TransactionHeader};
+    use crate::crypto::hashing::{DefaultHash, HashFunction};
+
+    #[test]
+    fn test_add_account() {
+        let mut account_manager = AccountManager::new();
+        let account = Account::new([1; 32], 100);
+        let added_account = account_manager.add_account(account);
+
+        assert_eq!(account_manager.accounts.len(), 1);
+        assert_eq!(account_manager.address_to_account.len(), 1);
+        assert_eq!(added_account.lock().unwrap().balance, 100);
+    }
+
+    #[test]
+    fn test_get_account() {
+        let mut account_manager = AccountManager::new();
+        let account = Account::new([1; 32], 100);
+        account_manager.add_account(account);
+
+        let retrieved_account = account_manager.get_account(&[1; 32]);
+        assert!(retrieved_account.is_some());
+        assert_eq!(retrieved_account.unwrap().lock().unwrap().balance, 100);
+    }
+
+    #[test]
+    fn test_update_from_block() {
+        let mut account_manager = AccountManager::new();
+        let sender = account_manager.add_account(Account::new([1; 32], 100));
+        let receiver = account_manager.add_account(Account::new([2; 32], 0));
+
+        let mut hasher = DefaultHash::new();
+        let transaction = Transaction::new(
+            [1; 32],
+            [2; 32],
+            50,
+            0,
+            0,
+            &mut hasher,
+        );
+
+        let mut block = Block::new(
+            [0; 32],
+            0,
+            0,
+            vec![transaction],
+            None,
+            Default::default(),
+            1,
+            &mut hasher,
+        );
+
+        block.hash = Some([0; 32]); // Mocking the block hash for testing
+
+        account_manager.update_from_block(&block);
+
+        assert_eq!(sender.lock().unwrap().balance, 50);
+        assert_eq!(receiver.lock().unwrap().balance, 50);
+        assert_eq!(sender.lock().unwrap().nonce, 1);
+        assert_eq!(sender.lock().unwrap().history.len(), 2);
+        assert_eq!(receiver.lock().unwrap().history.len(), 1);
+    }
+
+    #[test]
+    fn test_create_new_account_on_transaction() {
+        let mut account_manager = AccountManager::new();
+        let sender = account_manager.add_account(Account::new([1; 32], 100));
+
+        let mut hasher = DefaultHash::new();
+        let transaction = Transaction::new(
+            [1; 32],
+            [3; 32], // Receiver does not exist yet
+            50,
+            0,
+            0,
+            &mut hasher,
+        );
+
+        let mut block = Block::new(
+            [0; 32],
+            0,
+            0,
+            vec![transaction],
+            None,
+            Default::default(),
+            1,
+            &mut hasher,
+        );
+
+        block.hash = Some([0; 32]); // Mocking the block hash for testing
+
+        account_manager.update_from_block(&block);
+
+        let receiver = account_manager.get_account(&[3; 32]);
+        assert!(receiver.is_some());
+        assert_eq!(receiver.as_ref().unwrap().lock().unwrap().history.len(), 1);
+        assert_eq!(receiver.unwrap().lock().unwrap().balance, 50);
+        assert_eq!(sender.lock().unwrap().balance, 50);
+    }
+}

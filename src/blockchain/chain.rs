@@ -172,11 +172,7 @@ impl Chain {
         let account = account.clone().unwrap();
         if account.lock().unwrap().balance < transaction.header.amount {
             return false;
-        } // @todo: If there are multiple transactions of the same sender in a block, we need to check if the balance is enough for all of them
-        // // check nonce
-        // if transaction.header.nonce != account.lock().unwrap().nonce {
-        //     return false;
-        // }
+        } 
         return true;
     }
 
@@ -223,57 +219,6 @@ impl Chain {
             ))
         }
     } 
-
-    // -======= moved to trait ========
-    // pub fn trim(&mut self){
-    //     let mut seen = HashMap::<[u8; 32], [u8; 32]>::new(); // node: leaf leading there
-    //     let mut forks_to_kill = HashSet::<[u8; 32]>::new();
-    //     let mut sorted_leaves : Vec::<&[u8; 32]> = self.leaves.iter().collect();
-    //     // visit deepest leaves first so that we can look back at deeper forks later
-    //     sorted_leaves.sort_by_key(|x| -(self.blocks[*x].header.depth as i64)); 
-    //     for leaf in sorted_leaves{
-    //         // iterate backwards, marking each node
-    //         // if the node is already seen, then check the leaf that saw it - can they coexist?
-    //         let current_fork_depth = self.blocks[leaf].header.depth;
-    //         let mut current_node = self.blocks.get(leaf);
-    //         while let Some(node) = current_node { // while there is a prevvious block
-    //             if seen.contains_key(&node.hash.unwrap()){ // already seen
-    //                 let fork = &seen[&node.hash.unwrap()]; // the biggest fork off so far 
-    //                 let fork = self.blocks.get(fork).unwrap();
-    //                 if fork.header.depth >= current_fork_depth + 10{
-    //                     // kill this current fork from the leaf
-    //                     forks_to_kill.insert(leaf.clone());
-    //                     break; // leave this fork early - everything downstream has been marked, and we kill eitherway
-    //                 }
-    //             }else{
-    //                 // indicate seen
-    //                 seen.insert(node.hash.unwrap(), *leaf);
-    //             }
-    //             current_node = self.blocks.get(&node.header.previous_hash);
-    //         }
-    //     }
-    //     // actully trim
-    //     let mut nodes_to_remove = Vec::new();
-    //     for fork in forks_to_kill.iter(){
-    //         let mut current_node = self.blocks.get(fork);
-    //         // update leaves
-    //         self.leaves.remove(fork);
-    //         // collect nodes to remove until the seen is no longer the fork
-    //         while let Some(node) = current_node {
-    //             if seen[&node.hash.unwrap()] == *fork {
-    //                 nodes_to_remove.push(node.hash.unwrap());
-    //             }else{
-    //                 // we have reached the end of this fork
-    //                 break;
-    //             }
-    //             current_node = self.blocks.get(&node.header.previous_hash);
-    //         }
-    //     }
-    //     // perform removal after collecting nodes
-    //     for hash in nodes_to_remove {
-    //         self.blocks.remove(&hash);
-    //     }
-    // }
 }
 
 
@@ -297,10 +242,9 @@ mod tests {
     use crate::accounting::account::Account;
     use crate::crypto::signing::{DefaultSigner, SigFunction, Signable};
     use crate::primitives::block::BlockTail;
-    use crate::primitives::transaction::{self, Transaction};
-    use crate::crypto::hashing::DefaultHash;
+    use crate::primitives::transaction::{Transaction};
+    use crate::crypto::hashing::{DefaultHash, Hashable};
     use crate::protocol::pow::mine;
-    use crate::protocol::reputation::N_TRANSMISSION_SIGNATURES;
 
     #[test]
     fn test_chain_creation() {
@@ -556,5 +500,206 @@ mod tests {
         }
         assert_eq!(count, 13); // 12 blocks in the main chain
     }
+    
+    #[tokio::test]
+    async fn test_trim_removes_multiple_forks_of_different_lengths() {
+        let mut chain = Chain::new_with_genesis();
+        let mut signing_key = DefaultSigner::generate_random();
+        let sender = signing_key.get_verifying_function().to_bytes();
 
+        chain.account_manager.add_account(Account::new(sender, 20000));
+
+        let mut main_hash = chain.deepest_hash;
+        let genesis_hash = main_hash;
+
+        // Extend the main chain to depth 15
+        for depth in 1..=15 {
+            let mut transaction = Transaction::new(sender, [2; 32], 1, 0, depth-1, &mut DefaultHash::new());
+            transaction.sign(&mut signing_key);
+            let mut block = Block::new(
+                main_hash,
+                0,
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()+depth,
+                vec![transaction],
+                Some(sender),
+                BlockTail::default().stamps,
+                depth,
+                &mut DefaultHash::new(),
+            );
+            mine(&mut block, sender, DefaultHash::new()).await;
+            main_hash = block.hash.unwrap();
+            chain.add_new_block(block).unwrap();
+        }
+
+        // Create forks of different lengths
+        let mut fork_hashes = vec![];
+        let mut offset = 0;
+        for fork_length in 1..=3 {
+            let mut parent_hash = genesis_hash;
+            for depth in 1..=fork_length {
+                let mut transaction = Transaction::new(sender, [2; 32], 1, 0, 15 + offset, &mut DefaultHash::new());
+                offset += 1;
+                transaction.sign(&mut signing_key);
+                let mut fork_block = Block::new(
+                    parent_hash,
+                    0,
+                    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth + 20,
+                    vec![transaction],
+                    Some(sender),
+                    BlockTail::default().stamps,
+                    depth,
+                    &mut DefaultHash::new(),
+                );
+                mine(&mut fork_block, sender, DefaultHash::new()).await;
+                parent_hash = fork_block.hash.unwrap();
+                if depth == fork_length {
+                    fork_hashes.push(parent_hash);
+                }
+                chain.add_new_block(fork_block).unwrap();
+            }
+        }
+
+        // Verify forks were added
+        for hash in &fork_hashes {
+            assert!(chain.blocks.contains_key(hash));
+            assert!(chain.leaves.contains(hash));
+        }
+
+        // Trim the chain
+        chain.trim();
+
+        // Verify forks were removed
+        for hash in &fork_hashes {
+            assert!(!chain.blocks.contains_key(hash));
+            assert!(!chain.leaves.contains(hash));
+        }
+
+        // Verify the main chain remains intact
+        assert!(chain.blocks.contains_key(&main_hash));
+        assert_eq!(chain.leaves.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_trim_keeps_forks_within_threshold() {
+        let mut chain = Chain::new_with_genesis();
+        let mut signing_key = DefaultSigner::generate_random();
+        let sender = signing_key.get_verifying_function().to_bytes();
+
+        chain.account_manager.add_account(Account::new(sender, 2000));
+
+        let mut main_hash = chain.deepest_hash;
+        let genesis_hash = main_hash;
+
+        // Extend the main chain to depth 15
+        for depth in 1..=15 {
+            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth - 1, &mut DefaultHash::new());
+            transaction.sign(&mut signing_key);
+            let mut block = Block::new(
+                main_hash,
+                0,
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth,
+                vec![transaction],
+                Some(sender),
+                BlockTail::default().stamps,
+                depth,
+                &mut DefaultHash::new(),
+            );
+            mine(&mut block, sender, DefaultHash::new()).await;
+            main_hash = block.hash.unwrap();
+            chain.add_new_block(block).unwrap();
+        }
+
+        // Create a fork that is within the threshold (difference < 10)
+        let mut fork_hash = genesis_hash;
+        for depth in 1..=6 {
+            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth + 14, &mut DefaultHash::new());
+            transaction.sign(&mut signing_key);
+            let mut fork_block = Block::new(
+                fork_hash,
+                0,
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth + 20,
+                vec![transaction],
+                Some(sender),
+                BlockTail::default().stamps,
+                depth,
+                &mut DefaultHash::new(),
+            );
+            mine(&mut fork_block, sender, DefaultHash::new()).await;
+            fork_hash = fork_block.hash.unwrap();
+            chain.add_new_block(fork_block).unwrap();
+        }
+
+        // Trim the chain
+        chain.trim();
+
+        // Verify the fork was not removed
+        assert!(chain.blocks.contains_key(&fork_hash));
+        assert!(chain.leaves.contains(&fork_hash));
+
+        // Verify the main chain remains intact
+        assert!(chain.blocks.contains_key(&main_hash));
+        assert_eq!(chain.leaves.len(), 2); // Main chain and fork
+    }
+
+    #[tokio::test]
+    async fn test_trim_removes_fork_with_shared_nodes() {
+        let mut chain = Chain::new_with_genesis();
+        let mut signing_key = DefaultSigner::generate_random();
+        let sender = signing_key.get_verifying_function().to_bytes();
+
+        chain.account_manager.add_account(Account::new(sender, 2000));
+
+        let mut main_hash = chain.deepest_hash;
+        let genesis_hash = main_hash;
+
+        // Extend the main chain to depth 10
+        for depth in 1..=15 {
+            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth - 1, &mut DefaultHash::new());
+            transaction.sign(&mut signing_key);
+            let mut block = Block::new(
+                main_hash,
+                0,
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth,
+                vec![transaction],
+                Some(sender),
+                BlockTail::default().stamps,
+                depth,
+                &mut DefaultHash::new(),
+            );
+            mine(&mut block, sender, DefaultHash::new()).await;
+            main_hash = block.hash.unwrap();
+            chain.add_new_block(block).unwrap();
+        }
+
+        // Create a fork that shares some nodes with the main chain
+        let mut fork_hash = genesis_hash;
+        for depth in 1..=3 {
+            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth + 14, &mut DefaultHash::new());
+            transaction.sign(&mut signing_key);
+            let mut fork_block = Block::new(
+                fork_hash,
+                0,
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth + 15,
+                vec![transaction],
+                Some(sender),
+                BlockTail::default().stamps,
+                depth,
+                &mut DefaultHash::new(),
+            );
+            mine(&mut fork_block, sender, DefaultHash::new()).await;
+            fork_hash = fork_block.hash.unwrap();
+            chain.add_new_block(fork_block).unwrap();
+        }
+
+        // Trim the chain
+        chain.trim();
+
+        // Verify the fork was removed
+        assert!(!chain.blocks.contains_key(&fork_hash));
+        assert!(!chain.leaves.contains(&fork_hash));
+
+        // Verify the main chain remains intact
+        assert!(chain.blocks.contains_key(&main_hash));
+        assert_eq!(chain.leaves.len(), 1); // Only the main chain remains
+    }
 }

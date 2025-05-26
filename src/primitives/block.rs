@@ -11,7 +11,7 @@ use crate::protocol::pow::is_valid_hash;
 use crate::protocol::reputation::N_TRANSMISSION_SIGNATURES;
 use super::transaction::Transaction;
 
-#[derive(Debug, Serialize, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
 pub struct Block{
     // header is the header of the block
     pub header: BlockHeader,
@@ -101,16 +101,16 @@ impl BlockTail {
         for i in 0..N_TRANSMISSION_SIGNATURES {
             if self.stamps[i].address == [0; 32] {
                 empty.push_back(i);
-            }else if empty.len() > 0 {
+            }else{
                 if seen.contains(&self.stamps[i].address) {
                     // if the address is already seen, remove it
                     self.stamps[i] = Stamp::default();
                     empty.push_back(i);
-                }else{
-                    seen.insert(self.stamps[i].address); // record the address
+                } else if empty.len() > 0 {
                     self.stamps.swap(i, empty.pop_front().unwrap());
                     empty.push_back(i);
                 }
+                seen.insert(self.stamps[i].address); // record the address
             }
         }
     }
@@ -159,7 +159,7 @@ impl BlockTail {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq, Hash)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq, Default)]
 pub struct BlockHeader{
     // previous_hash is the sha3_356 hash of the previous block in the chain
     pub previous_hash: [u8; 32],
@@ -251,12 +251,6 @@ impl BlockHeader {
         &self,
         hasher: &mut impl HashFunction
     ) -> Result<[u8; 32], std::io::Error>{
-        if let None = self.miner_address {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "Miner address is not set"
-            ));
-        }
         hasher.update(self.previous_hash);
         hasher.update(self.merkle_root);
         hasher.update(self.nonce.to_le_bytes());
@@ -371,6 +365,8 @@ impl Into<[u8; 32]> for Block{
 
 #[cfg(test)]
 mod tests {
+    use crate::crypto::signing::{DefaultSigner, SigFunction};
+
     use super::*;
 
     #[test]
@@ -410,7 +406,7 @@ mod tests {
     }
 
     #[test]
-    fn test_collapse_with_move(){
+    fn test_collapse_with_move() {
         let mut tail = BlockTail::default();
         tail.stamps[0] = Stamp {
             signature: [1; 64],
@@ -435,8 +431,7 @@ mod tests {
     }
 
     #[test]
-    fn test_very_compelx_collapse(){
-        // test case with multiple gaps
+    fn test_very_complex_collapse() {
         let mut tail = BlockTail::default();
         tail.stamps[0] = Stamp {
             signature: [1; 64],
@@ -458,18 +453,82 @@ mod tests {
             signature: [5; 64],
             address: [5; 32]
         };
-        // collapse the tail
         tail.collapse();
-        // check the number of stamps
         assert_eq!(tail.n_stamps(), 5);
-        // check the order of the stamps
         assert_eq!(tail.stamps[0].signature, [1; 64]);
         assert_eq!(tail.stamps[1].signature, [2; 64]);
         assert_eq!(tail.stamps[2].signature, [3; 64]);
         assert_eq!(tail.stamps[3].signature, [4; 64]);
         assert_eq!(tail.stamps[4].signature, [5; 64]);
-        // check the empty space is at the end
-        // assert_eq!(tail.stamps[5].signature, [0; 64]);
-        // assert_eq!(tail.stamps[6].signature, [0; 64]);
+    }
+
+    #[test]
+    fn test_collapse_with_duplicates() {
+        let mut tail = BlockTail::default();
+        tail.stamps[0] = Stamp {
+            signature: [1; 64],
+            address: [1; 32]
+        };
+        tail.stamps[1] = Stamp {
+            signature: [2; 64],
+            address: [2; 32]
+        };
+        tail.stamps[2] = Stamp {
+            signature: [1; 64],
+            address: [1; 32]
+        };
+        tail.collapse();
+        println!("{:?}", tail.stamps[3]);
+        assert_eq!(tail.n_stamps(), 2);
+        assert_eq!(tail.stamps[0].address, [1; 32]);
+        assert_eq!(tail.stamps[1].address, [2; 32]);
+    }
+
+    #[test]
+    fn test_clean_invalid_signatures() {
+        let mut tail = BlockTail::default();
+        let target = BlockHeader::default(); // Assuming BlockHeader implements Default
+        let private = DefaultSigner::generate_random();
+        let public = private.get_verifying_function().to_bytes();
+        tail.stamps[0] = Stamp {
+            signature: [1; 64],
+            address: public
+        };
+        let mut private = DefaultSigner::generate_random();
+        let public = private.get_verifying_function().to_bytes();
+        tail.stamps[1] = Stamp {
+            signature: private.sign(&target),
+            address: public
+        };
+        tail.clean(&target);
+        assert_eq!(tail.n_stamps(), 1);
+    }
+
+    #[test]
+    fn test_stamp_addition() {
+        let mut tail = BlockTail::default();
+        let stamp = Stamp {
+            signature: [1; 64],
+            address: [1; 32]
+        };
+        assert!(tail.stamp(stamp).is_ok());
+        assert_eq!(tail.n_stamps(), 1);
+        assert_eq!(tail.stamps[0].address, [1; 32]);
+    }
+
+    #[test]
+    fn test_stamp_overflow() {
+        let mut tail = BlockTail::default();
+        for i in 0..N_TRANSMISSION_SIGNATURES {
+            tail.stamps[i] = Stamp {
+                signature: [(i+1) as u8; 64],
+                address: [(i+1) as u8; 32]
+            };
+        }
+        let new_stamp = Stamp {
+            signature: [255; 64],
+            address: [255; 32]
+        };
+        assert!(tail.stamp(new_stamp).is_err());
     }
 }
