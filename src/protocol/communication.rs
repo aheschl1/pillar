@@ -42,8 +42,8 @@ pub async fn broadcast_knowledge(node: Node) -> Result<(), std::io::Error> {
             if broadcasted_already.contains(&hash) {
                 continue;
             }
-            broadcasted_already.insert(hash);
             node.broadcast(&message).await?;
+            broadcasted_already.insert(hash);
             // add the message to the broadcasted list
             i += 1; // We want to make sure we check back at the mining pool
         }
@@ -172,7 +172,7 @@ mod tests {
             peer::Peer,
         }, primitives::transaction::Transaction
     };
-    use core::time;
+    use core::{panic, time};
     use std::net::{IpAddr, Ipv4Addr};
     use std::str::FromStr;
 
@@ -227,6 +227,11 @@ mod tests {
             port: 8081,
         };
 
+        // listen as peer to hear from server
+        let listener = TcpListener::bind(format!("{}:{}", ip_address, 8081))
+            .await
+            .unwrap();
+
         let t = Transaction::new([0; 32], [0; 32], 0, 0, 0, &mut DefaultHash::new());
         let message = Message::TransactionRequest(t);
         let serialized_message = bincode::serialize(&message).unwrap();
@@ -237,8 +242,37 @@ mod tests {
 
         stream.write_all(&serialized_message).await.unwrap();
 
-        // Verify the message was broadcasted
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await; // Allow time for processing
+        // Verify the message was broadcasted back
+
+        let (mut peer_stream, _) = listener.accept().await.unwrap();
+        
+        // receive peer declaration from node
+
+        let mut b = [0; get_declaration_length(Versions::V1V4) as usize];
+        let _ = peer_stream.read_exact(&mut b).await.unwrap();
+        let declaration: Message = bincode::deserialize(&b).unwrap();
+        match declaration {
+            Message::Declaration(_, size) => {
+                assert_eq!(size, serialized_message.len() as u32);
+            }
+            _ => panic!("Expected a Declaration message"),
+        }
+
+        let mut buffer = vec![0; serialized_message.len() as usize];
+        let n = peer_stream.read_exact(&mut buffer).await.unwrap();
+        let message: Message = bincode::deserialize(&buffer[..n]).unwrap();
+        match message {
+            Message::TransactionRequest(_) => {},
+            _ => panic!("Expected a TransactionRequest message"),
+        }
+        // respond with ack
+        let response = Message::TransactionAck;
+        // send bytes then message
+        let response_serialized = bincode::serialize(&response).unwrap();
+        let nbytes = response_serialized.len() as u32;
+        peer_stream.write_all(&nbytes.to_le_bytes()).await.unwrap();
+        peer_stream.write_all(&response_serialized).await.unwrap();
+        
         let broadcasted = node.broadcasted_already.lock().await;
         let mut hasher = DefaultHash::new();
         let message_hash = message.hash(&mut hasher).unwrap();
@@ -278,4 +312,5 @@ mod tests {
             _ => panic!("Expected an error message"),
         }
     }
+
 }
