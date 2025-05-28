@@ -44,3 +44,88 @@ pub async fn discover_peers(node: &mut Node) -> Result<(), std::io::Error> {
     node.peers.lock().await.extend(new_peers);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    use super::*;
+    use crate::nodes::messages::{get_declaration_length, Versions};
+    use crate::nodes::{messages::Message, node::Node, peer::Peer};
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::str::FromStr;
+
+    #[tokio::test]
+    async fn test_discover_peers_adds_new_peers() {
+        let existing_peer = Peer {
+            public_key: [3; 32],
+            ip_address: IpAddr::V4(Ipv4Addr::from_str("127.0.0.2").unwrap()),
+            port: 8081,
+        };
+        let listener = tokio::net::TcpListener::bind(format!(
+            "{}:{}",
+            existing_peer.ip_address, existing_peer.port
+        )).await.unwrap();
+
+        let mut node = Node::new(
+            [1; 32],
+            [2; 32],
+            IpAddr::V4(Ipv4Addr::from_str("127.0.0.1").unwrap()),
+            8080,
+            vec![existing_peer],
+            None,
+            None,
+        );
+ 
+        // Mock new peer to be discovered
+        let new_peer = Peer {
+            public_key: [4; 32],
+            ip_address: IpAddr::V4(Ipv4Addr::from_str("127.0.0.3").unwrap()),
+            port: 8082,
+        };
+        let new_peer2 = Peer {
+            public_key: [5; 32],
+            ip_address: IpAddr::V4(Ipv4Addr::from_str("127.0.0.3").unwrap()),
+            port: 8082,
+        };
+
+        // Mock peer response
+        let mock_response = Message::PeerResponse(vec![new_peer.clone(), new_peer2.clone()]);
+
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            // expect a peer declaration 
+            let mut buffer = [0; get_declaration_length(Versions::V1V4) as usize];
+            stream.read_exact(&mut buffer).await.unwrap();
+            let message: Message = bincode::deserialize(&buffer).unwrap();
+            let expected_request = Message::PeerRequest;
+            match message {
+                Message::Declaration(peer, size) => {
+                    assert_eq!(peer.public_key, [1; 32]);
+                    assert_eq!(size, bincode::serialized_size(&expected_request).unwrap() as u32);
+                }
+                _ => panic!("Expected a declaration message"),
+            }
+            let mut buffer = vec![0; bincode::serialized_size(&expected_request).unwrap() as usize];
+            stream.read_exact(&mut buffer).await.unwrap();
+            let message: Message = bincode::deserialize(&buffer).unwrap();
+            match message {
+                Message::PeerRequest=>{},
+                _ => panic!("Expected a peer request message"),
+            }
+            // reply with a peer
+            // first n bytes
+            let size = bincode::serialized_size(&mock_response).unwrap() as usize;
+            stream.write_all(&size.to_le_bytes()[0..4]).await.unwrap();
+            let _ = stream.write_all(&bincode::serialize(&mock_response).unwrap()).await;
+            // done
+        });
+        // Discover peers
+        discover_peers(&mut node).await.unwrap();
+        // Verify new peer was added
+        let peers = node.peers.lock().await;
+        assert!(peers.contains_key(&new_peer.public_key));
+        assert!(peers.contains_key(&new_peer2.public_key));
+        assert_eq!(peers.len(), 3); // Existing + new peer
+    }
+}
