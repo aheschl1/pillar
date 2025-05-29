@@ -9,6 +9,47 @@ use crate::{
     blockchain::chain::Chain, crypto::signing::{DefaultSigner, SigFunction, Signable}, primitives::{block::{Block, BlockHeader, Stamp}, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::dicover_chain, communication::{broadcast_knowledge, serve_peers}, reputation::{self, nth_percentile_peer, N_TRANSMISSION_SIGNATURES}}, reputation::history::NodeHistory
 };
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum NodeState{
+    ICD,
+    ChainAvailable,
+    ChainLoading,
+    ChainSyncing,
+    Serving
+}
+
+impl NodeState {
+    /// If a state is_track, then the node should track incoming blocks and transactions
+    /// These values should be added to chain at the soonest available moment
+    /// If is_track, then the node does not add requests immediately 
+    fn is_track(&self) -> bool {
+        matches!(self, 
+            NodeState::ICD | 
+            NodeState::ChainSyncing | 
+            NodeState::ChainLoading | 
+            NodeState::ChainAvailable
+        )
+    }
+
+    /// If a state is_forward, then the node should forward incoming blocks and transactions
+    fn is_forward(&self) -> bool {
+        matches!(self, 
+            NodeState::ChainAvailable | 
+            NodeState::ChainLoading | 
+            NodeState::ChainSyncing | 
+            NodeState::Serving
+        )
+    }
+
+    /// If a state is_consume, then the node should consume incoming blocks and transactions
+    /// This means that state should be updated immediately. This includes consuming a tracking queue
+    fn is_consume(&self) -> bool {
+        matches!(self, 
+            NodeState::Serving
+        )
+    }
+}
+
 #[derive(Clone)]
 pub struct Node {
     pub public_key: Arc<[u8; 32]>,
@@ -36,6 +77,8 @@ pub struct Node {
     pub reputations: Arc<Mutex<HashMap<[u8; 32], NodeHistory>>>,
     /// registered filters for the local node - producer will be this node, and consumer will be some backgroung thread that polls
     filter_callbacks: Arc<Mutex<HashMap<TransactionFilter, Sender<BlockHeader>>>>,
+    /// the state represents the nodes ability to communicate with other nodes
+    state: NodeState,
 }
 
 impl Node {
@@ -70,6 +113,7 @@ impl Node {
             transaction_filters,
             reputations: Arc::new(Mutex::new(HashMap::new())),
             filter_callbacks: Arc::new(Mutex::new(HashMap::new())), // initially no callbacks
+            state: NodeState::ICD, // initially in discovery mode
         }
     }
 
