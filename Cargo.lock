@@ -976,6 +976,7 @@ dependencies = [
  "ed25519",
  "ed25519-dalek",
  "flume",
+ "log",
  "rand",
  "rand_core 0.6.4",
  "serde",

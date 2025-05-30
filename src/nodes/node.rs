@@ -6,13 +6,13 @@ use tokio::sync::Mutex;
 use super::messages::Message;
 
 use crate::{
-    blockchain::chain::Chain, crypto::signing::{DefaultSigner, SigFunction, Signable}, primitives::{block::{Block, BlockHeader, Stamp}, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::dicover_chain, communication::{broadcast_knowledge, serve_peers}, reputation::{self, nth_percentile_peer, N_TRANSMISSION_SIGNATURES}}, reputation::history::NodeHistory
+    blockchain::chain::Chain, crypto::signing::{DefaultSigner, SigFunction, Signable}, persistence::database::{Datastore, GenesisDatastore}, primitives::{block::{Block, BlockHeader, Stamp}, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::dicover_chain, communication::{broadcast_knowledge, serve_peers}, reputation::{self, nth_percentile_peer, N_TRANSMISSION_SIGNATURES}}, reputation::history::NodeHistory
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum NodeState{
     ICD,
-    ChainAvailable,
+    ChainOutdated,
     ChainLoading,
     ChainSyncing,
     Serving
@@ -27,14 +27,14 @@ impl NodeState {
             NodeState::ICD | 
             NodeState::ChainSyncing | 
             NodeState::ChainLoading | 
-            NodeState::ChainAvailable
+            NodeState::ChainOutdated
         )
     }
 
     /// If a state is_forward, then the node should forward incoming blocks and transactions
     fn is_forward(&self) -> bool {
         matches!(self, 
-            NodeState::ChainAvailable | 
+            NodeState::ChainOutdated | 
             NodeState::ChainLoading | 
             NodeState::ChainSyncing | 
             NodeState::Serving
@@ -47,6 +47,26 @@ impl NodeState {
         matches!(self, 
             NodeState::Serving
         )
+    }
+}
+
+fn get_initial_state(datastore: &dyn Datastore) -> (NodeState, Option<Chain>) {
+    // check if the datastore has a chain
+    if let Some(_) = datastore.latest_chain() {
+        // if it does, load the chain
+        match datastore.load_chain() {
+            Ok(chain) => {
+                // assign the chain to the node
+                (NodeState::ChainOutdated, Some(chain))
+            },
+            Err(_) => {
+                // if it fails, we are in discovery mode
+                (NodeState::ICD, None)
+            }
+        }
+    } else {
+        // if it does not, we are in discovery mode
+        (NodeState::ICD, None)
     }
 }
 
@@ -79,6 +99,8 @@ pub struct Node {
     filter_callbacks: Arc<Mutex<HashMap<TransactionFilter, Sender<BlockHeader>>>>,
     /// the state represents the nodes ability to communicate with other nodes
     state: NodeState,
+    /// the datastore
+    pub datastore: Option<Arc<dyn Datastore>>,
 }
 
 impl Node {
@@ -89,9 +111,13 @@ impl Node {
         ip_address: IpAddr,
         port: u16,
         peers: Vec<Peer>,
-        chain: Option<Chain>,
+        mut database: Option<Arc<dyn Datastore>>,
         transaction_pool: Option<MinerPool>,
     ) -> Self {
+        if database.is_none() {
+            log::warn!("Node created without a database. This will not persist the chain or transactions.");
+            database = Some(Arc::new(GenesisDatastore{}));
+        }
         let (broadcast_sender, broadcast_receiver) = flume::unbounded();
         let transaction_filters = Arc::new(Mutex::new(Vec::new()));
         let broadcasted_already = Arc::new(Mutex::new(HashSet::new()));
@@ -99,13 +125,14 @@ impl Node {
             .iter()
             .map(|peer| (peer.public_key, peer.clone()))
             .collect::<HashMap<_, _>>();
+        let (state, maybe_chain) = get_initial_state(&**database.as_ref().unwrap());
         Node {
             public_key: public_key.into(),
             private_key: private_key.into(),
             ip_address,
             port: port.into(),
             peers: Arc::new(Mutex::new(peer_map)),
-            chain: Arc::new(Mutex::new(chain)),
+            chain: Arc::new(Mutex::new(maybe_chain)),
             miner_pool: transaction_pool.map(Arc::new),
             broadcasted_already,
             broadcast_receiver,
@@ -113,10 +140,10 @@ impl Node {
             transaction_filters,
             reputations: Arc::new(Mutex::new(HashMap::new())),
             filter_callbacks: Arc::new(Mutex::new(HashMap::new())), // initially no callbacks
-            state: NodeState::ICD, // initially in discovery mode
+            state: state, // initially in discovery mode
+            datastore: database,
         }
     }
-
     
     /// when called, launches a new thread that listens for incoming connections
     pub async fn serve(&self) {

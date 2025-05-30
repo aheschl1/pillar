@@ -116,9 +116,9 @@ impl Miner{
 
 #[cfg(test)]
 mod test{
-    use std::{net::{IpAddr, Ipv4Addr}, str::FromStr};
+    use std::{net::{IpAddr, Ipv4Addr}, str::FromStr, sync::Arc};
 
-    use crate::{blockchain::chain::Chain, crypto::hashing::{DefaultHash, HashFunction}, primitives::{block::{Block, BlockTail}, pool::MinerPool, transaction::Transaction}, protocol::{pow::mine, reputation::N_TRANSMISSION_SIGNATURES}};
+    use crate::{crypto::hashing::{DefaultHash, HashFunction}, persistence::database::GenesisDatastore, primitives::{block::{Block, BlockTail}, pool::MinerPool, transaction::Transaction}, protocol::{pow::mine, reputation::N_TRANSMISSION_SIGNATURES}};
     use crate::nodes::miner::Miner;
     use super::Node;
 
@@ -128,7 +128,7 @@ mod test{
         let private_key = [2u8; 32];
         let ip_address = IpAddr::V4(Ipv4Addr::from_str("127.0.0.1").unwrap());
         let port = 8080;
-        let node = Node::new(public_key, private_key, ip_address, port, vec![], Some(Chain::new_with_genesis()), Some(MinerPool::new()));
+        let node = Node::new(public_key, private_key, ip_address, port, vec![], Some(Arc::new(GenesisDatastore{})), Some(MinerPool::new()));
         let miner = Miner::new(node).unwrap();
         let mut hasher = DefaultHash::new();
 
