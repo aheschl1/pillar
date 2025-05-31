@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 use super::messages::Message;
 
 use crate::{
-    blockchain::chain::Chain, crypto::signing::{DefaultSigner, SigFunction, Signable}, persistence::database::{Datastore, GenesisDatastore}, primitives::{block::{Block, BlockHeader, Stamp}, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::dicover_chain, communication::{broadcast_knowledge, serve_peers}, reputation::{self, nth_percentile_peer, N_TRANSMISSION_SIGNATURES}}, reputation::history::NodeHistory
+    blockchain::chain::Chain, crypto::signing::{DefaultSigner, SigFunction, Signable}, persistence::database::{Datastore, GenesisDatastore}, primitives::{block::{Block, BlockHeader, Stamp}, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::{dicover_chain, sync_chain}, communication::{broadcast_knowledge, serve_peers}, reputation::{self, nth_percentile_peer, N_TRANSMISSION_SIGNATURES}}, reputation::history::NodeHistory
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -148,22 +148,21 @@ impl Node {
     /// when called, launches a new thread that listens for incoming connections
     pub async fn serve(&self) {
         // spawn a new thread to handle the connection
-        let self_clone = self.clone();
-        if let None = self.chain.lock().await.as_ref(){
-            let mut selfcloneclone = self_clone.clone();
-            // TODO this should be for brand new nodes only
-            // After persistence use sync_chain
-            tokio::spawn(async move{
-                // try to discover
-                let chain = dicover_chain(
-                    &mut selfcloneclone
-                ).await.unwrap();
-                // asign the chain to the node
-                selfcloneclone.chain.lock().await.replace(chain);
-            });
+        match self.state{
+            NodeState::ICD => {
+                log::info!("Starting ICD.");
+                tokio::spawn(dicover_chain(self.clone()));
+            },
+            NodeState::ChainOutdated => {
+                log::info!("Node has an outdated chain. Starting sync.");
+                tokio::spawn(sync_chain(self.clone()));
+            },
+            _ => {
+                panic!("Unexpected node state for startup: {:?}", self.state);
+            }
         }
-        tokio::spawn(serve_peers(self_clone.clone()));
-        tokio::spawn(broadcast_knowledge(self_clone));
+        tokio::spawn(serve_peers(self.clone()));
+        tokio::spawn(broadcast_knowledge(self.clone()));
     }
 
     /// Register a transaction filter callback - adds the callback channel and adds it to the transaction filter queue

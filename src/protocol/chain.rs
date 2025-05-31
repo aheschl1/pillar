@@ -139,9 +139,9 @@ fn settle_reputations(reputations: &mut HashMap<[u8; 32], NodeHistory>, miner: [
 }
 
 /// Discovery algorithm for the chain
-pub async fn dicover_chain(node: &mut Node) -> Result<Chain, std::io::Error> {
+pub async fn dicover_chain(mut node: Node) -> Result<(), std::io::Error> {
     // get the peers first
-    discover_peers(node).await?;
+    discover_peers(&mut node).await?;
     // broadcast the chain shard request to all peers
     let mut peers = node.peers.lock().await;
     let mut chain_shards = Vec::new();
@@ -163,7 +163,9 @@ pub async fn dicover_chain(node: &mut Node) -> Result<Chain, std::io::Error> {
     // find deepest out of peers
     let shard = deepest_shard(&chain_shards)?;
     // now we have valid shards
-    shard_to_chain(node, shard.clone()).await
+    let chain = shard_to_chain(&mut node, shard.clone()).await?;
+    node.chain.lock().await.replace(chain);
+    Ok(())
 }
 
 /// Find the deepest chain shard - they shoudl in theory be the same but we want the longest
@@ -199,7 +201,7 @@ pub fn get_genesis_block() -> Block{
 /// Avoids recomputing and entire chain when a node comes back online
 /// Includes verification of new blocks and trimming of synced blocks
 /// May take ownership of mutexed chain for a while
-pub async fn sync_chain(node: &mut Node){
+pub async fn sync_chain(node: Node){
     // the sync request
     let leaves = node.chain.lock().await.as_ref().expect("No chain - discover chain instead").leaves.clone();
     let request = Message::ChainSyncRequest(leaves.clone());
