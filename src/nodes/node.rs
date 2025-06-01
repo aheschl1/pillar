@@ -151,11 +151,13 @@ impl Node {
         let handle = match self.state.lock().await.clone() {
             NodeState::ICD => {
                 log::info!("Starting ICD.");
+                *self.state.lock().await = NodeState::ChainLoading; // update state to chain loading
                 let handle = tokio::spawn(dicover_chain(self.clone()));
                 Some(handle)
             },
             NodeState::ChainOutdated => {
                 log::info!("Node has an outdated chain. Starting sync.");
+                *self.state.lock().await = NodeState::ChainSyncing; // update state to chain syncing
                 let handle = tokio::spawn(sync_chain(self.clone()));
                 Some(handle)
             },
