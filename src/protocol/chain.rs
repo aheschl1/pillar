@@ -201,12 +201,17 @@ pub fn get_genesis_block() -> Block{
 /// Avoids recomputing and entire chain when a node comes back online
 /// Includes verification of new blocks and trimming of synced blocks
 /// May take ownership of mutexed chain for a while
-pub async fn sync_chain(node: Node){
+pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
     // the sync request
-    let leaves = node.chain.lock().await.as_ref().expect("No chain - discover chain instead").leaves.clone();
+    let chain = node.chain.lock().await;
+    if chain.is_none() {
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, "No chain to sync"));
+    }
+    let leaves = chain.as_ref().unwrap().leaves.clone();
+    
     let request = Message::ChainSyncRequest(leaves.clone());
     // broadcast the request
-    let responses = node.broadcast(&request).await.expect("Failed to broadcast sync request");
+    let responses = node.broadcast(&request).await?;
     // sync up with the reponses
     let mut extensions: HashMap<[u8; 32], (Chain, u64)> = HashMap::new();
     for response in responses{
@@ -262,7 +267,7 @@ pub async fn sync_chain(node: Node){
             // now we add them to the chain
             for block in to_add.iter().rev(){
                 // verifies again
-                chain.add_new_block(block.clone()).expect("Failed to add block");
+                chain.add_new_block(block.clone())?;
                 // and record the reputations
                 let miner = block.header.miner_address.unwrap();
                 let tail = block.header.tail.clone();
@@ -274,4 +279,5 @@ pub async fn sync_chain(node: Node){
     }
     chain.trim(); // cleanup any old forks
     // done
+    Ok(())
 }

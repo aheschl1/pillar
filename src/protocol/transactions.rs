@@ -40,7 +40,7 @@ pub async fn submit_transaction<const K: usize, const P: usize>(
     // sign with the signer
     transaction.sign(signer);
     // broadcast and wait for peer responses
-    let results = node.broadcast(&Message::TransactionRequest(transaction.clone())).await?;
+    let results = node.broadcast(&Message::TransactionBroadcast(transaction.clone())).await?;
     // check if the transaction was acknowledged at least once
     let ok = results.iter().any(|x| {
         match x {

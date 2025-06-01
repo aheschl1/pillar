@@ -98,7 +98,7 @@ pub struct Node {
     /// registered filters for the local node - producer will be this node, and consumer will be some backgroung thread that polls
     filter_callbacks: Arc<Mutex<HashMap<TransactionFilter, Sender<BlockHeader>>>>,
     /// the state represents the nodes ability to communicate with other nodes
-    state: NodeState,
+    state: Arc<Mutex<NodeState>>,
     /// the datastore
     pub datastore: Option<Arc<dyn Datastore>>,
 }
@@ -140,7 +140,7 @@ impl Node {
             transaction_filters,
             reputations: Arc::new(Mutex::new(HashMap::new())),
             filter_callbacks: Arc::new(Mutex::new(HashMap::new())), // initially no callbacks
-            state: state, // initially in discovery mode
+            state: Arc::new(Mutex::new(state)), // initially in discovery mode
             datastore: database,
         }
     }
@@ -148,18 +148,37 @@ impl Node {
     /// when called, launches a new thread that listens for incoming connections
     pub async fn serve(&self) {
         // spawn a new thread to handle the connection
-        match self.state{
+        let handle = match self.state.lock().await.clone() {
             NodeState::ICD => {
                 log::info!("Starting ICD.");
-                tokio::spawn(dicover_chain(self.clone()));
+                let handle = tokio::spawn(dicover_chain(self.clone()));
+                Some(handle)
             },
             NodeState::ChainOutdated => {
                 log::info!("Node has an outdated chain. Starting sync.");
-                tokio::spawn(sync_chain(self.clone()));
+                let handle = tokio::spawn(sync_chain(self.clone()));
+                Some(handle)
             },
             _ => {
                 panic!("Unexpected node state for startup: {:?}", self.state);
             }
+        };
+        if let Some(handle) = handle {
+            let self_clone = self.clone();
+            tokio::spawn(async move {
+                let result = handle.await;
+                match result {
+                    Ok(Ok(_)) => {
+                        log::info!("Node started successfully.");
+                        let mut state = self_clone.state.lock().await;
+                        // update to serving
+                        *state = NodeState::Serving;
+                    },
+                    Ok(Err(e)) => log::error!("Node failed to start: {:?}", e),
+                    Err(e) => log::error!("Failed to start node: {:?}", e),
+                }
+
+            });
         }
         tokio::spawn(serve_peers(self.clone()));
         tokio::spawn(broadcast_knowledge(self.clone()));
@@ -182,34 +201,41 @@ impl Node {
 
     /// Derive the response to a request from a peer
     pub async fn serve_request(&mut self, message: &Message, _declared_peer: Peer) -> Result<Message, std::io::Error> {
+        let state = self.state.lock().await.clone();
         match message {
             Message::PeerRequest => {
                 // send all peers
                 Ok(Message::PeerResponse(self.peers.lock().await.values().cloned().collect()))
             }
             Message::ChainRequest => {
-                if let Some(chain) = self.chain.lock().await.as_ref(){
-                    Ok(Message::ChainResponse(chain.clone()))
+                if state.is_consume(){ // in consume state, chain is actively being consumed
+                    Ok(Message::ChainResponse(self.chain.lock().await.clone().unwrap()))
                 }else{
                     Ok(Message::Error("Chain not downloaded for peer".into()))
                 }
             },
-            Message::TransactionRequest(transaction) => {
+            Message::TransactionBroadcast(transaction) => {
                 // add the transaction to the pool
-                if let Some(ref pool) = self.miner_pool {
-                    pool.add_transaction(transaction.clone());
+                if let Some(ref pool) = self.miner_pool{
+                    if state.is_consume() {
+                        pool.add_transaction(transaction.clone());
+                    }
                 }
                 // to be broadcasted
-                self.broadcast_sender.send(Message::TransactionRequest(transaction.to_owned())).unwrap();
+                if state.is_forward(){
+                    self.broadcast_sender.send(Message::TransactionBroadcast(transaction.to_owned())).unwrap();
+                }
                 Ok(Message::TransactionAck)
             }
             Message::BlockTransmission(block) => {
                 // add the block to the chain if we have downloaded it already - first it is verified TODO add to a queue to be added later
                 let mut block = block.clone();
-                if let Some(chain) = self.chain.lock().await.as_mut(){
+                if state.is_consume(){
+                    let mut chain_lock = self.chain.lock().await;
+                    let chain = chain_lock.as_mut().unwrap();
                     self.settle_block(&mut block, chain).await?;
                 }else{
-                    // TODO is it ok to ignore rep here?
+                    // TODO handle is_track instead
                     // if we do not have the chain, just forward the block if there is room in the stamps
                     if block.header.tail.n_stamps() < N_TRANSMISSION_SIGNATURES {
                         let _ = self.stamp_block(&mut block.clone());
@@ -217,12 +243,16 @@ impl Node {
                     }
                 }
                 // handle callback
-                self.handle_callbacks(&block).await;
+                if state.is_track() {
+                    self.handle_callbacks(&block).await;
+                }
                 Ok(Message::BlockAck)
             },
             Message::BlockRequest(hash) => {
                 // send a block to the peer upon request
-                if let Some(chain) = self.chain.lock().await.as_ref(){
+                if state.is_consume(){
+                    let lock = self.chain.lock().await;
+                    let chain = lock.as_ref().unwrap();
                     let block = chain.get_block(hash).cloned();
                     Ok(Message::BlockResponse(block))
                 }else{
@@ -231,14 +261,19 @@ impl Node {
             },
             Message::ChainShardRequest => {
                 // send the block headers to the peer
-                if let Some(chain) = self.chain.lock().await.as_ref(){
-                    Ok(Message::ChainShardResponse(chain.clone().into()))
+                if state.is_consume(){
+                    let lock = self.chain.lock().await;
+                    let chain = lock.as_ref().unwrap().clone();
+                    Ok(Message::ChainShardResponse(chain.into()))
                 }else{
                     Ok(Message::Error("Chain not downloaded for peer".into()))
                 }
             },
             Message::TransactionProofRequest(stub) => {
-                if let Some(chain) = self.chain.lock().await.as_ref(){
+                if state.is_consume(){
+                    let lock = self.chain.lock().await;
+                    let chain = lock.as_ref().unwrap().clone();
+
                     let block = chain.get_block(&stub.block_hash);
                     
                     if let Some(block) = block{
@@ -262,24 +297,30 @@ impl Node {
                 Ok(Message::TransactionFilterAck)
             },
             Message::TransactionFilterResponse(filter, header) => {
-                let mut callbacks = self.filter_callbacks.lock().await;
-                if let Some(sender) = callbacks.get_mut(filter) {
-                    // send the block header to the sender
-                    sender.send(*header).unwrap();
-                    // remove the callback - one time only
-                    callbacks.remove(filter);
+                if state.is_track(){
+                    let mut callbacks = self.filter_callbacks.lock().await;
+                    if let Some(sender) = callbacks.get_mut(filter) {
+                        // send the block header to the sender
+                        sender.send(*header).unwrap();
+                        // remove the callback - one time only
+                        callbacks.remove(filter);
+                    }
                 }
                 Ok(Message::TransactionFilterAck)
             },
             Message::PercentileFilteredPeerRequest(lower_n, upper_n) => {
-                let reputations = self.reputations.lock().await;
-                let peers = nth_percentile_peer(*lower_n, *upper_n, &reputations);
-                let peers_map = self.peers.lock().await.clone();
-                // find the peer objects in the address list 
-                let filtered_peers = peers.iter().filter_map(|peer| {
-                    peers_map.get(peer).cloned()
-                }).collect::<Vec<_>>();
-                Ok(Message::PercentileFilteredPeerResponse(filtered_peers))
+                if state.is_consume(){
+                    let reputations = self.reputations.lock().await;
+                    let peers = nth_percentile_peer(*lower_n, *upper_n, &reputations);
+                    let peers_map = self.peers.lock().await.clone();
+                    // find the peer objects in the address list 
+                    let filtered_peers = peers.iter().filter_map(|peer| {
+                        peers_map.get(peer).cloned()
+                    }).collect::<Vec<_>>();
+                    Ok(Message::PercentileFilteredPeerResponse(filtered_peers))
+                }else{
+                    Ok(Message::PercentileFilteredPeerResponse(vec![])) // just say nothing - info not up to date
+                }
             }
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,

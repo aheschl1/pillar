@@ -233,7 +233,7 @@ mod tests {
             .unwrap();
 
         let t = Transaction::new([0; 32], [0; 32], 0, 0, 0, &mut DefaultHash::new());
-        let message = Message::TransactionRequest(t);
+        let message = Message::TransactionBroadcast(t);
         let serialized_message = bincode::serialize(&message).unwrap();
 
         let declaration = Message::Declaration(peer.clone(), serialized_message.len() as u32);
@@ -262,7 +262,7 @@ mod tests {
         let n = peer_stream.read_exact(&mut buffer).await.unwrap();
         let message: Message = bincode::deserialize(&buffer[..n]).unwrap();
         match message {
-            Message::TransactionRequest(_) => {},
+            Message::TransactionBroadcast(_) => {},
             _ => panic!("Expected a TransactionRequest message"),
         }
         // respond with ack

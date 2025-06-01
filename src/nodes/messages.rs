@@ -21,7 +21,7 @@ pub enum Message {
     // inform of who you are and message length following - always the first message
     Declaration(Peer, u32),
     // request for a transaction
-    TransactionRequest(Transaction),
+    TransactionBroadcast(Transaction),
     // acknowledge a transaction has been received
     TransactionAck,
     // transmit a newly mined block
