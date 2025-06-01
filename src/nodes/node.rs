@@ -1,5 +1,6 @@
 use super::peer::Peer;
 use flume::{Receiver, Sender};
+use sha3::digest::consts::True;
 use std::{collections::{HashMap, HashSet}, net::IpAddr, sync::Arc};
 use tokio::sync::Mutex;
 
@@ -23,6 +24,7 @@ impl NodeState {
     /// These values should be added to chain at the soonest available moment
     /// If is_track, then the node does not add requests immediately 
     fn is_track(&self) -> bool {
+        // return true;
         matches!(self, 
             NodeState::ICD | 
             NodeState::ChainSyncing | 
@@ -33,7 +35,9 @@ impl NodeState {
 
     /// If a state is_forward, then the node should forward incoming blocks and transactions
     fn is_forward(&self) -> bool {
-        matches!(self, 
+        // return true;
+        matches!(self,
+            NodeState::ICD |
             NodeState::ChainOutdated | 
             NodeState::ChainLoading | 
             NodeState::ChainSyncing | 
@@ -44,6 +48,7 @@ impl NodeState {
     /// If a state is_consume, then the node should consume incoming blocks and transactions
     /// This means that state should be updated immediately. This includes consuming a tracking queue
     fn is_consume(&self) -> bool {
+        // return true;
         matches!(self, 
             NodeState::Serving
         )
@@ -526,6 +531,7 @@ mod tests{
         assert!(node.transaction_filters.lock().await.is_empty());
         assert!(node.reputations.lock().await.is_empty());
         assert!(node.filter_callbacks.lock().await.is_empty());
+        assert!(node.state.lock().await.clone() == super::NodeState::ICD);
     }
         
 }
