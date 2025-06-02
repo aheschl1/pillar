@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{blockchain::chain::Chain, primitives::block::Block};
 
 pub trait Datastore: Send + Sync {
@@ -22,6 +24,10 @@ pub trait Datastore: Send + Sync {
     /// Loads a block from disk.
     fn load_block(&self, block_hash: &str) -> Result<Block, std::io::Error>;
 
+    /// sync the on disk state with a new chain
+    /// This will write/remove as needed to ensure the on disk state matches the chain.
+    fn sync_chain(&self, chain: Chain) -> Result<(), std::io::Error>;
+
 }
 
 pub struct GenesisDatastore;
@@ -44,9 +50,62 @@ impl Datastore for GenesisDatastore {
     }
 
     fn load_block(&self, _block_hash: &str) -> Result<Block, std::io::Error> {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Genesis block does not exist",
-        ))
+        unimplemented!()
+    }
+
+    fn sync_chain(&self, _chain: Chain) -> Result<(), std::io::Error> {
+        unimplemented!()
+    }
+}
+
+pub struct SledDatastore {
+    data: sled::Db,
+}
+
+impl SledDatastore {
+    pub fn new(address: String) -> Self {
+        SledDatastore { 
+            data: sled::open(address).expect("Failed to open sled database"),
+        }
+    }
+}
+
+impl Datastore for SledDatastore {
+    fn latest_chain(&self) -> Option<u64> {
+        let timestamp = self.data.get("latest_timestamp");
+        match timestamp {
+            Ok(Some(value)) => {
+                let timestamp = u64::from_le_bytes(
+                    value.as_ref().try_into().expect("Failed to convert timestamp to u64")
+                );
+                timestamp.into()
+            },
+            _ => None,
+        }
+    }
+
+    fn load_chain(&self) -> Result<Chain, std::io::Error> {
+        let leaf_hashes = self.data.get("leaf_hashes")
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        // the leaf hash's will point off to the respective blocks. then, we will work our way backwards, loading each block.
+        // from there, we reconstruct the chain
+        let mut blocks: HashMap<[u8; 32], Block>;
+        
+    }
+
+    fn save_chain(&self, chain: Chain) -> Result<(), std::io::Error> {
+        todo!()
+    }
+
+    fn save_block(&self, block: Block) -> Result<(), std::io::Error> {
+        todo!()
+    }
+
+    fn load_block(&self, block_hash: &str) -> Result<Block, std::io::Error> {
+        todo!()
+    }
+
+    fn sync_chain(&self, chain: Chain) -> Result<(), std::io::Error> {
+        todo!()
     }
 }
