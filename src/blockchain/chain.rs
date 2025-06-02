@@ -50,6 +50,41 @@ impl Chain {
             account_manager: AccountManager::new(),
         }
     }
+
+    /// Create a chain without a genesis block.
+    pub fn new_from_blocks(blocks: HashMap<[u8; 32], Block>) -> Self{
+        let mut headers = HashMap::new();
+        let mut deepest_hash = [0; 32];
+        let mut depth = 0;
+
+        let mut all_hashes: HashSet<[u8; 32]> = HashSet::new();
+        let mut seen_prevs: HashSet<[u8; 32]> = HashSet::new();
+
+        for (hash, block) in &blocks {
+            headers.insert(*hash, block.header.clone());
+            all_hashes.insert(*hash);
+            seen_prevs.insert(block.header.previous_hash);
+
+            if block.header.depth > depth {
+                depth = block.header.depth;
+                deepest_hash = *hash;
+            }
+        }
+        // leaves is those that are not seen as previous hashes
+        let leaves = all_hashes
+            .difference(&seen_prevs)
+            .cloned()
+            .collect::<HashSet<[u8; 32]>>();
+
+        Chain {
+            blocks,
+            headers,
+            depth,
+            deepest_hash,
+            leaves,
+            account_manager: AccountManager::new(),
+        }
+    }
     
     /// Validates the structure and metadata of a block.
     fn validate_block(&self, block: &Block) -> bool {

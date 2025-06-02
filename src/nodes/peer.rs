@@ -1,7 +1,7 @@
-use std::net::IpAddr;
+use std::{net::IpAddr, time::Duration};
 
 use serde::{Serialize, Deserialize};
-use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream};
+use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream, time::timeout};
 
 use super::messages::Message;
 
@@ -72,7 +72,8 @@ impl Peer{
     }
 
     pub async fn communicate(&mut self, message: &Message, initializing_peer: &Peer) -> Result<Message, std::io::Error> {
-        let stream = self.send_initial(message, initializing_peer).await?;
+        
+        let stream = timeout(Duration::from_secs(1), self.send_initial(message, initializing_peer)).await??;
         let response = self.read_response(stream).await?;
         Ok(response)
     }

@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 use super::messages::Message;
 
 use crate::{
-    blockchain::chain::Chain, crypto::signing::{DefaultSigner, SigFunction, Signable}, persistence::database::{Datastore, GenesisDatastore}, primitives::{block::{Block, BlockHeader, Stamp}, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::{dicover_chain, sync_chain}, communication::{broadcast_knowledge, serve_peers}, reputation::{self, nth_percentile_peer, N_TRANSMISSION_SIGNATURES}}, reputation::history::NodeHistory
+    blockchain::chain::Chain, crypto::signing::{DefaultSigner, SigFunction, Signable}, persistence::database::{Datastore, EmptyDatastore, GenesisDatastore}, primitives::{block::{Block, BlockHeader, Stamp}, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::{dicover_chain, service_sync, sync_chain}, communication::{broadcast_knowledge, serve_peers}, reputation::{self, nth_percentile_peer, N_TRANSMISSION_SIGNATURES}}, reputation::history::NodeHistory
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -121,7 +121,7 @@ impl Node {
     ) -> Self {
         if database.is_none() {
             log::warn!("Node created without a database. This will not persist the chain or transactions.");
-            database = Some(Arc::new(GenesisDatastore{}));
+            database = Some(Arc::new(EmptyDatastore::new()));
         }
         let (broadcast_sender, broadcast_receiver) = flume::unbounded();
         let transaction_filters = Arc::new(Mutex::new(Vec::new()));
@@ -153,7 +153,8 @@ impl Node {
     /// when called, launches a new thread that listens for incoming connections
     pub async fn serve(&self) {
         // spawn a new thread to handle the connection
-        let handle = match self.state.lock().await.clone() {
+        let state = self.state.lock().await.clone();
+        let handle = match state {
             NodeState::ICD => {
                 log::info!("Starting ICD.");
                 *self.state.lock().await = NodeState::ChainLoading; // update state to chain loading
@@ -328,7 +329,15 @@ impl Node {
                 }else{
                     Ok(Message::PercentileFilteredPeerResponse(vec![])) // just say nothing - info not up to date
                 }
-            }
+            },
+            Message::ChainSyncRequest(leaves) => {
+                if state.is_consume() {
+                    let chains = service_sync(self.clone(), leaves).await?;
+                    return Ok(Message::ChainSyncResponse(chains));
+                }else{
+                    return Ok(Message::ChainSyncResponse(vec![]));
+                }
+            },
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "Expected a request",
@@ -489,7 +498,12 @@ impl Broadcaster for Node {
         // send a message to all peers
         let mut responses = Vec::new();
         for (_, peer) in self.peers.lock().await.iter_mut() {
-            responses.push(peer.communicate(message, &self.into()).await?);
+            let response = peer.communicate(message, &self.into()).await;
+            if let Err(e) = response {
+                println!("Failed to communicate with peer {:?}: {:?}", peer.public_key, e);
+                continue; // skip this peer
+            }
+            responses.push(response.unwrap());
         }
         Ok(responses)
     }
@@ -497,8 +511,10 @@ impl Broadcaster for Node {
 
 #[cfg(test)]
 mod tests{
+    use crate::{nodes::{messages::Message, peer::Peer}, persistence::database::{Datastore, GenesisDatastore}, protocol::peers::discover_peers};
+
     use super::Node;
-    use std::net::{IpAddr, Ipv4Addr};
+    use std::{net::{IpAddr, Ipv4Addr}, sync::Arc};
 
     #[tokio::test]
     async fn test_create_empty_node() {
@@ -527,11 +543,159 @@ mod tests{
         assert!(node.peers.lock().await.is_empty());
         assert!(node.chain.lock().await.is_none());
         assert!(node.miner_pool.is_none());
-        assert!(node.chain.lock().await.is_none());
         assert!(node.transaction_filters.lock().await.is_empty());
         assert!(node.reputations.lock().await.is_empty());
         assert!(node.filter_callbacks.lock().await.is_empty());
         assert!(node.state.lock().await.clone() == super::NodeState::ICD);
+    }
+
+    #[tokio::test]
+    async fn test_create_empty_node_genisis() {
+        let public_key = [0u8; 32];
+        let private_key = [1u8; 32];
+        let ip_address = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        let port = 8080;
+        let peers = vec![];
+        let datastore = Some(Arc::new(GenesisDatastore::new()));
+        let transaction_pool = None;
+
+        let node = Node::new(
+            public_key,
+            private_key,
+            ip_address,
+            port,
+            peers,
+            datastore.map(|ds| ds as Arc<dyn Datastore>),
+            transaction_pool,
+        );
+
+        assert_eq!(*node.public_key, public_key);
+        assert_eq!(*node.private_key, private_key);
+        assert_eq!(node.ip_address, ip_address);
+        assert_eq!(*node.port, port);
+        assert!(node.peers.lock().await.is_empty());
+        assert!(node.chain.lock().await.is_some());
+        assert!(node.miner_pool.is_none());
+        assert!(node.transaction_filters.lock().await.is_empty());
+        assert!(node.reputations.lock().await.is_empty());
+        assert!(node.filter_callbacks.lock().await.is_empty());
+        assert!(node.state.lock().await.clone() == super::NodeState::ChainOutdated);
+    }
+
+
+
+    #[tokio::test]
+    async fn test_serve(){
+        let public_key = [0u8; 32];
+        let private_key = [1u8; 32];
+        let ip_address = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        let port = 8070;
+        let peers = vec![];
+        let datastore = GenesisDatastore::new();
+        let transaction_pool = None;
+
+        let node = Node::new(
+            public_key,
+            private_key,
+            ip_address,
+            port,
+            peers,
+            Some(Arc::new(datastore)),
+            transaction_pool,
+        );
+
+        node.serve().await;
+
+        // check state update
+        let state = node.state.lock().await;
+        assert!(*state == super::NodeState::ChainSyncing);
+        drop(state);
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await; // wait for the node to start
+        // check if the node is in serving state
+        let state = node.state.lock().await;
+        assert!(*state == super::NodeState::Serving);
+
+    }
+
+    #[tokio::test]
+    async fn test_two_node_chat(){
+        let public_key = [0u8; 32];
+        let private_key = [1u8; 32];
+        let ip_address = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        let port = 8069;
+        let peers = vec![
+            Peer::new(
+                [8u8; 32],
+                IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)),
+                8081,
+            ),
+        ];
+        let datastore = GenesisDatastore::new();
+        let transaction_pool = None;
+
+        let node1 = Node::new(
+            public_key,
+            private_key,
+            ip_address,
+            port,
+            peers,
+            Some(Arc::new(datastore.clone())),
+            transaction_pool,
+        );
+
+        node1.serve().await;
+
+        // check state update
+        let state = node1.state.lock().await;
+        assert!(*state == super::NodeState::ChainSyncing);
+        drop(state);
+
+        // create a second node
+        let public_key2 = [2u8; 32];
+        let private_key2 = [3u8; 32];
+        let ip_address2 = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2));
+        let port2 = 8070;
+        
+        let mut node2 = Node::new(
+            public_key2,
+            private_key2,
+            ip_address2,
+            port2,
+            vec![node1.clone().into()],
+            Some(Arc::new(datastore)),
+            None,
+        );
+
+        node2.serve().await;
+
+        // check state update
+        let state = node2.state.lock().await;
+        assert!(*state == super::NodeState::ChainSyncing);
+        drop(state);
+
+        // attemp to make node 2 work alongside node 1
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await; // wait for the node to start
+        // check if the node is in serving state
+        let state = node1.state.lock().await.clone();
+        assert!(state == super::NodeState::Serving);
+        let state = node2.state.lock().await.clone();
+        assert!(state == super::NodeState::Serving);
+
+        // check if the nodes can communicate
+        let result = discover_peers(&mut node2).await;
+        result.unwrap(); // should be successful
+        // make sure that node2 is in the list of peers for node 1
+        let peers = node1.peers.lock().await;
+        assert!(peers.contains_key(&public_key2));
+        drop(peers);
+
+        // make sure the [9u8; 32] is in the list of peers for node 2
+        let peers = node2.peers.lock().await;
+        assert!(peers.contains_key(&public_key));
+        assert!(peers.contains_key(&[8u8; 32])); // the peer we added
+        drop(peers);
+        assert!(node2.chain.lock().await.as_ref().unwrap().blocks.len() == 1);
     }
         
 }

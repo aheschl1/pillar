@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::{collections::{HashMap, HashSet}, hash::DefaultHasher};
 
 use rand::{rng, seq::{IndexedRandom, IteratorRandom}};
 
-use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, crypto::{hashing::{DefaultHash, HashFunction}, merkle::generate_tree}, nodes::{messages::Message, node::{Broadcaster, Node}, peer::Peer}, primitives::{block::{Block, BlockHeader, BlockTail}, transaction::Transaction}, reputation::history::NodeHistory};
+use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, crypto::{hashing::{DefaultHash, HashFunction, Hashable}, merkle::generate_tree}, nodes::{messages::Message, node::{Broadcaster, Node}, peer::Peer}, primitives::{block::{Block, BlockHeader, BlockTail}, transaction::Transaction}, reputation::history::NodeHistory};
 
 use super::{peers::discover_peers, reputation::N_TRANSMISSION_SIGNATURES};
 
@@ -202,6 +202,10 @@ pub fn get_genesis_block() -> Block{
 /// Includes verification of new blocks and trimming of synced blocks
 /// May take ownership of mutexed chain for a while
 pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
+    if node.peers.lock().await.is_empty(){
+        log::warn!("No peers to sync with, skipping chain sync");
+        return Ok(());
+    }
     // the sync request
     let chain = node.chain.lock().await;
     if chain.is_none() {
@@ -212,6 +216,12 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
     let request = Message::ChainSyncRequest(leaves.clone());
     // broadcast the request
     let responses = node.broadcast(&request).await?;
+
+    if responses.is_empty() {
+        println!("No responses to chain sync request, skipping sync");
+        return Ok(());
+    }
+
     // sync up with the reponses
     let mut extensions: HashMap<[u8; 32], (Chain, u64)> = HashMap::new();
     for response in responses{
@@ -247,12 +257,14 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
 
                 }
             }
-            _ => {}
+            _ => {
+                println!("Received unexpected message during chain sync: {:?}", response);
+            }
         }
     }
     // each response has been verified and we have the deepest for each leaf
     // now we need to merge the chains
-    let mut chain = node.chain.lock().await.as_ref().unwrap().clone();
+    let mut chain = chain.clone().unwrap();
     for (_, (chain_extension, _)) in extensions.iter(){
         // we need to find the block in the chain
         for extension_leaf in chain_extension.leaves.iter(){ // include the forks
@@ -280,4 +292,29 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
     chain.trim(); // cleanup any old forks
     // done
     Ok(())
+}
+
+
+/// given a set of leaves, we need to provide chains that come after them: i.e. "missing chains"
+pub async fn service_sync(node: Node, leaves: &HashSet<[u8; 32]>) -> Result<Vec<Chain>, std::io::Error> {
+    let my_leaves = node.chain.lock().await.as_ref().unwrap().leaves.clone();
+    let missing_leaves = my_leaves.iter().filter(|x| !leaves.contains(*x)).cloned().collect::<Vec<_>>();
+    // for each of these, we need to work our way backwards from the nodes chain off the leaf
+    // we recurse until we find a node that is in `leaves` - end the chain there.
+    let chain = node.chain.lock().await.as_ref().unwrap().clone();
+    let chains: Vec<Chain> = missing_leaves.iter().map(|leaf|{
+        let mut curr = chain.blocks.get(leaf);
+        let mut blocks = HashMap::new();
+        while let Some(current_block) = curr {
+            blocks.insert(current_block.header.hash(&mut DefaultHash::new()).unwrap(), current_block.clone());
+            if leaves.contains(&current_block.header.previous_hash) {
+                // we have reached the end of the chain
+                break;
+            }
+            curr = chain.blocks.get(&current_block.header.previous_hash);
+        }
+        Chain::new_from_blocks(blocks)
+    }).collect();
+
+    Ok(chains)
 }
