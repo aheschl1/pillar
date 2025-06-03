@@ -697,5 +697,136 @@ mod tests{
         drop(peers);
         assert!(node2.chain.lock().await.as_ref().unwrap().blocks.len() == 1);
     }
+
+    #[tokio::test]
+    async fn test_complex_peer_discovery(){
+        let public_key_a = [0u8; 32];
+        let private_key_a = [1u8; 32];
+        let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        let port_a = 8060;
+
+        let public_key_b = [2u8; 32];
+        let private_key_b = [3u8; 32];
+        let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2));
+        let port_b = 8061;
+
+        let public_key_c = [4u8; 32];
+        let private_key_c = [5u8; 32];
+        let ip_address_c = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 3));
+        let port_c = 8062;
+
+        let public_key_d = [6u8; 32];
+        let private_key_d = [7u8; 32];
+        let ip_address_d = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 4));
+        let port_d = 8063;
+
+        let datastore = GenesisDatastore::new();
+
+        let mut node_a = Node::new(
+            public_key_a,
+            private_key_a,
+            ip_address_a,
+            port_a,
+            vec![Peer::new(public_key_b, ip_address_b, port_b)],
+            Some(Arc::new(datastore.clone())),
+            None,
+        );
+
+        let mut node_b = Node::new(
+            public_key_b,
+            private_key_b,
+            ip_address_b,
+            port_b,
+            vec![Peer::new(public_key_c, ip_address_c, port_c)],
+            Some(Arc::new(datastore.clone())),
+            None,
+        );
+
+        let mut node_c = Node::new(
+            public_key_c,
+            private_key_c,
+            ip_address_c,
+            port_c,
+            vec![Peer::new(public_key_d, ip_address_d, port_d)],
+            Some(Arc::new(datastore.clone())),
+            None,
+        );
+
+        let mut node_d = Node::new(
+            public_key_d,
+            private_key_d,
+            ip_address_d,
+            port_d,
+            vec![Peer::new(public_key_a, ip_address_a, port_a)],
+            Some(Arc::new(datastore.clone())),
+            None,
+        );
+
+        node_d.serve().await; // no discovery
+        node_c.serve().await; // D learns of C
+        node_b.serve().await; // C learns of B
+        node_a.serve().await; // B learns of A
+
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;        
+        discover_peers(&mut node_a).await.unwrap(); // 
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        let peers_a = node_a.peers.lock().await;
+        assert!(peers_a.contains_key(&public_key_b));
+        assert!(peers_a.contains_key(&public_key_c));
+        assert!(!peers_a.contains_key(&public_key_d)); // node A does not know about D yet
+        drop(peers_a);
+
+        let peers_b = node_b.peers.lock().await;
+        assert!(peers_b.contains_key(&public_key_a));
+        assert!(peers_b.contains_key(&public_key_c));
+        assert!(!peers_b.contains_key(&public_key_d));
+        drop(peers_b);
+
+        let peers_c = node_c.peers.lock().await;
+        assert!(!peers_c.contains_key(&public_key_a));
+        assert!(peers_c.contains_key(&public_key_b));
+        assert!(peers_c.contains_key(&public_key_d));
+        drop(peers_c);
+
+        let peers_d = node_d.peers.lock().await;
+        assert!(peers_d.contains_key(&public_key_a));
+        assert!(!peers_d.contains_key(&public_key_b));
+        assert!(peers_d.contains_key(&public_key_c));
+        drop(peers_d);
+
+        // D does not know of B.
+        // A does not know of D.
+        // C does not know of A.
+        // B does not know of D.
+
+        discover_peers(&mut node_d).await.unwrap(); // 
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        let peers_a = node_a.peers.lock().await;
+        assert!(peers_a.contains_key(&public_key_b));
+        assert!(peers_a.contains_key(&public_key_c));
+        assert!(peers_a.contains_key(&public_key_d)); // node A does not know about D yet
+        drop(peers_a);
+
+        let peers_b = node_b.peers.lock().await;
+        assert!(peers_b.contains_key(&public_key_a));
+        assert!(peers_b.contains_key(&public_key_c));
+        assert!(!peers_b.contains_key(&public_key_d));
+        drop(peers_b);
+
+        let peers_c = node_c.peers.lock().await;
+        assert!(!peers_c.contains_key(&public_key_a));
+        assert!(peers_c.contains_key(&public_key_b));
+        assert!(peers_c.contains_key(&public_key_d));
+        drop(peers_c);
+
+        let peers_d = node_d.peers.lock().await;
+        assert!(peers_d.contains_key(&public_key_a));
+        assert!(peers_d.contains_key(&public_key_b));
+        assert!(peers_d.contains_key(&public_key_c));
+        drop(peers_d);
+        
+    }
         
 }
