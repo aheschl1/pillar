@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{crypto::hashing::{DefaultHash, HashFunction}, primitives::block::BlockHeader, protocol::chain::get_genesis_block};
+use crate::{crypto::hashing::{DefaultHash, HashFunction}, nodes::node::StdByteArray, primitives::block::BlockHeader, protocol::chain::get_genesis_block};
 
 use super::{chain::Chain, TrimmableChain};
 
@@ -11,8 +11,8 @@ use super::{chain::Chain, TrimmableChain};
 /// // chain shard is just a chain of headers
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChainShard {
-    pub headers: HashMap<[u8; 32], BlockHeader>,
-    pub leaves: HashSet<[u8; 32]>
+    pub headers: HashMap<StdByteArray, BlockHeader>,
+    pub leaves: HashSet<StdByteArray>
 }
 
 impl ChainShard{
@@ -54,7 +54,7 @@ impl ChainShard{
         genesis_found // the last check
     }
 
-    pub fn get_block(&self, hash: &[u8; 32]) -> Option<BlockHeader>{
+    pub fn get_block(&self, hash: &StdByteArray) -> Option<BlockHeader>{
         self.headers.get(hash).cloned()
     }
 
@@ -77,15 +77,15 @@ impl From<Chain> for ChainShard{
 
 
 impl TrimmableChain for ChainShard {
-    fn get_headers(&self) -> &HashMap<[u8; 32], BlockHeader> {
+    fn get_headers(&self) -> &HashMap<StdByteArray, BlockHeader> {
         &self.headers
     }
 
-    fn get_leaves_mut(&mut self) -> &mut HashSet<[u8; 32]> {
+    fn get_leaves_mut(&mut self) -> &mut HashSet<StdByteArray> {
         &mut self.leaves
     }
 
-    fn remove_header(&mut self, hash: &[u8; 32]) {
+    fn remove_header(&mut self, hash: &StdByteArray) {
         self.headers.remove(hash);
     }
 }

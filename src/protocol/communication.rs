@@ -18,7 +18,7 @@ pub async fn broadcast_knowledge(node: Node) -> Result<(), std::io::Error> {
     let mut hasher = DefaultHash::new();
     loop {
         // send a message to all peers
-        if let Some(pool) = &node.miner_pool {
+        if let Some(pool) = &node.inner.miner_pool {
             // broadcast out of mining pool
             // while pool.ready_block_count() > 0 {
             //     node.broadcast(&Message::BlockTransmission(pool.pop_ready_block().unwrap()))
@@ -33,10 +33,10 @@ pub async fn broadcast_knowledge(node: Node) -> Result<(), std::io::Error> {
             }
         }
         let mut i = 0;
-        let mut broadcasted_already = node.broadcasted_already.lock().await;
-        while i < 10 && !node.broadcast_receiver.is_empty() {
+        let mut broadcasted_already = node.inner.broadcasted_already.lock().await;
+        while i < 10 && !node.inner.broadcast_receiver.is_empty() {
             // receive the transaction from the sender
-            let message = node.broadcast_receiver.recv().unwrap();
+            let message = node.inner.broadcast_receiver.recv().unwrap();
             let hash = message.hash(&mut hasher).unwrap();
             // do not broadcast if already broadcasted
             if broadcasted_already.contains(&hash) {
@@ -55,7 +55,7 @@ pub async fn broadcast_knowledge(node: Node) -> Result<(), std::io::Error> {
 /// After handling the peer, it reads for the actual message. Then, it calls off to the serve_message function.
 /// The response from serve_message is finally returned back to the peer
 pub async fn serve_peers(node: Node) {
-    let listener = TcpListener::bind(format!("{}:{}", node.ip_address, node.port))
+    let listener = TcpListener::bind(format!("{}:{}", node.inner.ip_address, node.inner.port))
         .await
         .unwrap();
     loop {
@@ -72,9 +72,8 @@ pub async fn serve_peers(node: Node) {
                 Ok(Err(_)) => 1,
                 Err(_) => 2
             };
-            let n: usize;
-            if status == 0{
-                n = result.unwrap().unwrap();
+            let n: usize = if status == 0{
+                result.unwrap().unwrap()
             } else {
                 // halt communication
                 send_error_message(
@@ -85,7 +84,7 @@ pub async fn serve_peers(node: Node) {
                     ),
                 ).await;
                 return;
-            }
+            };
             let declaration: Result<Message, Box<bincode::ErrorKind>> = bincode::deserialize(&buffer[..n]);
             if declaration.is_err() {
                 // halt communication
@@ -202,7 +201,7 @@ mod tests {
 
         // Verify the peer was added
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await; // Allow time for processing
-        let peers = node.peers.lock().await;
+        let peers = node.inner.peers.lock().await;
         assert!(peers.contains_key(&peer.public_key));
     }
 
@@ -273,7 +272,7 @@ mod tests {
         peer_stream.write_all(&nbytes.to_le_bytes()).await.unwrap();
         peer_stream.write_all(&response_serialized).await.unwrap();
         
-        let broadcasted = node.broadcasted_already.lock().await;
+        let broadcasted = node.inner.broadcasted_already.lock().await;
         let mut hasher = DefaultHash::new();
         let message_hash = message.hash(&mut hasher).unwrap();
         assert!(broadcasted.contains(&message_hash));

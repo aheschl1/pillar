@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use crate::crypto::{hashing::{HashFunction, Hashable}, signing::Signable};
+use crate::{crypto::{hashing::{HashFunction, Hashable}, signing::Signable}, nodes::node::StdByteArray};
 use serde_with::{serde_as, Bytes};
 
 use super::block::Block;
@@ -11,7 +11,7 @@ pub struct Transaction{
     // header is the header of the transaction
     pub header: TransactionHeader,
     // hash is the sha3_256 hash of the transaction header
-    pub hash: [u8; 32],
+    pub hash: StdByteArray,
     // signature is the signature over the transaction header
     #[serde_as(as = "Option<Bytes>")]
     pub signature: Option<[u8; 64]>,
@@ -20,9 +20,9 @@ pub struct Transaction{
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct TransactionHeader{
     // sender is the ed25519 public key of the sender
-    pub sender: [u8; 32],
+    pub sender: StdByteArray,
     // receiver is the ed25519 public key of the receiver
-    pub receiver: [u8; 32],
+    pub receiver: StdByteArray,
     // amount is the amount of tokens being transferred
     pub amount: u64,
     // timestamp is the time the transaction was created
@@ -36,9 +36,9 @@ pub struct TransactionHeader{
 /// a proof of a transaction when it is incorporated into a block.
 pub struct TransactionFilter {
     // sender is the ed25519 public key of the sender
-    pub sender: Option<[u8; 32]>,
+    pub sender: Option<StdByteArray>,
     // receiver is the ed25519 public key of the receiver
-    pub receiver: Option<[u8; 32]>,
+    pub receiver: Option<StdByteArray>,
     // amount is the amount of tokens being transferred
     pub amount: Option<u64>,
 }
@@ -51,7 +51,7 @@ impl TransactionFilter{
     /// * `sender` - The sender's public key
     /// * `receiver` - The receiver's public key
     /// * `amount` - The amount of tokens being transferred
-    pub fn new(sender: Option<[u8; 32]>, receiver: Option<[u8; 32]>, amount: Option<u64>) -> Self {
+    pub fn new(sender: Option<StdByteArray>, receiver: Option<StdByteArray>, amount: Option<u64>) -> Self {
         TransactionFilter {
             sender,
             receiver,
@@ -111,8 +111,8 @@ impl From<Transaction> for TransactionFilter{
 
 impl TransactionHeader {
     pub fn new(
-        sender: [u8; 32], 
-        receiver: [u8; 32], 
+        sender: StdByteArray, 
+        receiver: StdByteArray, 
         amount: u64, 
         timestamp: u64, 
         nonce: u64
@@ -134,8 +134,8 @@ impl TransactionHeader {
     ///
     /// # Returns
     ///
-    /// * The hash of the transaction header as a [u8; 32] array
-    pub fn hash(&self, hasher: &mut impl HashFunction) -> [u8; 32] {
+    /// * The hash of the transaction header as a StdByteArray array
+    pub fn hash(&self, hasher: &mut impl HashFunction) -> StdByteArray {
         hasher.update(self.sender);
         hasher.update(self.receiver);
         hasher.update(self.amount.to_le_bytes());
@@ -156,8 +156,8 @@ impl Transaction {
     /// * `timestamp` - The time the transaction was created
     /// * `nonce` - A random number used to prevent replay attacks
     pub fn new(
-        sender: [u8; 32],
-        receiver: [u8; 32],
+        sender: StdByteArray,
+        receiver: StdByteArray,
         amount: u64,
         timestamp: u64,
         nonce: u64,
@@ -174,13 +174,13 @@ impl Transaction {
 }
 
 impl Hashable for Transaction {
-    fn hash(&self, hasher: &mut impl HashFunction) -> Result<[u8; 32], std::io::Error> {
+    fn hash(&self, hasher: &mut impl HashFunction) -> Result<StdByteArray, std::io::Error> {
         Ok(self.header.hash(hasher))
     }
 }
 
-impl Into<[u8; 32]> for Transaction {
-    fn into(self) -> [u8; 32] {
+impl Into<StdByteArray> for Transaction {
+    fn into(self) -> StdByteArray {
         self.hash
     }
 }
