@@ -6,9 +6,18 @@ use tokio::sync::Mutex;
 use super::messages::Message;
 
 use crate::{
-    blockchain::chain::Chain, crypto::signing::{DefaultSigner, SigFunction, Signable}, persistence::database::{Datastore, EmptyDatastore}, primitives::{block::{Block, BlockHeader, Stamp}, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::{dicover_chain, service_sync, sync_chain}, communication::{broadcast_knowledge, serve_peers}, reputation::{nth_percentile_peer, N_TRANSMISSION_SIGNATURES}}, reputation::history::NodeHistory
+    blockchain::chain::Chain,
+    crypto::signing::{DefaultSigner, SigFunction, Signable},
+    persistence::database::{Datastore, EmptyDatastore},
+    primitives::{block::{Block, BlockHeader, Stamp},
+    pool::MinerPool,
+    transaction::{FilterMatch, TransactionFilter}},
+    protocol::{chain::{dicover_chain, service_sync, sync_chain},
+    communication::{broadcast_knowledge, serve_peers},
+    reputation::{nth_percentile_peer, N_TRANSMISSION_SIGNATURES}},
+    reputation::history::NodeHistory
 };
-
+ 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum NodeState{
     ICD,
@@ -917,6 +926,8 @@ mod tests{
         ).await.unwrap();
 
         assert!(result.is_none());
+
+        panic!();
 
     }
         
