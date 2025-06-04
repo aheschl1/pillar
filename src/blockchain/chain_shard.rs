@@ -92,8 +92,6 @@ impl TrimmableChain for ChainShard {
 
 #[cfg(test)]
 mod tests {
-    use rand_core::OsRng;
-
     use super::*;
     use crate::accounting::account::Account;
     use crate::crypto::signing::{DefaultSigner, SigFunction, SigVerFunction, Signable};
