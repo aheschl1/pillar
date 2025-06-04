@@ -84,6 +84,13 @@ impl AccountManager{
         self.address_to_account.get(address).cloned()
     }
 
+    pub fn get_or_create_account(&mut self, address: &[u8; 32]) -> Arc<Mutex<Account>> {
+        match self.get_account(address) {
+            Some(account) => account,
+            None => self.add_account(Account::new(*address, 0)),
+        }
+    }
+
     /// Updates the accounts from the block
     /// This is called when a new block is added to the chain
     /// This does NOT verify the block - VERIFY THE BLOCK FIRST
@@ -91,7 +98,16 @@ impl AccountManager{
     pub fn update_from_block(&mut self, block: &Block){
         // Update the accounts from the block
         for transaction in &block.transactions {
-            let sender = self.get_account(&transaction.header.sender).unwrap();
+            let sender = match self.get_account(&transaction.header.sender){
+                Some(account) => account,
+                None => {
+                    // if the sender does not exist, we create a new account with 0 balance
+                    if transaction.header.amount > 0 {
+                        panic!("Sender account does not exist, but transaction amount is greater than 0");
+                    }
+                    self.add_account(Account::new(transaction.header.sender, 0))
+                }
+            };
             // may need to make a new public account for the receiver under the established public key
             let receiver = match self.get_account(&transaction.header.receiver){
                 Some(account) => account,

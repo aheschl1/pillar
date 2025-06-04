@@ -452,7 +452,7 @@ impl Node {
     pub async fn maybe_update_peer(&self, peer: Peer) -> Result<(), std::io::Error> {
         // check if the peer is already in the list
         let mut peers = self.peers.lock().await;
-        if !peers.iter().any(|(public_key, _)| public_key == &peer.public_key) {
+        if (peer.public_key != *self.public_key) && !peers.iter().any(|(public_key, _)| public_key == &peer.public_key) {
             // add the peer to the list
             peers.insert(peer.public_key, peer);
         }
@@ -496,7 +496,8 @@ impl Broadcaster for Node {
     async fn broadcast(&self, message: &Message) -> Result<Vec<Message>, std::io::Error> {
         // send a message to all peers
         let mut responses = Vec::new();
-        for (_, peer) in self.peers.lock().await.iter_mut() {
+        let mut peers = self.peers.lock().await.clone();
+        for (_, peer) in peers.iter_mut(){
             let response = peer.communicate(message, &self.into()).await;
             if let Err(e) = response {
                 println!("Failed to communicate with peer {:?}: {:?}", peer.public_key, e);
@@ -510,10 +511,12 @@ impl Broadcaster for Node {
 
 #[cfg(test)]
 mod tests{
-    use crate::{nodes::{messages::Message, peer::Peer}, persistence::database::{Datastore, GenesisDatastore}, protocol::peers::discover_peers};
+    use sled::transaction;
+
+    use crate::{crypto::{hashing::{DefaultHash, HashFunction}, signing::{self, DefaultSigner, SigFunction, SigVerFunction, Signable}}, nodes::{messages::Message, node, peer::Peer}, persistence::database::{Datastore, GenesisDatastore}, primitives::transaction::Transaction, protocol::{peers::discover_peers, transactions::submit_transaction}};
 
     use super::Node;
-    use std::{net::{IpAddr, Ipv4Addr}, sync::Arc};
+    use std::{hash::DefaultHasher, net::{IpAddr, Ipv4Addr}, sync::Arc};
 
     #[tokio::test]
     async fn test_create_empty_node() {
@@ -826,6 +829,81 @@ mod tests{
         assert!(peers_d.contains_key(&public_key_c));
         drop(peers_d);
         
+    }
+
+    #[tokio::test]
+    async fn test_start_account(){
+        let mut signing_a = DefaultSigner::generate_random();
+        let public_key_a = signing_a.get_verifying_function().to_bytes();
+        let private_key_a = signing_a.to_bytes();
+
+        let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        let port_a = 8020;
+
+        let signing_b = DefaultSigner::generate_random();
+        let public_key_b = signing_b.get_verifying_function().to_bytes();
+        let private_key_b = signing_b.to_bytes();
+
+        let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2));
+        let port_b = 8021;
+
+        let datastore = GenesisDatastore::new();
+
+        let mut node_a = Node::new(
+            public_key_a,
+            private_key_a,
+            ip_address_a,
+            port_a,
+            vec![Peer::new(public_key_b, ip_address_b, port_b)],
+            Some(Arc::new(datastore.clone())),
+            None,
+        );
+
+        let mut node_b = Node::new(
+            public_key_b,
+            private_key_b,
+            ip_address_b,
+            port_b,
+            vec![],
+            Some(Arc::new(datastore.clone())),
+            None,
+        );
+
+        node_b.serve().await;
+        node_a.serve().await;
+
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        // Node A sends a peer request to Node B
+        discover_peers(&mut node_a).await.unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        // Verify that Node B knows Node A
+        let peers_b = node_b.peers.lock().await;
+        assert!(peers_b.contains_key(&public_key_a));
+
+        drop(peers_b);
+
+        // now, A makes a transaction of 0 dollars to B
+
+        let mut chain = node_a.chain.lock().await;
+        let sender_account = chain.as_mut().unwrap().account_manager.get_or_create_account(&public_key_a);
+        drop(chain);
+
+        let result = submit_transaction(
+            &mut node_a, 
+            &mut sender_account.clone().lock().unwrap(), 
+            &mut signing_a, 
+            public_key_b, 
+            0, 
+            false
+        ).await.unwrap();
+
+        assert!(result.is_none());
+
+
+
     }
         
 }
