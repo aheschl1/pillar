@@ -48,15 +48,15 @@ impl GenesisDatastore {
 
 impl Datastore for GenesisDatastore {
     fn latest_chain(&self) -> Option<u64> {
-        self.chain.leaves.iter().last().map(|leaf| self.chain.blocks.get(leaf).unwrap().header.timestamp)
+        self.inner.chain.leaves.iter().last().map(|leaf| self.inner.chain.blocks.get(leaf).unwrap().header.timestamp)
     }
 
     fn load_chain(&self) -> Result<Chain, std::io::Error> {
-        Ok(self.chain.clone())
+        Ok(self.inner.chain.clone())
     }
 
     fn save_chain(&mut self, chain: Chain) -> Result<(), std::io::Error> {
-        self.chain = chain;
+        self.inner.chain = chain;
         Ok(())
     }
 
@@ -88,21 +88,21 @@ impl EmptyDatastore {
 
 impl Datastore for EmptyDatastore {
     fn latest_chain(&self) -> Option<u64> {
-        match &self.chain{
+        match &self.inner.chain{
             Some(chain) => chain.leaves.iter().last().map(|leaf| chain.blocks.get(leaf).unwrap().header.timestamp),
             None => None,
         }
     }
 
     fn load_chain(&self) -> Result<Chain, std::io::Error> {
-        match &self.chain {
+        match &self.inner.chain {
             Some(chain) => Ok(chain.clone()),
             None => Err(std::io::Error::new(std::io::ErrorKind::NotFound, "No chain found")),
         }
     }
 
     fn save_chain(&mut self, chain: Chain) -> Result<(), std::io::Error> {
-        self.chain = Some(chain);
+        self.inner.chain = Some(chain);
         Ok(())
     }
 

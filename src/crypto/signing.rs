@@ -99,15 +99,15 @@ impl DefaultSigner{
 
 impl SigFunction<32,32, 64> for DefaultSigner{
     fn sign(&mut self, data: &impl Signable<64>) -> [u8; 64]{
-        self.private_key.sign(data.get_signing_bytes().as_ref()).to_bytes()
+        self.inner.private_key.sign(data.get_signing_bytes().as_ref()).to_bytes()
     }
 
     fn to_bytes(&self) -> [u8; 32]{
-        self.private_key.to_bytes()
+        self.inner.private_key.to_bytes()
     }
 
     fn get_verifying_function(&self) -> impl SigVerFunction<32, 64>{
-        DefaultVerifier::new(self.private_key.verifying_key().to_bytes())
+        DefaultVerifier::new(self.inner.private_key.verifying_key().to_bytes())
     }
 
     fn generate_random() -> Self {
@@ -122,11 +122,11 @@ impl SigVerFunction<32, 64> for DefaultVerifier{
     fn verify(&self, signature: &[u8; 64], target: &impl Signable<64>) -> bool{
         let signature = ed25519::Signature::from_bytes(signature);
 
-        self.public_key.verify_strict(target.get_signing_bytes().as_ref(), &signature).is_ok()
+        self.inner.public_key.verify_strict(target.get_signing_bytes().as_ref(), &signature).is_ok()
     }
 
     fn to_bytes(&self) -> [u8; 32]{
-        self.public_key.to_bytes()
+        self.inner.public_key.to_bytes()
     }
 
     fn from_bytes(bytes: &[u8; 32]) -> Self{

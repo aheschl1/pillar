@@ -18,9 +18,9 @@ pub struct Peer{
 impl Clone for Peer {
     fn clone(&self) -> Self {
         Peer {
-            public_key: self.public_key,
-            ip_address: self.ip_address.clone(),
-            port: self.port
+            public_key: self.inner.public_key,
+            ip_address: self.inner.ip_address.clone(),
+            port: self.inner.port
         }
     }
 }
@@ -38,7 +38,7 @@ impl Peer{
     /// Send a message to the peer
     /// Initializaes a new connection to the peer
     async fn send_initial(&mut self, message: &Message, initializing_peer: &Peer) -> Result<TcpStream, std::io::Error> {
-        let mut stream = tokio::net::TcpStream::connect(format!("{}:{}", self.ip_address, self.port)).await?;
+        let mut stream = tokio::net::TcpStream::connect(format!("{}:{}", self.inner.ip_address, self.inner.port)).await?;
         let serialized_message = bincode::serialize(&message);
         // always send a "peer" object of the initializing node first, and length of the message in bytes
         let declaration = Message::Declaration(initializing_peer.clone(), serialized_message.as_ref().unwrap().len() as u32);
