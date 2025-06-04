@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 use super::messages::Message;
 
 use crate::{
-    blockchain::chain::Chain, crypto::signing::{DefaultSigner, SigFunction, Signable}, persistence::database::{Datastore, EmptyDatastore}, primitives::{block::{Block, BlockHeader, Stamp}, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::{dicover_chain, service_sync, sync_chain}, communication::{broadcast_knowledge, serve_peers}, reputation::{self, nth_percentile_peer, N_TRANSMISSION_SIGNATURES}}, reputation::history::NodeHistory
+    blockchain::chain::Chain, crypto::signing::{DefaultSigner, SigFunction, Signable}, persistence::database::{Datastore, EmptyDatastore}, primitives::{block::{Block, BlockHeader, Stamp}, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::{dicover_chain, service_sync, sync_chain}, communication::{broadcast_knowledge, serve_peers}, reputation::{nth_percentile_peer, N_TRANSMISSION_SIGNATURES}}, reputation::history::NodeHistory
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -451,7 +451,7 @@ impl Node {
 
     pub async fn maybe_update_peer(&self, peer: Peer) -> Result<(), std::io::Error> {
         // check if the peer is already in the list
-        let mut peers = self.peers.lock().await;
+        let mut peers: tokio::sync::MutexGuard<'_, HashMap<[u8; 32], Peer>> = self.peers.lock().await;
         if (peer.public_key != *self.public_key) && !peers.iter().any(|(public_key, _)| public_key == &peer.public_key) {
             // add the peer to the list
             peers.insert(peer.public_key, peer);
@@ -496,7 +496,7 @@ impl Broadcaster for Node {
     async fn broadcast(&self, message: &Message) -> Result<Vec<Message>, std::io::Error> {
         // send a message to all peers
         let mut responses = Vec::new();
-        let mut peers = self.peers.lock().await.clone();
+        let mut peers = self.peers.lock().await;
         for (_, peer) in peers.iter_mut(){
             let response = peer.communicate(message, &self.into()).await;
             if let Err(e) = response {
@@ -511,12 +511,11 @@ impl Broadcaster for Node {
 
 #[cfg(test)]
 mod tests{
-    use sled::transaction;
 
-    use crate::{crypto::{hashing::{DefaultHash, HashFunction}, signing::{self, DefaultSigner, SigFunction, SigVerFunction, Signable}}, nodes::{messages::Message, node, peer::Peer}, persistence::database::{Datastore, GenesisDatastore}, primitives::transaction::Transaction, protocol::{peers::discover_peers, transactions::submit_transaction}};
+    use crate::{crypto::signing::{DefaultSigner, SigFunction, SigVerFunction}, nodes::peer::Peer, persistence::database::{Datastore, GenesisDatastore}, protocol::{peers::discover_peers, transactions::submit_transaction}};
 
     use super::Node;
-    use std::{hash::DefaultHasher, net::{IpAddr, Ipv4Addr}, sync::Arc};
+    use std::{net::{IpAddr, Ipv4Addr}, sync::Arc};
 
     #[tokio::test]
     async fn test_create_empty_node() {
@@ -808,6 +807,7 @@ mod tests{
         let peers_a = node_a.peers.lock().await;
         assert!(peers_a.contains_key(&public_key_b));
         assert!(peers_a.contains_key(&public_key_c));
+        assert!(!peers_a.contains_key(&public_key_a));
         assert!(peers_a.contains_key(&public_key_d)); // node A does not know about D yet
         drop(peers_a);
 
@@ -885,6 +885,10 @@ mod tests{
 
         drop(peers_b);
 
+        let peers_a = node_a.peers.lock().await;
+        assert!(peers_a.contains_key(&public_key_b));
+        assert!(!peers_a.contains_key(&public_key_a)); // Node A does not know itself
+        drop(peers_a);
         // now, A makes a transaction of 0 dollars to B
 
         let mut chain = node_a.chain.lock().await;
@@ -901,8 +905,6 @@ mod tests{
         ).await.unwrap();
 
         assert!(result.is_none());
-
-
 
     }
         

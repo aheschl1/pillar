@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::nodes::{messages::Message, node::Node, peer::Peer};
 
@@ -15,7 +15,7 @@ pub async fn discover_peers(node: &mut Node) -> Result<(), std::io::Error> {
         .keys()
         .cloned()
         .collect::<HashSet<_>>();
-    let mut new_peers: HashMap<[u8; 32], Peer> = HashMap::new();
+    let mut new_peers: Vec<Peer> = vec![];
     // send a message to the peers
     for (_, peer) in node.peers.lock().await.iter_mut() {
         let peers = peer
@@ -28,7 +28,7 @@ pub async fn discover_peers(node: &mut Node) -> Result<(), std::io::Error> {
                     if !existing_peers.contains(&peer.public_key) {
                         // add the peer to the list
                         existing_peers.insert(peer.public_key);
-                        new_peers.insert(peer.public_key, peer);
+                        new_peers.push(peer);
                     }
                 }
             }
@@ -41,7 +41,8 @@ pub async fn discover_peers(node: &mut Node) -> Result<(), std::io::Error> {
         }
     }
     // extend the peers list with the new peers
-    node.peers.lock().await.extend(new_peers);
+    // node.peers.lock().await.extend(new_peers);
+    node.maybe_update_peers(new_peers).await;
     Ok(())
 }
 
