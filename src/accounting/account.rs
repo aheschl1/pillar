@@ -6,7 +6,7 @@ use crate::primitives::block::Block;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransactionStub{
-    // The block hash of the block that created this account
+    // The block hash of the block that created this transaction
     pub block_hash: [u8; 32],
     // The transaction hash of the transaction that created this account
     pub transaction_hash: [u8; 32],

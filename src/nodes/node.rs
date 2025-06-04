@@ -1,13 +1,12 @@
 use super::peer::Peer;
 use flume::{Receiver, Sender};
-use sha3::digest::consts::True;
 use std::{collections::{HashMap, HashSet}, net::IpAddr, sync::Arc};
 use tokio::sync::Mutex;
 
 use super::messages::Message;
 
 use crate::{
-    blockchain::chain::Chain, crypto::signing::{DefaultSigner, SigFunction, Signable}, persistence::database::{Datastore, EmptyDatastore, GenesisDatastore}, primitives::{block::{Block, BlockHeader, Stamp}, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::{dicover_chain, service_sync, sync_chain}, communication::{broadcast_knowledge, serve_peers}, reputation::{self, nth_percentile_peer, N_TRANSMISSION_SIGNATURES}}, reputation::history::NodeHistory
+    blockchain::chain::Chain, crypto::signing::{DefaultSigner, SigFunction, Signable}, persistence::database::{Datastore, EmptyDatastore}, primitives::{block::{Block, BlockHeader, Stamp}, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::{dicover_chain, service_sync, sync_chain}, communication::{broadcast_knowledge, serve_peers}, reputation::{self, nth_percentile_peer, N_TRANSMISSION_SIGNATURES}}, reputation::history::NodeHistory
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -732,7 +731,7 @@ mod tests{
             None,
         );
 
-        let mut node_b = Node::new(
+        let node_b = Node::new(
             public_key_b,
             private_key_b,
             ip_address_b,
@@ -742,7 +741,7 @@ mod tests{
             None,
         );
 
-        let mut node_c = Node::new(
+        let node_c = Node::new(
             public_key_c,
             private_key_c,
             ip_address_c,
