@@ -1,19 +1,19 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{crypto::hashing::{DefaultHash, HashFunction, Hashable}, primitives::block::BlockHeader};
+use crate::{crypto::hashing::{DefaultHash, HashFunction, Hashable}, nodes::node::StdByteArray, primitives::block::BlockHeader};
 
 pub mod chain;
 pub mod chain_shard;
 
 pub trait TrimmableChain {
-    fn get_headers(&self) -> &HashMap<[u8; 32], BlockHeader>;
-    fn get_leaves_mut(&mut self) -> &mut HashSet<[u8; 32]>;
-    fn remove_header(&mut self, hash: &[u8; 32]);
+    fn get_headers(&self) -> &HashMap<StdByteArray, BlockHeader>;
+    fn get_leaves_mut(&mut self) -> &mut HashSet<StdByteArray>;
+    fn remove_header(&mut self, hash: &StdByteArray);
 
     fn trim(&mut self) {
         let headers = self.get_headers().clone();
-        let mut seen = HashMap::<[u8; 32], [u8; 32]>::new(); // node: leaf leading there
-        let mut forks_to_kill = HashSet::<[u8; 32]>::new();
+        let mut seen = HashMap::<StdByteArray, StdByteArray>::new(); // node: leaf leading there
+        let mut forks_to_kill = HashSet::<StdByteArray>::new();
         let mut sorted_leaves: Vec<_> = self.get_leaves_mut().iter().cloned().collect();
         // visit deepest leaves first so that we can look back at deeper forks later
         sorted_leaves.sort_by_key(|x| -(headers[x].depth as i64)); // deepest first

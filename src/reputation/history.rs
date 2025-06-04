@@ -1,13 +1,13 @@
 use std::{cmp::max, collections::HashSet};
 
-use crate::{blockchain::{chain_shard::ChainShard, TrimmableChain}, crypto::hashing::{HashFunction, Hashable}, primitives::block::{BlockHeader, BlockTail}, protocol::reputation::{block_worth_scaling_fn, BLOCK_STAMP_SCALING, N_TRANSMISSION_SIGNATURES}};
+use crate::{blockchain::{chain_shard::ChainShard, TrimmableChain}, crypto::hashing::{HashFunction, Hashable}, nodes::node::StdByteArray, primitives::block::{BlockHeader, BlockTail}, protocol::reputation::{block_worth_scaling_fn, BLOCK_STAMP_SCALING, N_TRANSMISSION_SIGNATURES}};
 
 /// The reputation structure holds all the information needed to compute the reputation of a node
 /// This information should be stored by each node, and each node can add it to a side chain
 #[derive(Debug, Default)]
 pub struct NodeHistory{
     /// The public key of the node
-    pub public_key: [u8; 32],
+    pub public_key: StdByteArray,
     /// The blocks that have been mined by the node - could be empty if the node does not mine
     pub blocks_mined: Vec<BlockHeader>,
     /// the blocks that have been stamped by the node - could be empty if the node does not stamp
@@ -18,7 +18,7 @@ pub struct NodeHistory{
 
 impl NodeHistory{
     pub fn new(
-        public_key: [u8; 32],
+        public_key: StdByteArray,
         blocks_mined: Vec<BlockHeader>,
         blocks_stamped: Vec<BlockHeader>,
         max_chain_depth: u64,
@@ -33,7 +33,7 @@ impl NodeHistory{
     /// Returns the reputation of the node
     pub fn extract(
         shard: &mut ChainShard,
-        miner: [u8; 32],
+        miner: StdByteArray,
         hash_function: &mut impl HashFunction
     ) -> NodeHistory{
         // trim the shard so that we elminate old forks that are now diregarded
@@ -70,7 +70,7 @@ impl NodeHistory{
     /// Settle a new block into the history of the node
     /// This is used when the node is a miner and has mined a new block
     pub fn settle_head(&mut self, block: BlockHeader){
-        if block.miner_address.is_none() || block.miner_address.unwrap() != self.inner.public_key{
+        if block.miner_address.is_none() || block.miner_address.unwrap() != self.public_key{
             panic!("Block does not belong to this miner");
         }
         self.blocks_mined.push(block);
@@ -82,7 +82,7 @@ impl NodeHistory{
     /// This is used when the node has stamped a new block
     pub fn settle_tail(&mut self, tail: &BlockTail, head: BlockHeader){
         let stampers = tail.get_stampers();
-        if !stampers.contains(&self.inner.public_key){
+        if !stampers.contains(&self.public_key){
             panic!("Block does not belong to this peer");
         }
         // now push the block into the history

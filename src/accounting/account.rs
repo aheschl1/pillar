@@ -2,20 +2,20 @@ use std::{cmp::Ordering, collections::HashMap, hash::Hash, sync::{Arc, Mutex}};
 
 use serde::{Deserialize, Serialize};
 
-use crate::primitives::block::Block;
+use crate::{nodes::node::StdByteArray, primitives::block::Block};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransactionStub{
     // The block hash of the block that created this transaction
-    pub block_hash: [u8; 32],
+    pub block_hash: StdByteArray,
     // The transaction hash of the transaction that created this account
-    pub transaction_hash: [u8; 32],
+    pub transaction_hash: StdByteArray,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Account{
     // The address of the account is the public key
-    pub address: [u8; 32],
+    pub address: StdByteArray,
     // The balance of the account
     pub balance: u64,
     // The nonce of the account, to prevent replay attacks
@@ -26,7 +26,7 @@ pub struct Account{
 
 impl Account{
     // Creates a new account with the given address and balance
-    pub fn new(address: [u8; 32], balance: u64) -> Self {
+    pub fn new(address: StdByteArray, balance: u64) -> Self {
         // for now, this placeholder will work; however, in the long run we need a coinbase account for initial distribution
         // TODO deal with coinbase
         let history = match balance.cmp(&0){
@@ -53,7 +53,7 @@ pub struct AccountManager{
     // The accounts in the blockchain
     pub accounts: Vec<Arc<Mutex<Account>>>,
     // The mapping from address to account
-    pub address_to_account: HashMap<[u8; 32], Arc<Mutex<Account>>>,
+    pub address_to_account: HashMap<StdByteArray, Arc<Mutex<Account>>>,
 }
 
 impl Default for AccountManager {
@@ -80,11 +80,11 @@ impl AccountManager{
     }
 
     // Gets an account by its address
-    pub fn get_account(&self, address: &[u8; 32]) -> Option<Arc<Mutex<Account>>> {
+    pub fn get_account(&self, address: &StdByteArray) -> Option<Arc<Mutex<Account>>> {
         self.address_to_account.get(address).cloned()
     }
 
-    pub fn get_or_create_account(&mut self, address: &[u8; 32]) -> Arc<Mutex<Account>> {
+    pub fn get_or_create_account(&mut self, address: &StdByteArray) -> Arc<Mutex<Account>> {
         match self.get_account(address) {
             Some(account) => account,
             None => self.add_account(Account::new(*address, 0)),

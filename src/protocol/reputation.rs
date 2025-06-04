@@ -2,7 +2,7 @@
 use core::f64;
 use std::collections::{HashMap, HashSet};
 
-use crate::{nodes::{messages::Message, node::{Broadcaster, Node}, peer::Peer}, reputation::history::NodeHistory};
+use crate::{nodes::{messages::Message, node::{Broadcaster, Node, StdByteArray}, peer::Peer}, reputation::history::NodeHistory};
 
 const MINING_WORTH_HALF_LIFE: f64 = 8f64;
 const MINING_WORTH_MAX: f64 = 1f64;
@@ -42,8 +42,8 @@ pub fn block_worth_scaling_fn(block_time: u64) -> f64 {
 /// 
 /// # Returns
 /// * A vector of peers that are in the n-th percentile
-pub fn nth_percentile_peer(lower_n: f32, upper_n: f32, reputations: &HashMap<[u8; 32], NodeHistory>) -> Vec<[u8; 32]>{
-    if lower_n > 1.0 || lower_n < 0.0  || upper_n > 1.0 || upper_n < 0.0 {
+pub fn nth_percentile_peer(lower_n: f32, upper_n: f32, reputations: &HashMap<StdByteArray, NodeHistory>) -> Vec<StdByteArray>{
+    if !(0.0..=1.0).contains(&lower_n)  || !(0.0..=1.0).contains(&upper_n) {
         panic!("n must be between 0 and 1");
     }
     let mut reputations = reputations.iter().map(|(a, h)|{(a, h.compute_reputation())}).collect::<Vec<_>>();
@@ -51,8 +51,8 @@ pub fn nth_percentile_peer(lower_n: f32, upper_n: f32, reputations: &HashMap<[u8
     let lower_n = (lower_n * reputations.len() as f32).round() as usize;
     let upper_n = (upper_n * reputations.len() as f32).round() as usize;
     let mut peers = Vec::new();
-    for i in lower_n..upper_n {
-        peers.push(*reputations[i].0);
+    for i in reputations.iter().take(upper_n).skip(lower_n) {
+        peers.push(*i.0);
     }
     peers
 }
@@ -76,8 +76,8 @@ pub async fn query_for_peers_by_reputation(node: Node, lower_n: f32, upper_n: f3
     }).collect();
     // the final response is the intersection of all responses
     let mut final_response = responses[0].clone();
-    for i in 1..responses.len() {
-        final_response = final_response.intersection(&responses[i]).cloned().collect();
+    for i in responses.iter().skip(1) {
+        final_response = final_response.intersection(&i).cloned().collect();
     }
     Ok(final_response.iter().cloned().cloned().collect::<Vec<Peer>>()) // super sus souble clone here
 }

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use rand::rand_core::le;
 
-use crate::{blockchain::chain::Chain, primitives::block::Block};
+use crate::{blockchain::chain::Chain, nodes::node::StdByteArray, primitives::block::Block};
 
 pub trait Datastore: Send + Sync {
     /// If a chain exists on disk.
@@ -48,15 +48,15 @@ impl GenesisDatastore {
 
 impl Datastore for GenesisDatastore {
     fn latest_chain(&self) -> Option<u64> {
-        self.inner.chain.leaves.iter().last().map(|leaf| self.inner.chain.blocks.get(leaf).unwrap().header.timestamp)
+        self.chain.leaves.iter().last().map(|leaf| self.chain.blocks.get(leaf).unwrap().header.timestamp)
     }
 
     fn load_chain(&self) -> Result<Chain, std::io::Error> {
-        Ok(self.inner.chain.clone())
+        Ok(self.chain.clone())
     }
 
     fn save_chain(&mut self, chain: Chain) -> Result<(), std::io::Error> {
-        self.inner.chain = chain;
+        self.chain = chain;
         Ok(())
     }
 
@@ -88,21 +88,21 @@ impl EmptyDatastore {
 
 impl Datastore for EmptyDatastore {
     fn latest_chain(&self) -> Option<u64> {
-        match &self.inner.chain{
+        match &self.chain{
             Some(chain) => chain.leaves.iter().last().map(|leaf| chain.blocks.get(leaf).unwrap().header.timestamp),
             None => None,
         }
     }
 
     fn load_chain(&self) -> Result<Chain, std::io::Error> {
-        match &self.inner.chain {
+        match &self.chain {
             Some(chain) => Ok(chain.clone()),
             None => Err(std::io::Error::new(std::io::ErrorKind::NotFound, "No chain found")),
         }
     }
 
     fn save_chain(&mut self, chain: Chain) -> Result<(), std::io::Error> {
-        self.inner.chain = Some(chain);
+        self.chain = Some(chain);
         Ok(())
     }
 
@@ -151,10 +151,10 @@ impl Datastore for SledDatastore {
 
     fn load_chain(&self) -> Result<Chain, std::io::Error> {
         let leaf_hashes = self.data.get("leaf_hashes")
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
         // the leaf hash's will point off to the respective blocks. then, we will work our way backwards, loading each block.
         // from there, we reconstruct the chain
-        let mut blocks: HashMap<[u8; 32], Block>;
+        let mut blocks: HashMap<StdByteArray, Block>;
         todo!();
         
     }

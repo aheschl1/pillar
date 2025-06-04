@@ -2,7 +2,7 @@ use std::{collections::{HashMap, HashSet}, hash::DefaultHasher};
 
 use rand::{rng, seq::{IndexedRandom, IteratorRandom}};
 
-use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, crypto::{hashing::{DefaultHash, HashFunction, Hashable}, merkle::generate_tree}, nodes::{messages::Message, node::{Broadcaster, Node}, peer::Peer}, primitives::{block::{Block, BlockHeader, BlockTail}, transaction::Transaction}, reputation::history::NodeHistory};
+use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, crypto::{hashing::{DefaultHash, HashFunction, Hashable}, merkle::generate_tree}, nodes::{messages::Message, node::{Broadcaster, Node, StdByteArray}, peer::Peer}, primitives::{block::{Block, BlockHeader, BlockTail}, transaction::Transaction}, reputation::history::NodeHistory};
 
 use super::{peers::discover_peers, reputation::N_TRANSMISSION_SIGNATURES};
 
@@ -10,7 +10,7 @@ use super::{peers::discover_peers, reputation::N_TRANSMISSION_SIGNATURES};
 async fn query_block_from_peer(
     peer: &mut Peer,
     initializing_peer: &Peer,
-    hash: [u8; 32]
+    hash: StdByteArray
 ) -> Result<Block, std::io::Error>{
     // send the block request to the peer
     // TODO better error handling
@@ -59,7 +59,7 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std
         let sender = tx.clone();
         let handle = tokio::spawn(async move{
             loop{ // keep asking for the node until we pass
-                let mut peer = nodeclone.clone().peers.lock().await.values().choose(&mut rng()).unwrap().clone(); // random peer
+                let mut peer = nodeclone.clone().inner.peers.lock().await.values().choose(&mut rng()).unwrap().clone(); // random peer
                 let block = query_block_from_peer(&mut peer, &nodeclone.clone().into(), hash).await;
                 match block{
                     Ok(block)=>{
@@ -83,7 +83,7 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std
     blocks.sort_by_key(|x| x.header.depth);
     // note: we know that there is exactly one genesis from shard validation
     let mut chain = Chain::new_with_genesis();
-    let mut reputations = node.reputations.lock().await;
+    let mut reputations = node.inner.reputations.lock().await;
     for block in &blocks[1..]{ // skip the first - genesis
         let mut block = block.to_owned();
         let miner = block.header.miner_address.unwrap();
@@ -93,7 +93,7 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std
         loop{ // we need to keep going until it passes full validation
             match chain.add_new_block(block){
                 Err(_) => { // failed validation
-                    let mut peer = node.peers.lock().await.values().choose(&mut rng()).unwrap().clone(); // random peer
+                    let mut peer = node.inner.peers.lock().await.values().choose(&mut rng()).unwrap().clone(); // random peer
                     block = query_block_from_peer(&mut peer, &node.clone().into(), hash).await?; // one more attempt, then fail.
                 }
                 _ => {
@@ -109,7 +109,7 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std
 
 /// This function takes a header and a tail of a block, as well as its miner.
 /// Then, it updates a reputations map to reflect new knowledge
-fn settle_reputations(reputations: &mut HashMap<[u8; 32], NodeHistory>, miner: [u8; 32], tail: &BlockTail, head: BlockHeader){
+fn settle_reputations(reputations: &mut HashMap<StdByteArray, NodeHistory>, miner: StdByteArray, tail: &BlockTail, head: BlockHeader){
     // passed validation - we need to record reputations
     match reputations.get_mut(&miner){
         Some(history) => {
@@ -143,7 +143,7 @@ pub async fn dicover_chain(mut node: Node) -> Result<(), std::io::Error> {
     // get the peers first
     discover_peers(&mut node).await?;
     // broadcast the chain shard request to all peers
-    let mut peers = node.peers.lock().await;
+    let mut peers = node.inner.peers.lock().await;
     let mut chain_shards = Vec::new();
     for (_, peer) in peers.iter_mut() {
         // send the chain shard request to the peer
@@ -164,7 +164,7 @@ pub async fn dicover_chain(mut node: Node) -> Result<(), std::io::Error> {
     let shard = deepest_shard(&chain_shards)?;
     // now we have valid shards
     let chain = shard_to_chain(&mut node, shard.clone()).await?;
-    node.chain.lock().await.replace(chain);
+    node.inner.chain.lock().await.replace(chain);
     Ok(())
 }
 
@@ -202,14 +202,14 @@ pub fn get_genesis_block() -> Block{
 /// Includes verification of new blocks and trimming of synced blocks
 /// May take ownership of mutexed chain for a while
 pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
-    if node.peers.lock().await.is_empty(){
+    if node.inner.peers.lock().await.is_empty(){
         log::warn!("No peers to sync with, skipping chain sync");
         return Ok(());
     }
     // the sync request
-    let chain = node.chain.lock().await;
+    let chain = node.inner.chain.lock().await;
     if chain.is_none() {
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, "No chain to sync"));
+        return Err(std::io::Error::other("No chain to sync"));
     }
     let leaves = chain.as_ref().unwrap().leaves.clone();
     
@@ -223,7 +223,7 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
     }
 
     // sync up with the reponses
-    let mut extensions: HashMap<[u8; 32], (Chain, u64)> = HashMap::new();
+    let mut extensions: HashMap<StdByteArray, (Chain, u64)> = HashMap::new();
     for response in responses{
         match response {
             Message::ChainSyncResponse(shards) => {
@@ -282,9 +282,9 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
                 chain.add_new_block(block.clone())?;
                 // and record the reputations
                 let miner = block.header.miner_address.unwrap();
-                let tail = block.header.tail.clone();
+                let tail = block.header.tail;
                 let head = block.header.clone();
-                let mut reputations = node.reputations.lock().await;
+                let mut reputations = node.inner.reputations.lock().await;
                 settle_reputations(&mut reputations, miner, &tail, head);
             }
         }
@@ -296,12 +296,12 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
 
 
 /// given a set of leaves, we need to provide chains that come after them: i.e. "missing chains"
-pub async fn service_sync(node: Node, leaves: &HashSet<[u8; 32]>) -> Result<Vec<Chain>, std::io::Error> {
-    let my_leaves = node.chain.lock().await.as_ref().unwrap().leaves.clone();
+pub async fn service_sync(node: Node, leaves: &HashSet<StdByteArray>) -> Result<Vec<Chain>, std::io::Error> {
+    let my_leaves = node.inner.chain.lock().await.as_ref().unwrap().leaves.clone();
     let missing_leaves = my_leaves.iter().filter(|x| !leaves.contains(*x)).cloned().collect::<Vec<_>>();
     // for each of these, we need to work our way backwards from the nodes chain off the leaf
     // we recurse until we find a node that is in `leaves` - end the chain there.
-    let chain = node.chain.lock().await.as_ref().unwrap().clone();
+    let chain = node.inner.chain.lock().await.as_ref().unwrap().clone();
     let chains: Vec<Chain> = missing_leaves.iter().map(|leaf|{
         let mut curr = chain.blocks.get(leaf);
         let mut blocks = HashMap::new();
