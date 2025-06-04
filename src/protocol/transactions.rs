@@ -1,6 +1,6 @@
 use flume::Receiver;
 
-use crate::{accounting::account::Account, crypto::{hashing::{DefaultHash, HashFunction}, signing::{SigFunction, Signable}}, nodes::{messages::Message, node::{Broadcaster, Node}}, primitives::{block::BlockHeader, transaction::{self, Transaction, TransactionFilter}}};
+use crate::{accounting::account::Account, crypto::{hashing::{DefaultHash, HashFunction}, signing::{SigFunction, Signable}}, nodes::{messages::Message, node::{Broadcaster, Node, StdByteArray}}, primitives::{block::BlockHeader, transaction::{self, Transaction, TransactionFilter}}};
 
 /// Submit a transaction to the network
 /// 
@@ -20,7 +20,7 @@ pub async fn submit_transaction<const K: usize, const P: usize>(
     node: &mut Node, 
     sender: &mut Account, 
     signer: &mut impl SigFunction<K, P, 64>,
-    receiver: [u8; 32],
+    receiver: StdByteArray,
     amount: u64,
     register_completion_callback: bool
 ) -> Result<Option<Receiver<BlockHeader>>, std::io::Error> {
@@ -40,13 +40,10 @@ pub async fn submit_transaction<const K: usize, const P: usize>(
     // sign with the signer
     transaction.sign(signer);
     // broadcast and wait for peer responses
-    let results = node.broadcast(&Message::TransactionBroadcast(transaction.clone())).await?;
+    let results = node.broadcast(&Message::TransactionBroadcast(transaction)).await?;
     // check if the transaction was acknowledged at least once
     let ok = results.iter().any(|x| {
-        match x {
-            Message::TransactionAck => true,
-            _ => false
-        }
+        matches!(x, Message::TransactionAck)
     });
     match ok{
         true => {
@@ -58,10 +55,7 @@ pub async fn submit_transaction<const K: usize, const P: usize>(
             }
         },
         false => {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Transaction not acknowledged",
-            ))
+            Err(std::io::Error::other("Transaction not acknowledged"))
         }
     }
 }

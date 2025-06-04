@@ -1,7 +1,7 @@
 use core::hash;
 use std::{collections::HashSet, hash::Hash, net::{IpAddr, Ipv4Addr, Ipv6Addr}};
 
-use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, crypto::{hashing::{DefaultHash, HashFunction, Hashable}, merkle::MerkleProof}, primitives::{block::{Block, BlockHeader}, transaction::{Transaction, TransactionFilter}}};
+use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, crypto::{hashing::{DefaultHash, HashFunction, Hashable}, merkle::MerkleProof}, nodes::node::StdByteArray, primitives::{block::{Block, BlockHeader}, transaction::{Transaction, TransactionFilter}}};
 use serde::{Serialize, Deserialize};
 use super::peer::Peer;
 
@@ -29,7 +29,7 @@ pub enum Message {
     // acknowledge a block has been received
     BlockAck,
     // request for a specific block
-    BlockRequest([u8; 32]),
+    BlockRequest(StdByteArray),
     // response with a specific block
     BlockResponse(Option<Block>),
     // request for the block headers
@@ -47,7 +47,7 @@ pub enum Message {
     /// A response to a hit on the transaction filter - with the block header that contains the transaction
     TransactionFilterResponse(TransactionFilter, BlockHeader),
     // chain syncing request - the current leaf hashes of the chain
-    ChainSyncRequest(HashSet<[u8; 32]>),
+    ChainSyncRequest(HashSet<StdByteArray>),
     // chain syncing response - the blocks that are missing. each chain is the child of leaves that shoudle be kept
     ChainSyncResponse(Vec<Chain>),
     // request for peers filtered between a lower percentile and an upper percentile based on reputation
@@ -59,7 +59,7 @@ pub enum Message {
 }
 
 impl Hashable for Message{
-    fn hash(&self, hasher: &mut impl HashFunction) -> Result<[u8; 32], std::io::Error> {
+    fn hash(&self, hasher: &mut impl HashFunction) -> Result<StdByteArray, std::io::Error> {
         let bin = bincode::serialize(self).unwrap();
         hasher.update(bin);
         hasher.digest()

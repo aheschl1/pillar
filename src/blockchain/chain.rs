@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    accounting::account::AccountManager, crypto::{hashing::{DefaultHash, HashFunction}, signing::{DefaultVerifier, SigVerFunction}}, primitives::{
+    accounting::account::AccountManager, crypto::{hashing::{DefaultHash, HashFunction}, signing::{DefaultVerifier, SigVerFunction}}, nodes::node::StdByteArray, primitives::{
         block::{Block, BlockHeader},
         transaction::Transaction,
     }, protocol::chain::get_genesis_block
@@ -15,15 +15,15 @@ use super::TrimmableChain;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Chain {
     /// The blocks in the chain.
-    pub blocks: HashMap<[u8; 32], Block>,
+    pub blocks: HashMap<StdByteArray, Block>,
     /// header cache
-    pub headers: HashMap<[u8; 32], BlockHeader>,
+    pub headers: HashMap<StdByteArray, BlockHeader>,
     /// The current depth (number of blocks) in the chain.
     pub depth: u64,
     /// the block at the deepest depth
-    pub deepest_hash: [u8; 32],
+    pub deepest_hash: StdByteArray,
     // track the leaves
-    pub leaves: HashSet<[u8; 32]>,
+    pub leaves: HashSet<StdByteArray>,
     /// The account manager for tracking account balances and nonces.
     #[serde(skip)]
     pub account_manager: AccountManager,
@@ -52,13 +52,13 @@ impl Chain {
     }
 
     /// Create a chain without a genesis block.
-    pub fn new_from_blocks(blocks: HashMap<[u8; 32], Block>) -> Self{
+    pub fn new_from_blocks(blocks: HashMap<StdByteArray, Block>) -> Self{
         let mut headers = HashMap::new();
         let mut deepest_hash = [0; 32];
         let mut depth = 0;
 
-        let mut all_hashes: HashSet<[u8; 32]> = HashSet::new();
-        let mut seen_prevs: HashSet<[u8; 32]> = HashSet::new();
+        let mut all_hashes: HashSet<StdByteArray> = HashSet::new();
+        let mut seen_prevs: HashSet<StdByteArray> = HashSet::new();
 
         for (hash, block) in &blocks {
             headers.insert(*hash, block.header.clone());
@@ -74,7 +74,7 @@ impl Chain {
         let leaves = all_hashes
             .difference(&seen_prevs)
             .cloned()
-            .collect::<HashSet<[u8; 32]>>();
+            .collect::<HashSet<StdByteArray>>();
 
         Chain {
             blocks,
@@ -111,11 +111,11 @@ impl Chain {
     /// Ensures that all transactions in a block are valid and do not exceed available funds.
     fn validate_transaction_set(&self, transactions: &Vec<Transaction>) -> bool {
         // we need to make sure that there are no duplicated nonce values under the same user
-        let per_user: HashMap<[u8; 32], Vec<&Transaction>> =
+        let per_user: HashMap<StdByteArray, Vec<&Transaction>> =
             transactions
                 .into_iter()
                 .fold(HashMap::new(), |mut acc, tx| {
-                    acc.entry(tx.header.sender) // assuming this gives you the [u8; 32] key
+                    acc.entry(tx.header.sender) // assuming this gives you the StdByteArray key
                         .or_default()
                         .push(tx);
                     acc
@@ -161,11 +161,11 @@ impl Chain {
         self.blocks.get(&self.deepest_hash)
     }
 
-    pub fn get_block(&self, hash: &[u8; 32]) -> Option<&Block> {
+    pub fn get_block(&self, hash: &StdByteArray) -> Option<&Block> {
         self.blocks.get(hash)
     }
 
-    pub fn get_block_mut(&mut self, hash: &[u8; 32]) -> Option<&mut Block> {
+    pub fn get_block_mut(&mut self, hash: &StdByteArray) -> Option<&mut Block> {
         self.blocks.get_mut(hash)
     }
 
@@ -258,15 +258,15 @@ impl Chain {
 
 
 impl TrimmableChain for Chain {
-    fn get_headers(&self) -> &HashMap<[u8; 32], BlockHeader> {
+    fn get_headers(&self) -> &HashMap<StdByteArray, BlockHeader> {
         &self.headers   
     }
 
-    fn get_leaves_mut(&mut self) -> &mut HashSet<[u8; 32]> {
+    fn get_leaves_mut(&mut self) -> &mut HashSet<StdByteArray> {
         &mut self.leaves
     }
 
-    fn remove_header(&mut self, hash: &[u8; 32]) {
+    fn remove_header(&mut self, hash: &StdByteArray) {
         self.blocks.remove(hash);
     }
 }

@@ -1,5 +1,7 @@
 use sha3::{Digest, Sha3_256};
 
+use crate::nodes::node::StdByteArray;
+
 /// A trait for objects that can be hashed using a hash function.
 pub trait Hashable {
     /// Computes the hash of the object using the provided hash function.
@@ -10,9 +12,9 @@ pub trait Hashable {
     ///
     /// # Returns
     ///
-    /// * `Ok([u8; 32])` containing the hash of the object.
+    /// * `Ok(StdByteArray)` containing the hash of the object.
     /// * `Err(std::io::Error)` if hashing fails.
-    fn hash(&self, hasher: &mut impl HashFunction) -> Result<[u8; 32], std::io::Error>;
+    fn hash(&self, hasher: &mut impl HashFunction) -> Result<StdByteArray, std::io::Error>;
 }
 
 /// A trait for hash functions that support updating with data and producing a digest.
@@ -28,9 +30,9 @@ pub trait HashFunction {
     ///
     /// # Returns
     ///
-    /// * `Ok([u8; 32])` containing the hash digest.
+    /// * `Ok(StdByteArray)` containing the hash digest.
     /// * `Err(std::io::Error)` if no data was added before finalizing.
-    fn digest(&mut self) -> Result<[u8; 32], std::io::Error>;
+    fn digest(&mut self) -> Result<StdByteArray, std::io::Error>;
 
     /// Creates a new instance of the hash function.
     fn new() -> Self;
@@ -67,9 +69,9 @@ impl HashFunction for DefaultHash {
     ///
     /// # Returns
     ///
-    /// * `Ok([u8; 32])` containing the hash digest.
+    /// * `Ok(StdByteArray)` containing the hash digest.
     /// * `Err(std::io::Error)` if no data was added before finalizing.
-    fn digest(&mut self) -> Result<[u8; 32], std::io::Error> {
+    fn digest(&mut self) -> Result<StdByteArray, std::io::Error> {
         if self.n_parameters == 0 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,

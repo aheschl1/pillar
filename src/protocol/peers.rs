@@ -9,6 +9,7 @@ use crate::nodes::{messages::Message, node::Node, peer::Peer};
 /// node: &mut Node - The node to discover peers for
 pub async fn discover_peers(node: &mut Node) -> Result<(), std::io::Error> {
     let mut existing_peers = node
+        .inner
         .peers
         .lock()
         .await
@@ -17,7 +18,7 @@ pub async fn discover_peers(node: &mut Node) -> Result<(), std::io::Error> {
         .collect::<HashSet<_>>();
     let mut new_peers: Vec<Peer> = vec![];
     // send a message to the peers
-    for (_, peer) in node.peers.lock().await.iter_mut() {
+    for (_, peer) in node.inner.peers.lock().await.iter_mut() {
         let peers = peer
             .communicate(&Message::PeerRequest, &node.clone().into())
             .await?;
@@ -33,10 +34,7 @@ pub async fn discover_peers(node: &mut Node) -> Result<(), std::io::Error> {
                 }
             }
             _ => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "Invalid message received",
-                ));
+                return Err(std::io::Error::other("Invalid message received"));
             }
         }
     }
@@ -124,7 +122,7 @@ mod tests {
         // Discover peers
         discover_peers(&mut node).await.unwrap();
         // Verify new peer was added
-        let peers = node.peers.lock().await;
+        let peers = node.inner.peers.lock().await;
         assert!(peers.contains_key(&new_peer.public_key));
         assert!(peers.contains_key(&new_peer2.public_key));
         assert_eq!(peers.len(), 3); // Existing + new peer

@@ -15,7 +15,7 @@ impl Miner{
     /// Creates a new miner instance
     /// Takes ownership of the node
     pub fn new(node: Node) -> Result<Self, std::io::Error> {
-        let transaction_pool = &node.miner_pool;
+        let transaction_pool = &node.inner.miner_pool;
         if let Some(_) = transaction_pool{
             return Ok(Miner {
                 node: Arc::new(node),
@@ -31,7 +31,7 @@ impl Miner{
     /// Starts monitoring of the pool in a background process
     /// and serves the node
     pub async fn serve(&self){
-        if self.node.chain.lock().await.is_none(){
+        if self.node.inner.chain.lock().await.is_none(){
             panic!("Cannot serve the miner before initial chain download.")
         }
         // self.node.serve().await;
@@ -43,12 +43,12 @@ impl Miner{
     async fn monitor_block_pool(self) {
         loop {
             // check if there is a block to mine
-            let block = self.node.miner_pool.as_ref().unwrap().pop_ready_block();
+            let block = self.node.inner.miner_pool.as_ref().unwrap().pop_ready_block();
             match block{
                 Some(mut block) => {
-                    block.header.miner_address = Some(*self.node.public_key);
+                    block.header.miner_address = Some(self.node.inner.public_key.clone());
                     block.header.tail.clean(&block.header.clone()); // removes broken signatures
-                    mine(&mut block, *self.node.public_key, DefaultHash::new()).await;
+                    mine(&mut block, self.node.inner.public_key.clone(), DefaultHash::new()).await;
                     // after mining the block, just transmit
                     // TODO this doesnt fully belong here - also handle broadcast error
                     let _ = self.node.broadcast(&Message::BlockTransmission(block)).await;
@@ -73,7 +73,7 @@ impl Miner{
         let mut transactions = vec![];
         let mut last_polled_at: Option<u64> = None;
         loop {
-            let transaction = self.node.miner_pool.as_ref().unwrap().pop_transaction();
+            let transaction = self.node.inner.miner_pool.as_ref().unwrap().pop_transaction();
             match transaction{
                 Some(transaction) => {
                     transactions.push(transaction);
@@ -87,18 +87,18 @@ impl Miner{
                 // mining time
                 // mine
                 let block = Block::new(
-                    self.node.chain.as_ref().lock().await.as_mut().unwrap().get_top_block().unwrap().hash.unwrap(), // if it crahses, there is bug
+                    self.node.inner.chain.lock().await.as_mut().unwrap().get_top_block().unwrap().hash.unwrap(), // if it crahses, there is bug
                     0,
                     tokio::time::Instant::now().elapsed().as_secs(),
                     transactions,
                     None, // because this is a proposition on an unmined node
                     BlockTail::default().stamps,
-                    self.node.chain.as_ref().lock().await.as_mut().unwrap().depth + 1,
+                    self.node.inner.chain.lock().await.as_mut().unwrap().depth + 1,
                     &mut DefaultHash::new()
                 );
                 // spawn off the mining process
                 // let address = *self.node.public_key;
-                let pool = self.node.miner_pool.clone();
+                let pool = self.node.inner.miner_pool.clone();
                 pool.as_ref().unwrap().add_block_proposition(block);
                 // tokio::spawn(async move {
                 //     mine(&mut block, address, DefaultHash::new()).await;
@@ -155,7 +155,7 @@ mod test{
             1, &mut hasher);
 
         // mine the block
-        mine(&mut block, *miner.node.public_key, hasher).await;
+        mine(&mut block, miner.node.inner.public_key, hasher).await;
         
         assert!(block.header.nonce > 0);
         assert!(block.header.miner_address.is_some());

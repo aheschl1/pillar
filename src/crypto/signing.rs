@@ -2,6 +2,8 @@ use ed25519::signature::SignerMut;
 use ed25519_dalek::{SigningKey, Verifier, VerifyingKey};
 use rand_core::OsRng;
 
+use crate::nodes::node::StdByteArray;
+
 /// A trait for an object that can be signed and verified.
 pub trait Signable<const S: usize>{
     fn get_signing_bytes(&self) -> impl AsRef<[u8]>;
@@ -26,7 +28,7 @@ pub trait SigFunction<const K: usize, const P: usize, const S: usize>{
     ///
     /// # Returns
     ///
-    /// * `Ok([u8; 32])` containing the signature.
+    /// * `Ok(StdByteArray)` containing the signature.
     /// * `Err(std::io::Error)` if signing fails.
     fn sign(&mut self, data: &impl Signable<S>) -> [u8; S];
     
@@ -82,7 +84,7 @@ pub struct DefaultVerifier{
 }
 
 impl DefaultVerifier{
-    pub fn new(public_key: [u8; 32]) -> Self{
+    pub fn new(public_key: StdByteArray) -> Self{
         DefaultVerifier{
             public_key: VerifyingKey::from_bytes(&public_key).expect("Invlaid public key")
         }
@@ -90,7 +92,7 @@ impl DefaultVerifier{
 }
 
 impl DefaultSigner{
-    pub fn new(private_key: [u8; 32]) -> Self{
+    pub fn new(private_key: StdByteArray) -> Self{
         DefaultSigner{
             private_key: SigningKey::from_bytes(&private_key)
         }
@@ -102,7 +104,7 @@ impl SigFunction<32,32, 64> for DefaultSigner{
         self.private_key.sign(data.get_signing_bytes().as_ref()).to_bytes()
     }
 
-    fn to_bytes(&self) -> [u8; 32]{
+    fn to_bytes(&self) -> StdByteArray{
         self.private_key.to_bytes()
     }
 
@@ -125,11 +127,11 @@ impl SigVerFunction<32, 64> for DefaultVerifier{
         self.public_key.verify_strict(target.get_signing_bytes().as_ref(), &signature).is_ok()
     }
 
-    fn to_bytes(&self) -> [u8; 32]{
+    fn to_bytes(&self) -> StdByteArray{
         self.public_key.to_bytes()
     }
 
-    fn from_bytes(bytes: &[u8; 32]) -> Self{
+    fn from_bytes(bytes: &StdByteArray) -> Self{
         DefaultVerifier::new(*bytes)
     }
 }

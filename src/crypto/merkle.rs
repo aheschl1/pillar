@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use slotmap::{SlotMap, new_key_type};
 
 
+use crate::nodes::node::StdByteArray;
+
 use super::hashing::{HashFunction, Hashable};
 
 // Define a key type for our nodes
@@ -16,7 +18,7 @@ pub struct TreeNode {
     pub left: Option<NodeKey>,
     pub right: Option<NodeKey>,
     pub parent: Option<NodeKey>,
-    pub hash: [u8; 32],
+    pub hash: StdByteArray,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Hash, PartialEq, Eq)]
@@ -27,9 +29,9 @@ pub enum HashDirection {
 
 #[derive(Debug, Clone, Deserialize, Serialize, Hash, PartialEq, Eq)]
 pub struct MerkleProof {
-    pub hashes: Vec<[u8; 32]>,
+    pub hashes: Vec<StdByteArray>,
     pub directions: Vec<HashDirection>,
-    pub root: [u8; 32],
+    pub root: StdByteArray,
 }
 
 #[derive(Debug, Clone)]
@@ -76,7 +78,7 @@ impl MerkleTree {
         }
     }
 
-    pub fn get_root_hash(&self) -> Option<[u8; 32]>{
+    pub fn get_root_hash(&self) -> Option<StdByteArray>{
         match self.root{
             None => None,
             Some(root) => {
@@ -151,7 +153,7 @@ pub fn generate_tree(data: Vec<&impl Hashable>, hash_function: &mut impl HashFun
 }
 
 /// Generate a Merkle proof for a specific transaction
-pub fn generate_proof_of_inclusion(merkle_tree: &MerkleTree, data: [u8; 32], hash_function: &mut impl HashFunction) -> Option<MerkleProof> {
+pub fn generate_proof_of_inclusion(merkle_tree: &MerkleTree, data: StdByteArray, hash_function: &mut impl HashFunction) -> Option<MerkleProof> {
     let leaves = merkle_tree.leaves.as_ref()?;
     let nodes = &merkle_tree.nodes;
     let root_key = merkle_tree.root?;
@@ -190,7 +192,7 @@ pub fn generate_proof_of_inclusion(merkle_tree: &MerkleTree, data: [u8; 32], has
 }
 
 /// Verify a Merkle proof
-pub fn verify_proof_of_inclusion<T: Into<[u8; 32]>>(data: T, proof: &MerkleProof, root: [u8; 32], hash_function: &mut impl HashFunction) -> bool {
+pub fn verify_proof_of_inclusion<T: Into<StdByteArray>>(data: T, proof: &MerkleProof, root: StdByteArray, hash_function: &mut impl HashFunction) -> bool {
     hash_function.update(data.into());
     let mut current_hash = hash_function.digest().expect("Hashing failed");
 

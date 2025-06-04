@@ -1,9 +1,9 @@
-use crate::{crypto::hashing::{HashFunction, Hashable}, primitives::block::Block};
+use crate::{crypto::hashing::{HashFunction, Hashable}, nodes::node::StdByteArray, primitives::block::Block};
 
 use super::difficulty::get_difficulty_from_depth;
 
 
-pub fn is_valid_hash(difficulty: u64, hash: &[u8; 32]) -> bool {
+pub fn is_valid_hash(difficulty: u64, hash: &StdByteArray) -> bool {
     // check for 'difficulty' leading 0 bits
     let mut leading_zeros: u64 = 0;
     for byte in hash.iter() {
@@ -17,7 +17,7 @@ pub fn is_valid_hash(difficulty: u64, hash: &[u8; 32]) -> bool {
     leading_zeros >= difficulty
 }
 
-pub async fn mine(block: &mut Block, address: [u8; 32], mut hash_function: impl HashFunction){
+pub async fn mine(block: &mut Block, address: StdByteArray, mut hash_function: impl HashFunction){
     // the block is already pupulated
     block.header.nonce = 0;
     block.header.miner_address = Some(address);

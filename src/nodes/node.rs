@@ -1,6 +1,6 @@
 use super::peer::Peer;
 use flume::{Receiver, Sender};
-use std::{collections::{HashMap, HashSet}, net::IpAddr, sync::Arc};
+use std::{collections::{HashMap, HashSet}, net::IpAddr, ops::Deref, sync::Arc};
 use tokio::sync::Mutex;
 
 use super::messages::Message;
@@ -83,44 +83,54 @@ fn get_initial_state(datastore: &dyn Datastore) -> (NodeState, Option<Chain>) {
     }
 }
 
-#[derive(Clone)]
-pub struct Node {
-    pub public_key: Arc<[u8; 32]>,
+pub const STANDARD_ARRAY_LENGTH: usize = 32;
+
+pub type StdByteArray = [u8; STANDARD_ARRAY_LENGTH];
+
+pub struct NodeInner {
+    pub public_key: StdByteArray,
     /// The private key of the node
-    pub private_key: Arc<[u8; 32]>,
+    pub private_key: StdByteArray,
     /// The IP address of the node
     pub ip_address: IpAddr,
     /// The port of the node
-    pub port: Arc<u16>,
+    pub port: u16,
     // known peers
-    pub peers: Arc<Mutex<HashMap<[u8; 32], Peer>>>,
+    pub peers: Mutex<HashMap<StdByteArray, Peer>>,
     // the blockchain
-    pub chain: Arc<Mutex<Option<Chain>>>,
+    pub chain: Mutex<Option<Chain>>,
     /// transactions to be serviced
-    pub miner_pool: Option<Arc<MinerPool>>,
+    pub miner_pool: Option<MinerPool>,
     /// transactions to be broadcasted
     pub broadcast_receiver: Receiver<Message>,
     /// transaction input
     pub broadcast_sender: Sender<Message>,
     // a collection of things already broadcasted
-    pub broadcasted_already: Arc<Mutex<HashSet<[u8; 32]>>>,
+    pub broadcasted_already: Mutex<HashSet<StdByteArray>>,
     // transaction filter queue
     pub transaction_filters: Arc<Mutex<Vec<(TransactionFilter, Peer)>>>,
     /// mapping of reputations for peers
-    pub reputations: Arc<Mutex<HashMap<[u8; 32], NodeHistory>>>,
+    pub reputations: Mutex<HashMap<StdByteArray, NodeHistory>>,
     /// registered filters for the local node - producer will be this node, and consumer will be some backgroung thread that polls
-    filter_callbacks: Arc<Mutex<HashMap<TransactionFilter, Sender<BlockHeader>>>>,
+    filter_callbacks: Mutex<HashMap<TransactionFilter, Sender<BlockHeader>>>,
     /// the state represents the nodes ability to communicate with other nodes
-    state: Arc<Mutex<NodeState>>,
+    state: Mutex<NodeState>,
     /// the datastore
     pub datastore: Option<Arc<dyn Datastore>>,
 }
 
+#[derive(Clone)]
+pub struct Node {
+    pub inner: Arc<NodeInner>
+}
+
+
+
 impl Node {
     /// Create a new node
     pub fn new(
-        public_key: [u8; 32],
-        private_key: [u8; 32],
+        public_key: StdByteArray,
+        private_key: StdByteArray,
         ip_address: IpAddr,
         port: u16,
         peers: Vec<Peer>,
@@ -132,51 +142,53 @@ impl Node {
             database = Some(Arc::new(EmptyDatastore::new()));
         }
         let (broadcast_sender, broadcast_receiver) = flume::unbounded();
-        let transaction_filters = Arc::new(Mutex::new(Vec::new()));
-        let broadcasted_already = Arc::new(Mutex::new(HashSet::new()));
+        let transaction_filters = Mutex::new(Vec::new());
+        let broadcasted_already = Mutex::new(HashSet::new());
         let peer_map = peers
             .iter()
             .map(|peer| (peer.public_key, peer.clone()))
             .collect::<HashMap<_, _>>();
         let (state, maybe_chain) = get_initial_state(&**database.as_ref().unwrap());
         Node {
-            public_key: public_key.into(),
+            inner: NodeInner {
+                public_key: public_key.into(),
             private_key: private_key.into(),
             ip_address,
             port: port.into(),
-            peers: Arc::new(Mutex::new(peer_map)),
-            chain: Arc::new(Mutex::new(maybe_chain)),
-            miner_pool: transaction_pool.map(Arc::new),
+            peers: Mutex::new(peer_map),
+            chain: Mutex::new(maybe_chain),
+            miner_pool: transaction_pool,
             broadcasted_already,
             broadcast_receiver,
             broadcast_sender,
-            transaction_filters,
-            reputations: Arc::new(Mutex::new(HashMap::new())),
-            filter_callbacks: Arc::new(Mutex::new(HashMap::new())), // initially no callbacks
-            state: Arc::new(Mutex::new(state)), // initially in discovery mode
+            transaction_filters: transaction_filters.into(),
+            reputations: Mutex::new(HashMap::new()),
+            filter_callbacks: Mutex::new(HashMap::new()), // initially no callbacks
+            state: Mutex::new(state), // initially in discovery mode
             datastore: database,
+            }.into()
         }
     }
     
     /// when called, launches a new thread that listens for incoming connections
     pub async fn serve(&self) {
         // spawn a new thread to handle the connection
-        let state = self.state.lock().await.clone();
+        let state = self.inner.state.lock().await.clone();
         let handle = match state {
             NodeState::ICD => {
                 log::info!("Starting ICD.");
-                *self.state.lock().await = NodeState::ChainLoading; // update state to chain loading
+                *self.inner.state.lock().await = NodeState::ChainLoading; // update state to chain loading
                 let handle = tokio::spawn(dicover_chain(self.clone()));
                 Some(handle)
             },
             NodeState::ChainOutdated => {
                 log::info!("Node has an outdated chain. Starting sync.");
-                *self.state.lock().await = NodeState::ChainSyncing; // update state to chain syncing
+                *self.inner.state.lock().await = NodeState::ChainSyncing; // update state to chain syncing
                 let handle = tokio::spawn(sync_chain(self.clone()));
                 Some(handle)
             },
             _ => {
-                panic!("Unexpected node state for startup: {:?}", self.state);
+                panic!("Unexpected node state for startup: {:?}", self.inner.state);
             }
         };
         if let Some(handle) = handle {
@@ -186,7 +198,7 @@ impl Node {
                 match result {
                     Ok(Ok(_)) => {
                         log::info!("Node started successfully.");
-                        let mut state = self_clone.state.lock().await;
+                        let mut state = self_clone.inner.state.lock().await;
                         // update to serving
                         *state = NodeState::Serving;
                     },
@@ -206,40 +218,40 @@ impl Node {
         // create a new channel
         let (sender, receiver) = flume::bounded(1);
         // add the filter to the list
-        self.filter_callbacks.lock().await.insert(filter.clone(), sender);
+        self.inner.filter_callbacks.lock().await.insert(filter.clone(), sender);
         // add the filter to the transaction filters
-        self.transaction_filters.lock().await.push((filter.clone(), self.clone().into()));
+        self.inner.transaction_filters.lock().await.push((filter.clone(), self.clone().into()));
         // broadcast the filter to all peers
-        self.broadcast_sender.send(Message::TransactionFilterRequest(filter, self.clone().into())).unwrap();
+        self.inner.broadcast_sender.send(Message::TransactionFilterRequest(filter, self.clone().into())).unwrap();
         // return the receiver
         receiver
     }
 
     /// Derive the response to a request from a peer
     pub async fn serve_request(&mut self, message: &Message, _declared_peer: Peer) -> Result<Message, std::io::Error> {
-        let state = self.state.lock().await.clone();
+        let state = self.inner.state.lock().await.clone();
         match message {
             Message::PeerRequest => {
                 // send all peers
-                Ok(Message::PeerResponse(self.peers.lock().await.values().cloned().collect()))
+                Ok(Message::PeerResponse(self.inner.peers.lock().await.values().cloned().collect()))
             }
             Message::ChainRequest => {
                 if state.is_consume(){ // in consume state, chain is actively being consumed
-                    Ok(Message::ChainResponse(self.chain.lock().await.clone().unwrap()))
+                    Ok(Message::ChainResponse(self.inner.chain.lock().await.clone().unwrap()))
                 }else{
                     Ok(Message::Error("Chain not downloaded for peer".into()))
                 }
             },
             Message::TransactionBroadcast(transaction) => {
                 // add the transaction to the pool
-                if let Some(ref pool) = self.miner_pool{
+                if let Some(ref pool) = self.inner.miner_pool{
                     if state.is_consume() {
                         pool.add_transaction(transaction.clone());
                     }
                 }
                 // to be broadcasted
                 if state.is_forward(){
-                    self.broadcast_sender.send(Message::TransactionBroadcast(transaction.to_owned())).unwrap();
+                    self.inner.broadcast_sender.send(Message::TransactionBroadcast(transaction.to_owned())).unwrap();
                 }
                 Ok(Message::TransactionAck)
             }
@@ -247,7 +259,7 @@ impl Node {
                 // add the block to the chain if we have downloaded it already - first it is verified TODO add to a queue to be added later
                 let mut block = block.clone();
                 if state.is_consume(){
-                    let mut chain_lock = self.chain.lock().await;
+                    let mut chain_lock = self.inner.chain.lock().await;
                     let chain = chain_lock.as_mut().unwrap();
                     self.settle_block(&mut block, chain).await?;
                 }else{
@@ -255,7 +267,7 @@ impl Node {
                     // if we do not have the chain, just forward the block if there is room in the stamps
                     if block.header.tail.n_stamps() < N_TRANSMISSION_SIGNATURES {
                         let _ = self.stamp_block(&mut block.clone());
-                        self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap();
+                        self.inner.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap();
                     }
                 }
                 // handle callback
@@ -267,7 +279,7 @@ impl Node {
             Message::BlockRequest(hash) => {
                 // send a block to the peer upon request
                 if state.is_consume(){
-                    let lock = self.chain.lock().await;
+                    let lock = self.inner.chain.lock().await;
                     let chain = lock.as_ref().unwrap();
                     let block = chain.get_block(hash).cloned();
                     Ok(Message::BlockResponse(block))
@@ -278,7 +290,7 @@ impl Node {
             Message::ChainShardRequest => {
                 // send the block headers to the peer
                 if state.is_consume(){
-                    let lock = self.chain.lock().await;
+                    let lock = self.inner.chain.lock().await;
                     let chain = lock.as_ref().unwrap().clone();
                     Ok(Message::ChainShardResponse(chain.into()))
                 }else{
@@ -287,7 +299,7 @@ impl Node {
             },
             Message::TransactionProofRequest(stub) => {
                 if state.is_consume(){
-                    let lock = self.chain.lock().await;
+                    let lock = self.inner.chain.lock().await;
                     let chain = lock.as_ref().unwrap().clone();
 
                     let block = chain.get_block(&stub.block_hash);
@@ -304,9 +316,9 @@ impl Node {
             },
             Message::TransactionFilterRequest(filter, peer) => {
                 // place into the transaction filter queue - if it is not already there
-                let mut transaction_filters = self.transaction_filters.lock().await;
+                let mut transaction_filters = self.inner.transaction_filters.lock().await;
                 if transaction_filters.iter().any(|(f, p)| f == filter && p == peer) {
-                    self.broadcast_sender.send(Message::TransactionFilterRequest(filter.to_owned(), peer.to_owned())).unwrap();
+                    self.inner.broadcast_sender.send(Message::TransactionFilterRequest(filter.to_owned(), peer.to_owned())).unwrap();
                     transaction_filters.push((filter.to_owned(), peer.to_owned()));
                 }
                 // to be broadcasted
@@ -314,7 +326,7 @@ impl Node {
             },
             Message::TransactionFilterResponse(filter, header) => {
                 if state.is_track(){
-                    let mut callbacks = self.filter_callbacks.lock().await;
+                    let mut callbacks = self.inner.filter_callbacks.lock().await;
                     if let Some(sender) = callbacks.get_mut(filter) {
                         // send the block header to the sender
                         sender.send(*header).unwrap();
@@ -326,9 +338,9 @@ impl Node {
             },
             Message::PercentileFilteredPeerRequest(lower_n, upper_n) => {
                 if state.is_consume(){
-                    let reputations = self.reputations.lock().await;
+                    let reputations = self.inner.reputations.lock().await;
                     let peers = nth_percentile_peer(*lower_n, *upper_n, &reputations);
-                    let peers_map = self.peers.lock().await.clone();
+                    let peers_map = self.inner.peers.lock().await.clone();
                     // find the peer objects in the address list 
                     let filtered_peers = peers.iter().filter_map(|peer| {
                         peers_map.get(peer).cloned()
@@ -359,11 +371,11 @@ impl Node {
         if block.header.miner_address.is_some(){ // meaning it is reqrd time
             chain.add_new_block(block.clone())?; // if we pass this line, valid block
             // initialize broadcast
-            self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap(); // forward
+            self.inner.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap(); // forward
             // the stamping process is done. do, if there is a miner address, then stamping is done on this block.
             // update the reputation tracker with the block to rwared the miner
             self.maybe_create_history(block.header.miner_address.unwrap()).await;
-            let mut reputations = self.reputations.lock().await;
+            let mut reputations = self.inner.reputations.lock().await;
             let miner_history = reputations.get_mut(&block.header.miner_address.unwrap()).unwrap();
             miner_history.settle_head(block.header.clone()); // SETTLE TO REWARD MINING
             // REWARD STAMPERS
@@ -378,18 +390,18 @@ impl Node {
         // ================================================
         // stamp and transmit
         let n_stamps = block.header.tail.n_stamps();
-        let has_our_stamp = block.header.tail.stamps.iter().any(|stamp| stamp.address == *self.public_key);
+        let has_our_stamp = block.header.tail.stamps.iter().any(|stamp| stamp.address == self.inner.public_key);
         if n_stamps < N_TRANSMISSION_SIGNATURES && !has_our_stamp {
             let signature = self.signature_for(&block.header)?;
             let stamp = Stamp {
-                address: *self.public_key,
+                address: self.inner.public_key,
                 signature,
             };
             let _ = block.header.tail.stamp(stamp); // if failure, then full - doesnt matter anyways
         }
         if has_our_stamp && n_stamps == N_TRANSMISSION_SIGNATURES{
             // this means that it was already full - do NOT transmit just assign to mine
-            match self.miner_pool{
+            match self.inner.miner_pool{
                 None => {},
                 Some(ref pool) => {
                     // add the block to the pool
@@ -398,8 +410,8 @@ impl Node {
             }
         }else if n_stamps == N_TRANSMISSION_SIGNATURES - 1{
             // this means that we were the last to sign. forward and assign to mine
-            self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap(); // forward
-            match self.miner_pool{
+            self.inner.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap(); // forward
+            match self.inner.miner_pool{
                 None => {},
                 Some(ref pool) => {
                     // add the block to the pool
@@ -407,14 +419,14 @@ impl Node {
                 }
             }
         }else{
-            self.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap(); // forward
+            self.inner.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap(); // forward
         }
         Ok(())
     }
 
     /// spawn a new thread to match transaction callback requests against the bock
     async fn handle_callbacks(&self, block: &Block){
-        let filters = self.transaction_filters.clone();
+        let filters = self.inner.transaction_filters.clone();
         let block_clone = block.clone();
         let initpeer: Peer = self.clone().into();
         let selfclone = self.clone();
@@ -424,7 +436,7 @@ impl Node {
                 if filter.matches(&block_clone){
                     peer.communicate(&Message::TransactionFilterResponse(filter.clone(), block_clone.header), &initpeer).await.unwrap();
                     // check if there is a registered callback
-                    let mut callbacks: tokio::sync::MutexGuard<'_, HashMap<TransactionFilter, Sender<BlockHeader>>> = selfclone.filter_callbacks.lock().await;
+                    let mut callbacks: tokio::sync::MutexGuard<'_, HashMap<TransactionFilter, Sender<BlockHeader>>> = selfclone.inner.filter_callbacks.lock().await;
                     // TODO maybe this is not nececarry - some rework?
                     if let Some(sender) = callbacks.get_mut(filter) {
                         // send the block header to the sender
@@ -443,7 +455,7 @@ impl Node {
         let signature = self.signature_for(&block.header)?;
         // add the stamp to the block
         let stamp = Stamp {
-            address: *self.public_key,
+            address: self.inner.public_key,
             signature: signature,
         };
         block.header.tail.stamp(stamp)
@@ -452,7 +464,7 @@ impl Node {
     /// ed25519 signature for the node over the hash of some data
     fn signature_for<T: Signable<64>>(&self, sign: &T) -> Result<[u8; 64], std::io::Error> {
         // sign the data with the private key
-        let mut signer = DefaultSigner::new(*self.private_key);
+        let mut signer = DefaultSigner::new(self.inner.private_key);
         let signature = signer.sign(sign);
         // return the signature
         Ok(signature)
@@ -460,8 +472,8 @@ impl Node {
 
     pub async fn maybe_update_peer(&self, peer: Peer) -> Result<(), std::io::Error> {
         // check if the peer is already in the list
-        let mut peers: tokio::sync::MutexGuard<'_, HashMap<[u8; 32], Peer>> = self.peers.lock().await;
-        if (peer.public_key != *self.public_key) && !peers.iter().any(|(public_key, _)| public_key == &peer.public_key) {
+        let mut peers: tokio::sync::MutexGuard<'_, HashMap<StdByteArray, Peer>> = self.inner.peers.lock().await;
+        if (peer.public_key != self.inner.public_key) && !peers.iter().any(|(public_key, _)| public_key == &peer.public_key) {
             // add the peer to the list
             peers.insert(peer.public_key, peer);
         }
@@ -475,9 +487,9 @@ impl Node {
     }
 
     /// create a new history for the node if it does not exist
-    async fn maybe_create_history(&self, public_key: [u8; 32]) {
+    async fn maybe_create_history(&self, public_key: StdByteArray) {
         // get the history of the node
-        let mut reputations = self.reputations.lock().await;
+        let mut reputations = self.inner.reputations.lock().await;
         if let None = reputations.get_mut(&public_key) {
             // create a new history
             reputations.insert(public_key, NodeHistory::default()); // create new
@@ -486,13 +498,13 @@ impl Node {
 }
 impl Into<Peer> for Node {
     fn into(self) -> Peer {
-        Peer::new(*self.public_key, self.ip_address, *self.port)
+        Peer::new(self.inner.public_key, self.inner.ip_address, self.inner.port)
     }
 }
 
 impl Into<Peer> for &Node {
     fn into(self) -> Peer {
-        Peer::new(*self.public_key, self.ip_address, *self.port)
+        Peer::new(self.inner.public_key, self.inner.ip_address, self.inner.port)
     }
 }
 
@@ -505,7 +517,7 @@ impl Broadcaster for Node {
     async fn broadcast(&self, message: &Message) -> Result<Vec<Message>, std::io::Error> {
         // send a message to all peers
         let mut responses = Vec::new();
-        let mut peers = self.peers.lock().await;
+        let mut peers = self.inner.peers.lock().await;
         for (_, peer) in peers.iter_mut(){
             let response = peer.communicate(message, &self.into()).await;
             if let Err(e) = response {
@@ -546,17 +558,17 @@ mod tests{
             transaction_pool,
         );
 
-        assert_eq!(*node.public_key, public_key);
-        assert_eq!(*node.private_key, private_key);
-        assert_eq!(node.ip_address, ip_address);
-        assert_eq!(*node.port, port);
-        assert!(node.peers.lock().await.is_empty());
-        assert!(node.chain.lock().await.is_none());
-        assert!(node.miner_pool.is_none());
-        assert!(node.transaction_filters.lock().await.is_empty());
-        assert!(node.reputations.lock().await.is_empty());
-        assert!(node.filter_callbacks.lock().await.is_empty());
-        assert!(node.state.lock().await.clone() == super::NodeState::ICD);
+        assert_eq!(node.inner.public_key, public_key);
+        assert_eq!(node.inner.private_key, private_key);
+        assert_eq!(node.inner.ip_address, ip_address);
+        assert_eq!(node.inner.port, port);
+        assert!(node.inner.peers.lock().await.is_empty());
+        assert!(node.inner.chain.lock().await.is_none());
+        assert!(node.inner.miner_pool.is_none());
+        assert!(node.inner.transaction_filters.lock().await.is_empty());
+        assert!(node.inner.reputations.lock().await.is_empty());
+        assert!(node.inner.filter_callbacks.lock().await.is_empty());
+        assert!(node.inner.state.lock().await.clone() == super::NodeState::ICD);
     }
 
     #[tokio::test]
@@ -579,17 +591,17 @@ mod tests{
             transaction_pool,
         );
 
-        assert_eq!(*node.public_key, public_key);
-        assert_eq!(*node.private_key, private_key);
-        assert_eq!(node.ip_address, ip_address);
-        assert_eq!(*node.port, port);
-        assert!(node.peers.lock().await.is_empty());
-        assert!(node.chain.lock().await.is_some());
-        assert!(node.miner_pool.is_none());
-        assert!(node.transaction_filters.lock().await.is_empty());
-        assert!(node.reputations.lock().await.is_empty());
-        assert!(node.filter_callbacks.lock().await.is_empty());
-        assert!(node.state.lock().await.clone() == super::NodeState::ChainOutdated);
+        assert_eq!(node.inner.public_key, public_key);
+        assert_eq!(node.inner.private_key, private_key);
+        assert_eq!(node.inner.ip_address, ip_address);
+        assert_eq!(node.inner.port, port);
+        assert!(node.inner.peers.lock().await.is_empty());
+        assert!(node.inner.chain.lock().await.is_some());
+        assert!(node.inner.miner_pool.is_none());
+        assert!(node.inner.transaction_filters.lock().await.is_empty());
+        assert!(node.inner.reputations.lock().await.is_empty());
+        assert!(node.inner.filter_callbacks.lock().await.is_empty());
+        assert!(node.inner.state.lock().await.clone() == super::NodeState::ChainOutdated);
     }
 
 
@@ -617,13 +629,13 @@ mod tests{
         node.serve().await;
 
         // check state update
-        let state = node.state.lock().await;
+        let state = node.inner.state.lock().await;
         assert!(*state == super::NodeState::ChainSyncing);
         drop(state);
 
         tokio::time::sleep(std::time::Duration::from_secs(1)).await; // wait for the node to start
         // check if the node is in serving state
-        let state = node.state.lock().await;
+        let state = node.inner.state.lock().await;
         assert!(*state == super::NodeState::Serving);
 
     }
@@ -657,7 +669,7 @@ mod tests{
         node1.serve().await;
 
         // check state update
-        let state = node1.state.lock().await;
+        let state = node1.inner.state.lock().await;
         assert!(*state == super::NodeState::ChainSyncing);
         drop(state);
 
@@ -680,32 +692,32 @@ mod tests{
         node2.serve().await;
 
         // check state update
-        let state = node2.state.lock().await;
+        let state = node2.inner.state.lock().await;
         assert!(*state == super::NodeState::ChainSyncing);
         drop(state);
 
         // attemp to make node 2 work alongside node 1
         tokio::time::sleep(std::time::Duration::from_secs(3)).await; // wait for the node to start
         // check if the node is in serving state
-        let state = node1.state.lock().await.clone();
+        let state = node1.inner.state.lock().await.clone();
         assert!(state == super::NodeState::Serving);
-        let state = node2.state.lock().await.clone();
+        let state = node2.inner.state.lock().await.clone();
         assert!(state == super::NodeState::Serving);
 
         // check if the nodes can communicate
         let result = discover_peers(&mut node2).await;
         result.unwrap(); // should be successful
         // make sure that node2 is in the list of peers for node 1
-        let peers = node1.peers.lock().await;
+        let peers = node1.inner.peers.lock().await;
         assert!(peers.contains_key(&public_key2));
         drop(peers);
 
         // make sure the [9u8; 32] is in the list of peers for node 2
-        let peers = node2.peers.lock().await;
+        let peers = node2.inner.peers.lock().await;
         assert!(peers.contains_key(&public_key));
         assert!(peers.contains_key(&[8u8; 32])); // the peer we added
         drop(peers);
-        assert!(node2.chain.lock().await.as_ref().unwrap().blocks.len() == 1);
+        assert!(node2.inner.chain.lock().await.as_ref().unwrap().blocks.len() == 1);
     }
 
     #[tokio::test]
@@ -781,25 +793,25 @@ mod tests{
         discover_peers(&mut node_a).await.unwrap(); // 
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-        let peers_a = node_a.peers.lock().await;
+        let peers_a = node_a.inner.peers.lock().await;
         assert!(peers_a.contains_key(&public_key_b));
         assert!(peers_a.contains_key(&public_key_c));
         assert!(!peers_a.contains_key(&public_key_d)); // node A does not know about D yet
         drop(peers_a);
 
-        let peers_b = node_b.peers.lock().await;
+        let peers_b = node_b.inner.peers.lock().await;
         assert!(peers_b.contains_key(&public_key_a));
         assert!(peers_b.contains_key(&public_key_c));
         assert!(!peers_b.contains_key(&public_key_d));
         drop(peers_b);
 
-        let peers_c = node_c.peers.lock().await;
+        let peers_c = node_c.inner.peers.lock().await;
         assert!(!peers_c.contains_key(&public_key_a));
         assert!(peers_c.contains_key(&public_key_b));
         assert!(peers_c.contains_key(&public_key_d));
         drop(peers_c);
 
-        let peers_d = node_d.peers.lock().await;
+        let peers_d = node_d.inner.peers.lock().await;
         assert!(peers_d.contains_key(&public_key_a));
         assert!(!peers_d.contains_key(&public_key_b));
         assert!(peers_d.contains_key(&public_key_c));
@@ -813,26 +825,26 @@ mod tests{
         discover_peers(&mut node_d).await.unwrap(); // 
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-        let peers_a = node_a.peers.lock().await;
+        let peers_a = node_a.inner.peers.lock().await;
         assert!(peers_a.contains_key(&public_key_b));
         assert!(peers_a.contains_key(&public_key_c));
         assert!(!peers_a.contains_key(&public_key_a));
         assert!(peers_a.contains_key(&public_key_d)); // node A does not know about D yet
         drop(peers_a);
 
-        let peers_b = node_b.peers.lock().await;
+        let peers_b = node_b.inner.peers.lock().await;
         assert!(peers_b.contains_key(&public_key_a));
         assert!(peers_b.contains_key(&public_key_c));
         assert!(!peers_b.contains_key(&public_key_d));
         drop(peers_b);
 
-        let peers_c = node_c.peers.lock().await;
+        let peers_c = node_c.inner.peers.lock().await;
         assert!(!peers_c.contains_key(&public_key_a));
         assert!(peers_c.contains_key(&public_key_b));
         assert!(peers_c.contains_key(&public_key_d));
         drop(peers_c);
 
-        let peers_d = node_d.peers.lock().await;
+        let peers_d = node_d.inner.peers.lock().await;
         assert!(peers_d.contains_key(&public_key_a));
         assert!(peers_d.contains_key(&public_key_b));
         assert!(peers_d.contains_key(&public_key_c));
@@ -889,18 +901,18 @@ mod tests{
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
         // Verify that Node B knows Node A
-        let peers_b = node_b.peers.lock().await;
+        let peers_b = node_b.inner.peers.lock().await;
         assert!(peers_b.contains_key(&public_key_a));
 
         drop(peers_b);
 
-        let peers_a = node_a.peers.lock().await;
+        let peers_a = node_a.inner.peers.lock().await;
         assert!(peers_a.contains_key(&public_key_b));
         assert!(!peers_a.contains_key(&public_key_a)); // Node A does not know itself
         drop(peers_a);
         // now, A makes a transaction of 0 dollars to B
 
-        let mut chain = node_a.chain.lock().await;
+        let mut chain = node_a.inner.chain.lock().await;
         let sender_account = chain.as_mut().unwrap().account_manager.get_or_create_account(&public_key_a);
         drop(chain);
 

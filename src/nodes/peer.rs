@@ -3,12 +3,14 @@ use std::{net::IpAddr, time::Duration};
 use serde::{Serialize, Deserialize};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream, time::timeout};
 
+use crate::nodes::node::StdByteArray;
+
 use super::messages::Message;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash)]
 pub struct Peer{
     /// The public key of the peer
-    pub public_key: [u8; 32],
+    pub public_key: StdByteArray,
     /// The IP address of the peer
     pub ip_address: IpAddr,
     /// The port of the peer
@@ -27,7 +29,7 @@ impl Clone for Peer {
 
 impl Peer{
     /// Create a new peer
-    pub fn new(public_key: [u8; 32], ip_address: IpAddr, port: u16) -> Self {
+    pub fn new(public_key: StdByteArray, ip_address: IpAddr, port: u16) -> Self {
         Peer {
             public_key,
             ip_address,

@@ -6,6 +6,7 @@ use serde_with::{serde_as, Bytes};
 use crate::crypto::hashing::{HashFunction, Hashable, DefaultHash};
 use crate::crypto::merkle::{generate_proof_of_inclusion, generate_tree, verify_proof_of_inclusion, MerkleProof, MerkleTree};
 use crate::crypto::signing::{DefaultVerifier, SigVerFunction, Signable};
+use crate::nodes::node::StdByteArray;
 use crate::protocol::difficulty::get_difficulty_from_depth;
 use crate::protocol::pow::is_valid_hash;
 use crate::protocol::reputation::N_TRANSMISSION_SIGNATURES;
@@ -18,7 +19,7 @@ pub struct Block{
     // transactions is a vector of transactions in this block
     pub transactions: Vec<Transaction>,
     // hash is the sha3_256 hash of the block header - is none if it hasnt been mined
-    pub hash: Option<[u8; 32]>,
+    pub hash: Option<StdByteArray>,
     // the merkle tree
     #[serde(skip)]
     pub merkle_tree: MerkleTree,
@@ -34,7 +35,7 @@ impl<'de> Deserialize<'de> for Block {
             // transactions is a vector of transactions in this block
             pub transactions: Vec<Transaction>,
             // hash is the sha3_256 hash of the block header - is none if it hasnt been mined
-            pub hash: Option<[u8; 32]>,
+            pub hash: Option<StdByteArray>,
             // tail is the tail of the block which can contain stamps
             pub tail: BlockTail,
         }
@@ -61,7 +62,7 @@ pub struct Stamp{
     #[serde_as(as = "Bytes")]
     pub signature: [u8; 64],
     // the address of the person who stamped the block
-    pub address: [u8; 32]
+    pub address: StdByteArray
 }
 
 impl Default for Stamp {
@@ -96,7 +97,7 @@ impl BlockTail {
     /// remove space between the signatures to ensure all empty space is at the end
     /// remove duplicate signatures
     pub fn collapse(&mut self){
-        let mut seen: HashSet<[u8; 32]> = HashSet::new();
+        let mut seen: HashSet<StdByteArray> = HashSet::new();
         let mut empty = VecDeque::new();
         for i in 0..N_TRANSMISSION_SIGNATURES {
             if self.stamps[i].address == [0; 32] {
@@ -148,7 +149,7 @@ impl BlockTail {
         Ok(())
     }
 
-    pub fn get_stampers(&self) -> HashSet<[u8; 32]> {
+    pub fn get_stampers(&self) -> HashSet<StdByteArray> {
         let mut stampers = HashSet::new();
         for i in 0..N_TRANSMISSION_SIGNATURES {
             if self.stamps[i].signature != [0; 64] {
@@ -162,15 +163,15 @@ impl BlockTail {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq, Default)]
 pub struct BlockHeader{
     // previous_hash is the sha3_356 hash of the previous block in the chain
-    pub previous_hash: [u8; 32],
+    pub previous_hash: StdByteArray,
     // merkle_root is the root hash of the transactions in this block
-    pub merkle_root: [u8; 32],
+    pub merkle_root: StdByteArray,
     // nonce is a random number used to find a valid hash
     pub nonce: u64,
     // timestamp is the time the block was created
     pub timestamp: u64,
     // the address of the miner is the sha3_256 hash of the miner address
-    pub miner_address: Option<[u8; 32]>,
+    pub miner_address: Option<StdByteArray>,
     // the depth is a depth of the block in the chain
     pub depth: u64,
     // tail is the tail of the block which can contain stamps
@@ -179,10 +180,10 @@ pub struct BlockHeader{
 
 impl BlockHeader {
     pub fn new(
-        previous_hash: [u8; 32], 
-        merkle_root: [u8; 32], 
+        previous_hash: StdByteArray, 
+        merkle_root: StdByteArray, 
         nonce: u64, timestamp: u64,
-        miner_address: Option<[u8; 32]>,
+        miner_address: Option<StdByteArray>,
         tail: BlockTail,
         depth: u64
     ) -> Self {
@@ -210,7 +211,7 @@ impl BlockHeader {
     /// * `hasher` - A mutable instance of a type implementing the HashFunction trait
     pub fn validate(
         &self, 
-        expected_hash: [u8; 32],
+        expected_hash: StdByteArray,
         hasher: &mut impl HashFunction
     ) -> bool{
         // check the miner is declared
@@ -250,7 +251,7 @@ impl BlockHeader {
     fn hash_clean(
         &self,
         hasher: &mut impl HashFunction
-    ) -> Result<[u8; 32], std::io::Error>{
+    ) -> Result<StdByteArray, std::io::Error>{
         hasher.update(self.previous_hash);
         hasher.update(self.merkle_root);
         hasher.update(self.nonce.to_le_bytes());
@@ -266,7 +267,7 @@ impl Hashable for BlockHeader {
     /// # Returns
     /// 
     /// * The SHA3-256 hash of the block header
-    fn hash(&self, hash_function: &mut impl HashFunction) -> Result<[u8; 32], std::io::Error>{
+    fn hash(&self, hash_function: &mut impl HashFunction) -> Result<StdByteArray, std::io::Error>{
         if let None = self.miner_address {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -290,11 +291,11 @@ impl Hashable for BlockHeader {
 impl Block {
     /// Create a new block
     pub fn new(
-        previous_hash: [u8; 32],
+        previous_hash: StdByteArray,
         nonce: u64,
         timestamp: u64,
         transactions: Vec<Transaction>,
-        miner_address: Option<[u8; 32]>,
+        miner_address: Option<StdByteArray>,
         stamps: [Stamp; N_TRANSMISSION_SIGNATURES],
         depth: u64,
         hasher: &mut impl HashFunction,
@@ -322,7 +323,7 @@ impl Block {
     }
 
     /// Creates the proof of inclusion for a transaction in the block
-    pub fn get_proof_for_transaction<T: Into<[u8; 32]>>(&self, transaction: T) -> Option<MerkleProof> {
+    pub fn get_proof_for_transaction<T: Into<StdByteArray>>(&self, transaction: T) -> Option<MerkleProof> {
         generate_proof_of_inclusion(
             &self.merkle_tree,
             transaction.into(),
@@ -331,7 +332,7 @@ impl Block {
     }
 
     /// Veerifies a transaction is in the block
-    pub fn validate_transaction<T: Into<[u8; 32]> + Clone>(&self, transaction: T) -> bool{
+    pub fn validate_transaction<T: Into<StdByteArray> + Clone>(&self, transaction: T) -> bool{
         let proof = self.get_proof_for_transaction(transaction.clone());
         if let Some(proof) = proof {
             verify_proof_of_inclusion(
@@ -357,8 +358,8 @@ impl Signable<64> for BlockHeader {
 }
 
 
-impl Into<[u8; 32]> for Block{
-    fn into(self) -> [u8; 32]{
+impl Into<StdByteArray> for Block{
+    fn into(self) -> StdByteArray{
         self.hash.unwrap()
     }
 }
