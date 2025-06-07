@@ -1,3 +1,4 @@
+use core::panic;
 use std::collections::{HashMap, HashSet};
 
 use rand::{rng, seq::{IndexedRandom, IteratorRandom}};
@@ -109,7 +110,7 @@ fn settle_reputations(reputations: &mut HashMap<StdByteArray, NodeHistory>, mine
         }
         None => {
             // create new history
-            reputations.insert(miner, NodeHistory::default());
+            reputations.insert(miner, NodeHistory::new(miner, vec![], vec![], 0));
             reputations.get_mut(&miner).unwrap().settle_head(head);
         }
     }
@@ -122,7 +123,7 @@ fn settle_reputations(reputations: &mut HashMap<StdByteArray, NodeHistory>, mine
             }
             None => {
                 // create new history
-                reputations.insert(miner, NodeHistory::default());
+                reputations.insert(miner, NodeHistory::new(stamper, vec![], vec![], 0));
                 reputations.get_mut(&miner).unwrap().settle_tail(tail, head);
             }
         }
@@ -216,16 +217,16 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
     let mut extensions: HashMap<StdByteArray, (Chain, u64)> = HashMap::new();
     for response in responses{
         match response {
-            Message::ChainSyncResponse(shards) => {
+            Message::ChainSyncResponse(mut shards) => {
                 // check each shard - validate it
-                for shard in shards.iter(){
+                for shard in shards.iter_mut(){
                     // figure out which leaf this connect to. we can start at any arbitrary leaf because they will all end up at the same place
                     let leaf = &shard.deepest_hash;
-                    let mut curr = shard.blocks.get(leaf);
+                    let mut curr = shard.blocks.get(leaf).cloned();
                     while let Some(current_block) = curr{
-                        if shard.verify_block(current_block){
+                        if shard.verify_block(&current_block){
                             // good, recurse
-                            if leaves.contains(&current_block.header.previous_hash){
+                            if leaves.contains(&current_block.header.previous_hash.clone()){
                                 // we have reached it. record this verified shard
                                 if let Some((_, existing_depth)) = extensions.get(&current_block.header.previous_hash) {
                                     // insert if this is deeper
@@ -238,7 +239,7 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
                                 }
                                 break;
                             }
-                            curr = shard.blocks.get(&current_block.header.previous_hash);
+                            curr = shard.blocks.get(&current_block.header.previous_hash).cloned();
                         }else{
                             // TODO maybe blacklist the peer
                             break;

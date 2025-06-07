@@ -43,7 +43,7 @@ impl Chain {
         blocks.insert(genisis_hash, genesis_block);
         Chain {
             blocks,
-            depth: 1,
+            depth: 0,
             deepest_hash: genisis_hash,
             leaves,
             headers,
@@ -102,14 +102,16 @@ impl Chain {
             Some(last_block) => (last_block.header.depth + 1 == block.header.depth) && (block.header.timestamp >= last_block.header.timestamp),
             None => false
         };
+
         if !valid {
             return false;
         }
+
         true
     }
 
     /// Ensures that all transactions in a block are valid and do not exceed available funds.
-    fn validate_transaction_set(&self, transactions: &Vec<Transaction>) -> bool {
+    fn validate_transaction_set(&mut self, transactions: &Vec<Transaction>) -> bool {
         // we need to make sure that there are no duplicated nonce values under the same user
         let per_user: HashMap<StdByteArray, Vec<&Transaction>> =
             transactions
@@ -121,13 +123,17 @@ impl Chain {
                     acc
                 });
         for (user, transactions) in per_user.iter() {
-            let account = self.account_manager.get_account(user);
-            if account.is_none() {
-                return false;
-            }
+
+            let account = self.account_manager.get_or_create_account(user);
+            // if account.is_none() {
+            //     return false;
+            //     panic!();
+            // }
+            // we create a 0 balance new account
+
             // return true;
             let total_sum: u64 = transactions.iter().map(|t| t.header.amount).sum();
-            if account.as_ref().unwrap().lock().unwrap().balance < total_sum {
+            if account.as_ref().lock().unwrap().balance < total_sum {
                 return false;
             }
             let mut nonces = vec![];
@@ -147,7 +153,7 @@ impl Chain {
                 }
             }
             // and the first one needs to be the accounts nonce
-            if nonces[0] != account.unwrap().lock().unwrap().nonce {
+            if nonces[0] != account.lock().unwrap().nonce {
                 return false;
             }
         }
@@ -212,7 +218,7 @@ impl Chain {
     }
 
     /// Verifies the validity of a block, including its transactions and metadata.
-    pub fn verify_block(&self, block: &Block) -> bool {
+    pub fn verify_block(&mut self, block: &Block) -> bool {
         let mut result = self.validate_block(block);
         result = result && self.validate_transaction_set(&block.transactions);
         result
@@ -314,7 +320,6 @@ mod tests {
         );
         chain.account_manager.add_account(Account::new(sender, 0));
         mine(&mut block, sender, DefaultHash::new()).await;
-        println!("Block: {:?}", block);
         let result = chain.add_new_block(block);
         assert!(result.is_ok());
     }

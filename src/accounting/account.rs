@@ -20,6 +20,8 @@ pub struct Account{
     pub balance: u64,
     // The nonce of the account, to prevent replay attacks
     pub nonce: u64,
+    // the local copy of the next nonce to send
+    pub local_nonce: u64,
     // a tracking of blocks/transactions that lead to this balance
     pub history: Vec<TransactionStub>, // (block hash, transaction hash)
 }
@@ -43,6 +45,7 @@ impl Account{
             address,
             balance,
             nonce: 0,
+            local_nonce: 0,
             history
         }
     }
@@ -88,6 +91,24 @@ impl AccountManager{
         match self.get_account(address) {
             Some(account) => account,
             None => self.add_account(Account::new(*address, 0)),
+        }
+    }
+
+    pub fn create_empty_accounts_from_block(&mut self, block: &Block) {
+        // Create empty accounts for all addresses in the block
+        for transaction in &block.transactions {
+            let sender_address = transaction.header.sender;
+            let receiver_address = transaction.header.receiver;
+
+            // Create sender account if it does not exist
+            if !self.address_to_account.contains_key(&sender_address) {
+                self.add_account(Account::new(sender_address, 0));
+            }
+
+            // Create receiver account if it does not exist
+            if !self.address_to_account.contains_key(&receiver_address) {
+                self.add_account(Account::new(receiver_address, 0));
+            }
         }
     }
 

@@ -4,7 +4,7 @@ use crate::{blockchain::{chain_shard::ChainShard, TrimmableChain}, crypto::hashi
 
 /// The reputation structure holds all the information needed to compute the reputation of a node
 /// This information should be stored by each node, and each node can add it to a side chain
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct NodeHistory{
     /// The public key of the node
     pub public_key: StdByteArray,

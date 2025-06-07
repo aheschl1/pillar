@@ -25,7 +25,7 @@ pub async fn submit_transaction<const K: usize, const P: usize>(
     register_completion_callback: bool,
     timestamp: Option<u64>
 ) -> Result<Option<Receiver<BlockHeader>>, std::io::Error> {
-    let nonce = sender.nonce; sender.nonce += 1;
+    let nonce = sender.local_nonce; sender.local_nonce += 1;
     let timestamp = match timestamp{
         Some(t) => t,
         None => {

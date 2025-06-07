@@ -76,10 +76,7 @@ async fn monitor_transaction_pool(miner: Miner) {
             let block = Block::new(
                 chain.get_top_block().unwrap().hash.unwrap(), // if it crahses, there is bug
                 0,
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
+                now,
                 transactions,
                 None, // because this is a proposition on an unmined node
                 BlockTail::default().stamps,

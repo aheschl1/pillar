@@ -156,6 +156,11 @@ impl BlockTail {
         }
         stampers
     }
+
+    // iter stamps
+    pub fn iter_stamps(&self) -> impl Iterator<Item = &Stamp> {
+        self.stamps.iter().filter(|s| s.signature != [0; 64])
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq, Default)]
@@ -232,6 +237,8 @@ impl BlockHeader {
                 return false;
             }
         }
+
+
         // check the time is not too far in the future
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -252,7 +259,6 @@ impl BlockHeader {
     ) -> Result<StdByteArray, std::io::Error>{
         hasher.update(self.previous_hash);
         hasher.update(self.merkle_root);
-        hasher.update(self.nonce.to_le_bytes());
         hasher.update(self.timestamp.to_le_bytes());
         hasher.update(self.depth.to_le_bytes());
         Ok(hasher.digest().unwrap())
@@ -477,7 +483,6 @@ mod tests {
             address: [1; 32]
         };
         tail.collapse();
-        println!("{:?}", tail.stamps[3]);
         assert_eq!(tail.n_stamps(), 2);
         assert_eq!(tail.stamps[0].address, [1; 32]);
         assert_eq!(tail.stamps[1].address, [2; 32]);

@@ -7,7 +7,7 @@ use super::messages::Message;
 
 use crate::{
     blockchain::chain::Chain,
-    crypto::signing::{DefaultSigner, SigFunction, Signable},
+    crypto::{hashing::{DefaultHash, HashFunction, Hashable}, signing::{DefaultSigner, SigFunction, Signable}},
     persistence::database::{Datastore, EmptyDatastore},
     primitives::{block::{Block, BlockHeader, Stamp},
     pool::MinerPool,
@@ -369,6 +369,7 @@ impl Node {
     /// After receiving a block - settle it to the chain
     /// Includes the tracking of reputation, braodcasting, and responding to callbacks
     async fn settle_block(&self, block: &mut Block, chain: &mut Chain) -> Result<(), std::io::Error> {
+
         if block.header.miner_address.is_some(){ // meaning it is reqrd time
             chain.add_new_block(block.clone())?; // if we pass this line, valid block
             // initialize broadcast
@@ -381,8 +382,12 @@ impl Node {
             miner_history.settle_head(block.header); // SETTLE TO REWARD MINING
             // REWARD STAMPERS
             // 3. reward reputation for the new stamps
-            for stamp in block.header.tail.stamps.iter() {
+            drop(reputations);
+            for stamp in block.header.tail.iter_stamps() {
                 self.maybe_create_history(stamp.address).await;
+            }
+            let mut reputations = self.inner.reputations.lock().await;
+            for stamp in block.header.tail.iter_stamps() {
                 let history = reputations.get_mut(&stamp.address).unwrap();
                 history.settle_tail(&block.header.tail, block.header); // SETTLE TO REWARD
             }
@@ -390,38 +395,33 @@ impl Node {
         }
         // ================================================
         // stamp and transmit
-        let n_stamps = block.header.tail.n_stamps();
+        let mut n_stamps = block.header.tail.n_stamps();
         let has_our_stamp = block.header.tail.stamps.iter().any(|stamp| stamp.address == self.inner.public_key);
+        let already_broadcasted = self.inner.broadcasted_already.lock().await.contains(
+            &Message::BlockTransmission(block
+                .clone())
+                .hash(&mut DefaultHash::new())
+                .unwrap()
+        );
+
         if n_stamps < N_TRANSMISSION_SIGNATURES && !has_our_stamp {
+            assert!(!already_broadcasted, "Block already broadcasted, but not stamped by us. This should not happen.");
             let signature = self.signature_for(&block.header)?;
             let stamp = Stamp {
                 address: self.inner.public_key,
                 signature,
             };
             let _ = block.header.tail.stamp(stamp); // if failure, then full - doesnt matter anyways
+            n_stamps += 1; // we have stamped the block
         }
-        if has_our_stamp && n_stamps == N_TRANSMISSION_SIGNATURES{
-            // this means that it was already full - do NOT transmit just assign to mine
-            match self.miner_pool{
-                None => {},
-                Some(ref pool) => {
-                    // add the block to the pool
-                    pool.add_ready_block(block.clone()).await;
-                }
-            }
-        }else if n_stamps == N_TRANSMISSION_SIGNATURES - 1{
-            // this means that we were the last to sign. forward and assign to mine
-            self.inner.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap(); // forward
-            match self.miner_pool{
-                None => {},
-                Some(ref pool) => {
-                    // add the block to the pool
-                    pool.add_ready_block(block.clone()).await;
-                }
-            }
-        }else{
-            self.inner.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap(); // forward
+
+        if (already_broadcasted || n_stamps == N_TRANSMISSION_SIGNATURES) && self.miner_pool.is_some(){
+            // add the block to the pool
+            self.miner_pool.as_ref().unwrap().add_ready_block(block.clone()).await;
         }
+
+        self.inner.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap(); // forward
+
         Ok(())
     }
 
@@ -493,7 +493,7 @@ impl Node {
         let mut reputations = self.inner.reputations.lock().await;
         if reputations.get(&public_key).is_none() {
             // create a new history
-            reputations.insert(public_key, NodeHistory::default()); // create new
+            reputations.insert(public_key, NodeHistory::new(public_key, vec![], vec![], 0)); // create new
         }
     }
 }
@@ -1121,11 +1121,60 @@ mod tests{
         // we will check the already broadcasted messages first.
         // we cannot know the exact hash, but check that 2 are in there
         let already_b = node_b.inner.broadcasted_already.lock().await;
-        assert_eq!(already_b.len(), 3); // at least the transaction and the block
+        assert_eq!(already_b.len(), 4); // at least the transaction and the block. also the mined block
         drop(already_b);
         let already_b = node_a.inner.broadcasted_already.lock().await;
-        assert_eq!(already_b.len(), 3); // at least the transaction and the block
+        assert_eq!(already_b.len(), 4); // at least the transaction and the block
         drop(already_b);
+
+        // assert the block is in the chain of node_b
+        let chain_b = node_b.inner.chain.lock().await;
+        assert!(chain_b.as_ref().unwrap().depth == 1); // 2 blocks
+        assert!(chain_b.as_ref().unwrap().blocks.len() == 2); // 2 blocks
+        drop(chain_b);
+        // assert the block is in the chain of node_a
+        let chain_a = node_a.inner.chain.lock().await;
+        assert!(chain_a.as_ref().unwrap().depth == 1); // 2 blocks
+        assert!(chain_a.as_ref().unwrap().blocks.len() == 2); // 2 blocks
+        drop(chain_a);
+        // check reputations.
+        let b_a;
+        let b_b;
+        let a_a;
+        let a_b;
+
+        let reputations_b = node_b.inner.reputations.lock().await;
+        assert!(reputations_b.contains_key(&public_key_a));
+        assert!(reputations_b.contains_key(&public_key_b));
+        let history_a = reputations_b.get(&public_key_a).unwrap();
+        assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
+        assert_eq!(history_a.blocks_stamped.len(), 1); // 0 blocks stamped
+        b_a = history_a.compute_reputation();
+
+        let history_b = reputations_b.get(&public_key_b).unwrap();
+        assert_eq!(history_b.blocks_mined.len(), 1); // 1 block mined
+        assert_eq!(history_b.blocks_stamped.len(), 1); // 0 blocks stamped
+        b_b = history_b.compute_reputation();
+
+        drop(reputations_b);
+
+        let reputations_a = node_a.inner.reputations.lock().await;
+        assert!(reputations_a.contains_key(&public_key_a));
+        assert!(reputations_a.contains_key(&public_key_b));
+        let history_a = reputations_a.get(&public_key_a).unwrap();
+        assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
+        assert_eq!(history_a.blocks_stamped.len(), 1); // 0 blocks stamped
+        a_a = history_a.compute_reputation();
+        let history_b = reputations_a.get(&public_key_b).unwrap();
+        assert_eq!(history_b.blocks_mined.len(), 1); // 1 block mined
+        assert_eq!(history_b.blocks_stamped.len(), 1); // 0 blocks stamped
+        a_b = history_b.compute_reputation();
+        drop(reputations_a);
+
+
+        assert!(a_a == b_a);
+        assert!(a_b == b_b);
+        assert!(a_b > a_a);
 
     }
         
