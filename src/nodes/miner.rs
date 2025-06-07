@@ -1,13 +1,13 @@
-use std::sync::Arc;
-
-
-use crate::{crypto::hashing::{DefaultHash, HashFunction}, primitives::block::{Block, BlockTail}, protocol::{pow::mine, reputation::N_TRANSMISSION_SIGNATURES}};
+use crate::{crypto::hashing::{DefaultHash, HashFunction}, primitives::block::{Block, BlockTail}, protocol::pow::mine};
 
 use super::{messages::Message, node::{Broadcaster, Node}};
 
+pub const MAX_TRANSACTION_WAIT_TIME: u64 = 5; // seconds
+pub const MAX_BLOCK_TRANSACTION_SIZE: usize = 10; // number of transactions to mine at once
+
 #[derive(Clone)]
 pub struct Miner {
-    pub node: Arc<Node>
+    pub node: Node
 }
 
 impl Miner{
@@ -15,15 +15,15 @@ impl Miner{
     /// Creates a new miner instance
     /// Takes ownership of the node
     pub fn new(node: Node) -> Result<Self, std::io::Error> {
-        let transaction_pool = &node.inner.miner_pool;
-        if let Some(_) = transaction_pool{
+        let miner_pool = &node.miner_pool;
+        if let Some(_) = miner_pool{
             return Ok(Miner {
-                node: Arc::new(node),
+                node: node,
             });
         }else{
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                "Transaction pool not found",
+                "miner_pool pool not found",
             ));
         }
     }
@@ -34,84 +34,97 @@ impl Miner{
         if self.node.inner.chain.lock().await.is_none(){
             panic!("Cannot serve the miner before initial chain download.")
         }
-        // self.node.serve().await;
+        self.node.serve().await;
         // start the miner
-        tokio::spawn(self.clone().monitor_transaction_pool());
-        tokio::spawn(self.clone().monitor_block_pool());
+        tokio::spawn(monitor_transaction_pool(self.clone()));
+        tokio::spawn(monitor_block_pool(self.clone()));
     }
 
-    async fn monitor_block_pool(self) {
-        loop {
-            // check if there is a block to mine
-            let block = self.node.inner.miner_pool.as_ref().unwrap().pop_ready_block();
-            match block{
-                Some(mut block) => {
-                    block.header.miner_address = Some(self.node.inner.public_key.clone());
-                    block.header.tail.clean(&block.header.clone()); // removes broken signatures
-                    mine(&mut block, self.node.inner.public_key.clone(), DefaultHash::new()).await;
-                    // after mining the block, just transmit
-                    // TODO this doesnt fully belong here - also handle broadcast error
-                    let _ = self.node.broadcast(&Message::BlockTransmission(block)).await;
-                },
-                None => {
-                    // no block to mine
-                    // wait for a while
-                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                    continue;
-                }
+}
+
+/// monitors the nodes transaction pool
+/// Takes ownership of a copy of the miner
+/// TODO: decide how many transactions to mine at once
+async fn monitor_transaction_pool(miner: Miner) {
+    // monitor the pool for transactions
+    let mut transactions = vec![];
+    let mut last_polled_at: Option<u64> = None;
+    loop {
+        let transaction = tokio::time::timeout(
+            tokio::time::Duration::from_secs(MAX_TRANSACTION_WAIT_TIME), 
+            miner.node.miner_pool.as_ref().unwrap().pop_transaction()
+        ).await.unwrap_or(None);
+
+        match transaction{
+            Some(transaction) => {
+                transactions.push(transaction);
+                // grab unix timestamp
+                last_polled_at = Some(std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs());
+            },
+            None => {}
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        if (last_polled_at.is_some() && now - last_polled_at.unwrap() >= MAX_TRANSACTION_WAIT_TIME) || transactions.len() >= MAX_BLOCK_TRANSACTION_SIZE {
+            // mining time
+            // mine
+            let chain_lock = miner.node.inner.chain.lock().await;
+            let chain = chain_lock.as_ref().unwrap();
+            let block = Block::new(
+                chain.get_top_block().unwrap().hash.unwrap(), // if it crahses, there is bug
+                0,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+                transactions,
+                None, // because this is a proposition on an unmined node
+                BlockTail::default().stamps,
+                chain.depth + 1,
+                &mut DefaultHash::new()
+            );
+            // spawn off the mining process
+            // let address = *self.node.public_key;
+            let pool = miner.node.miner_pool.clone();
+            pool.as_ref().unwrap().add_block_proposition(block).await;
+            // tokio::spawn(async move {
+            //     mine(&mut block, address, DefaultHash::new()).await;
+            //     // send it back to the node
+            // });
+            // reset for next mine
+            last_polled_at = None;
+            transactions = vec![];
+        }
+    }
+}
+
+async fn monitor_block_pool(miner: Miner) {
+    loop {
+        // check if there is a block to mine
+        let block = miner.node.miner_pool.as_ref().unwrap().pop_ready_block().await;
+        match block{
+            Some(mut block) => {
+                block.header.miner_address = Some(miner.node.inner.public_key.clone());
+                block.header.tail.clean(&block.header.clone()); // removes broken signatures
+                mine(&mut block, miner.node.inner.public_key.clone(), DefaultHash::new()).await;
+                // after mining the block, just transmit
+                // TODO this doesnt fully belong here - also handle broadcast error
+                let _ = miner.node.broadcast(&Message::BlockTransmission(block)).await;
+            },
+            None => {
+                // no block to mine
+                // wait for a while
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                continue;
             }
         }
     }
-
-    /// monitors the nodes transaction pool
-    /// Takes ownership of a copy of the miner
-    /// TODO: decide how many transactions to mine at once
-    async fn monitor_transaction_pool(self) {
-        // monitor the pool for transactions
-        let transactions_to_mine = 10;
-        let max_wait_time = 10; // seconds
-        let mut transactions = vec![];
-        let mut last_polled_at: Option<u64> = None;
-        loop {
-            let transaction = self.node.inner.miner_pool.as_ref().unwrap().pop_transaction();
-            match transaction{
-                Some(transaction) => {
-                    transactions.push(transaction);
-                    // grab unix timestamp
-                    last_polled_at = Some(tokio::time::Instant::now().elapsed().as_secs());
-                },
-                None => {}
-            }
-            if (last_polled_at.is_some() && tokio::time::Instant::now().elapsed().as_secs() - last_polled_at.unwrap() > max_wait_time) ||
-                transactions.len() >= transactions_to_mine {
-                // mining time
-                // mine
-                let block = Block::new(
-                    self.node.inner.chain.lock().await.as_mut().unwrap().get_top_block().unwrap().hash.unwrap(), // if it crahses, there is bug
-                    0,
-                    tokio::time::Instant::now().elapsed().as_secs(),
-                    transactions,
-                    None, // because this is a proposition on an unmined node
-                    BlockTail::default().stamps,
-                    self.node.inner.chain.lock().await.as_mut().unwrap().depth + 1,
-                    &mut DefaultHash::new()
-                );
-                // spawn off the mining process
-                // let address = *self.node.public_key;
-                let pool = self.node.inner.miner_pool.clone();
-                pool.as_ref().unwrap().add_block_proposition(block);
-                // tokio::spawn(async move {
-                //     mine(&mut block, address, DefaultHash::new()).await;
-                //     // send it back to the node
-                // });
-                // reset for next mine
-                last_polled_at = None;
-                transactions = vec![];
-            }
-        }
-    }
-}                    // self.node.chain.lock().await.add_new_block(block.clone()).await.unwrap();
-
+}
 
 
 #[cfg(test)]

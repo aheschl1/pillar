@@ -36,8 +36,6 @@ impl<'de> Deserialize<'de> for Block {
             pub transactions: Vec<Transaction>,
             // hash is the sha3_256 hash of the block header - is none if it hasnt been mined
             pub hash: Option<StdByteArray>,
-            // tail is the tail of the block which can contain stamps
-            pub tail: BlockTail,
         }
 
         let helper = PartialBlock::deserialize(deserializer)?;
@@ -48,7 +46,7 @@ impl<'de> Deserialize<'de> for Block {
             helper.header.timestamp,
             helper.transactions,
             helper.header.miner_address,
-            helper.tail.stamps,
+            helper.header.tail.stamps,
             helper.header.depth,
             &mut DefaultHash::new()
         ))
