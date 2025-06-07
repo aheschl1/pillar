@@ -1,4 +1,3 @@
-use core::panic;
 use std::collections::{HashMap, HashSet};
 
 use rand::{rng, seq::{IndexedRandom, IteratorRandom}};

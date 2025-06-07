@@ -1138,10 +1138,10 @@ mod tests{
         assert!(chain_a.as_ref().unwrap().blocks.len() == 2); // 2 blocks
         drop(chain_a);
         // check reputations.
-        let b_a;
-        let b_b;
-        let a_a;
-        let a_b;
+        
+        
+        
+        
 
         let reputations_b = node_b.inner.reputations.lock().await;
         assert!(reputations_b.contains_key(&public_key_a));
@@ -1149,12 +1149,12 @@ mod tests{
         let history_a = reputations_b.get(&public_key_a).unwrap();
         assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
         assert_eq!(history_a.blocks_stamped.len(), 1); // 0 blocks stamped
-        b_a = history_a.compute_reputation();
+        let b_a = history_a.compute_reputation();
 
         let history_b = reputations_b.get(&public_key_b).unwrap();
         assert_eq!(history_b.blocks_mined.len(), 1); // 1 block mined
         assert_eq!(history_b.blocks_stamped.len(), 1); // 0 blocks stamped
-        b_b = history_b.compute_reputation();
+        let b_b = history_b.compute_reputation();
 
         drop(reputations_b);
 
@@ -1164,11 +1164,11 @@ mod tests{
         let history_a = reputations_a.get(&public_key_a).unwrap();
         assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
         assert_eq!(history_a.blocks_stamped.len(), 1); // 0 blocks stamped
-        a_a = history_a.compute_reputation();
+        let a_a = history_a.compute_reputation();
         let history_b = reputations_a.get(&public_key_b).unwrap();
         assert_eq!(history_b.blocks_mined.len(), 1); // 1 block mined
         assert_eq!(history_b.blocks_stamped.len(), 1); // 0 blocks stamped
-        a_b = history_b.compute_reputation();
+        let a_b = history_b.compute_reputation();
         drop(reputations_a);
 
 
