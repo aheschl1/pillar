@@ -77,7 +77,7 @@ pub async fn query_for_peers_by_reputation(node: Node, lower_n: f32, upper_n: f3
     // the final response is the intersection of all responses
     let mut final_response = responses[0].clone();
     for i in responses.iter().skip(1) {
-        final_response = final_response.intersection(&i).cloned().collect();
+        final_response = final_response.intersection(i).cloned().collect();
     }
     Ok(final_response.iter().cloned().cloned().collect::<Vec<Peer>>()) // super sus souble clone here
 }

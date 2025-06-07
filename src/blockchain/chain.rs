@@ -357,7 +357,7 @@ mod tests {
         chain.account_manager.add_account(Account::new(sender, 1000));
 
         let mut parent_hash = chain.deepest_hash;
-        let genesis_hash = parent_hash.clone();
+        let genesis_hash = parent_hash;
         for depth in 1..=11 {
             let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth-1, &mut DefaultHash::new());
             transaction.sign(&mut signing_key);

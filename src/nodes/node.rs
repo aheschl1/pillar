@@ -65,7 +65,7 @@ impl NodeState {
 
 fn get_initial_state(datastore: &dyn Datastore) -> (NodeState, Option<Chain>) {
     // check if the datastore has a chain
-    if let Some(_) = datastore.latest_chain() {
+    if datastore.latest_chain().is_some() {
         // if it does, load the chain
         match datastore.load_chain() {
             Ok(chain) => {
@@ -151,21 +151,21 @@ impl Node {
         let (state, maybe_chain) = get_initial_state(&**database.as_ref().unwrap());
         Node {
             inner: NodeInner {
-            public_key: public_key.into(),
-            private_key: private_key.into(),
+            public_key: public_key,
+            private_key: private_key,
             peers: Mutex::new(peer_map),
             chain: Mutex::new(maybe_chain),
             broadcasted_already,
             broadcast_receiver,
             broadcast_sender,
-            transaction_filters: transaction_filters.into(),
+            transaction_filters,
             reputations: Mutex::new(HashMap::new()),
             filter_callbacks: Mutex::new(HashMap::new()), // initially no callbacks
             state: Mutex::new(state), // initially in discovery mode
             datastore: database,
             }.into(),
             ip_address,
-            port: port.into(),
+            port: port,
             miner_pool: transaction_pool,
         }
     }
@@ -307,7 +307,7 @@ impl Node {
                     
                     if let Some(block) = block{
                         let proof = block.get_proof_for_transaction(stub.transaction_hash);
-                        Ok(Message::TransactionProofResponse(proof.unwrap(), block.header.clone()))
+                        Ok(Message::TransactionProofResponse(proof.unwrap(), block.header))
                     }else{
                         Ok(Message::Error("Block does not exist".into()))
                     }                 
@@ -354,9 +354,9 @@ impl Node {
             Message::ChainSyncRequest(leaves) => {
                 if state.is_consume() {
                     let chains = service_sync(self.clone(), leaves).await?;
-                    return Ok(Message::ChainSyncResponse(chains));
+                    Ok(Message::ChainSyncResponse(chains))
                 }else{
-                    return Ok(Message::ChainSyncResponse(vec![]));
+                    Ok(Message::ChainSyncResponse(vec![]))
                 }
             },
             _ => Err(std::io::Error::new(
@@ -378,7 +378,7 @@ impl Node {
             self.maybe_create_history(block.header.miner_address.unwrap()).await;
             let mut reputations = self.inner.reputations.lock().await;
             let miner_history = reputations.get_mut(&block.header.miner_address.unwrap()).unwrap();
-            miner_history.settle_head(block.header.clone()); // SETTLE TO REWARD MINING
+            miner_history.settle_head(block.header); // SETTLE TO REWARD MINING
             // REWARD STAMPERS
             // 3. reward reputation for the new stamps
             for stamp in block.header.tail.stamps.iter() {
@@ -441,7 +441,7 @@ impl Node {
                     // TODO maybe this is not nececarry - some rework?
                     if let Some(sender) = callbacks.get_mut(filter) {
                         // send the block header to the sender
-                        sender.send(block_clone.header.clone()).unwrap();
+                        sender.send(block_clone.header).unwrap();
                         // remove the callback - one time only
                         callbacks.remove(filter);
                     } // we will get the callback here if and only if the current active node is the one that resgistered the callback
@@ -491,21 +491,22 @@ impl Node {
     async fn maybe_create_history(&self, public_key: StdByteArray) {
         // get the history of the node
         let mut reputations = self.inner.reputations.lock().await;
-        if let None = reputations.get_mut(&public_key) {
+        if reputations.get(&public_key).is_none() {
             // create a new history
             reputations.insert(public_key, NodeHistory::default()); // create new
         }
     }
 }
-impl Into<Peer> for Node {
-    fn into(self) -> Peer {
-        Peer::new(self.inner.public_key, self.ip_address, self.port)
+
+impl From<&Node> for Peer {
+    fn from(node: &Node) -> Self {
+        Peer::new(node.inner.public_key, node.ip_address, node.port)
     }
 }
 
-impl Into<Peer> for &Node {
-    fn into(self) -> Peer {
-        Peer::new(self.inner.public_key, self.ip_address, self.port)
+impl From<Node> for Peer {
+    fn from(node: Node) -> Self {
+        Peer::new(node.inner.public_key, node.ip_address, node.port)
     }
 }
 
@@ -925,7 +926,7 @@ mod tests{
             .as_secs();
         let result = submit_transaction(
             &mut node_a, 
-            &mut sender_account.clone().lock().unwrap(), 
+            &mut sender_account.lock().unwrap(), 
             &mut signing_a, 
             public_key_b, 
             0, 
@@ -938,7 +939,7 @@ mod tests{
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         
         // node a already broadcasted
-
+        
         let mut transaction = Transaction::new(
             sender_account.lock().unwrap().address, 
             public_key_b, 
@@ -949,7 +950,7 @@ mod tests{
         );
         transaction.sign(&mut signing_a);
 
-        let message_to_hash = Message::TransactionBroadcast(transaction.clone());
+        let message_to_hash = Message::TransactionBroadcast(transaction);
 
         // also, node b should be forward by now
         assert!(node_b.inner.state.lock().await.is_forward());
@@ -979,7 +980,6 @@ mod tests{
     }
 
     #[tokio::test]
-
     async fn test_transaction_and_block_proposal(){
 
         let mut signing_a = DefaultSigner::generate_random();
@@ -1054,9 +1054,10 @@ mod tests{
             .duration_since(std::time::UNIX_EPOCH)
             .expect("Time went backwards")
             .as_secs();
+
         let result = submit_transaction(
             &mut node_a, 
-            &mut sender_account.clone().lock().unwrap(), 
+            &mut sender_account.lock().unwrap(), 
             &mut signing_a, 
             public_key_b, 
             0, 
@@ -1080,7 +1081,7 @@ mod tests{
         );
         transaction.sign(&mut signing_a);
 
-        let message_to_hash = Message::TransactionBroadcast(transaction.clone());
+        let message_to_hash = Message::TransactionBroadcast(transaction);
 
         // also, node b should be forward by now
 

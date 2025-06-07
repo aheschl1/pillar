@@ -16,32 +16,25 @@ async fn query_block_from_peer(
     // TODO better error handling
     let response = peer.communicate(&Message::BlockRequest(hash), initializing_peer).await?;
     let block = match response {
-        Message::BlockResponse(block) => {
-            // add the block to the chain
-            match block{
-                Some(block) => {
-                    // we need to verify that the header validates
-                    // and that the transactions are the same as declared
-                    let mut result = true;
-                    // check header
-                    result &= block.header.validate(hash, &mut DefaultHash::new());
-                    // verify merkle root
-                    let tree = generate_tree(
-                        block.transactions.iter().map(|x|x).collect(), 
-                        &mut DefaultHash::new()
-                    );
-                    result = result 
-                        && tree.is_ok()  // tree worked
-                        && tree.as_ref().unwrap().get_root_hash().is_some() // has root
-                        && tree.unwrap().get_root_hash().unwrap() == block.header.merkle_root; // root matches
-                    if result{
-                        Ok(block)
-                    }else{
-                        Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Block failed verification"))
-                    }
-                },
-                _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Peer responded wrong"))
-
+        Message::BlockResponse(Some(block)) => {
+            // we need to verify that the header validates
+            // and that the transactions are the same as declared
+            let mut result = true;
+            // check header
+            result &= block.header.validate(hash, &mut DefaultHash::new());
+            // verify merkle root
+            let tree = generate_tree(
+                block.transactions.iter().collect(), 
+                &mut DefaultHash::new()
+            );
+            result = result 
+                && tree.is_ok()  // tree worked
+                && tree.as_ref().unwrap().get_root_hash().is_some() // has root
+                && tree.unwrap().get_root_hash().unwrap() == block.header.merkle_root; // root matches
+            if result{
+                Ok(block)
+            }else{
+                Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Block failed verification"))
             }
         }
         _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Peer responded wrong"))
@@ -61,13 +54,11 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std
             loop{ // keep asking for the node until we pass
                 let mut peer = nodeclone.clone().inner.peers.lock().await.values().choose(&mut rng()).unwrap().clone(); // random peer
                 let block = query_block_from_peer(&mut peer, &nodeclone.clone().into(), hash).await;
-                match block{
-                    Ok(block)=>{
-                        sender.send(block).unwrap();
-                        break;
-                    },
-                    Err(_) => {}
-                };
+                if let Ok(block) = block {
+                    // we got the block, send it to the channel
+                    sender.send(block).unwrap();
+                    break;
+                }
             }
         });
         threads.push(handle);
@@ -87,8 +78,8 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std
     for block in &blocks[1..]{ // skip the first - genesis
         let mut block = block.to_owned();
         let miner = block.header.miner_address.unwrap();
-        let tail = block.header.tail.clone();
-        let head = block.header.clone();
+        let tail = block.header.tail;
+        let head = block.header;
         let hash = block.hash.unwrap();
         loop{ // we need to keep going until it passes full validation
             match chain.add_new_block(block){
@@ -118,7 +109,7 @@ fn settle_reputations(reputations: &mut HashMap<StdByteArray, NodeHistory>, mine
         }
         None => {
             // create new history
-            reputations.insert(miner.clone(), NodeHistory::default());
+            reputations.insert(miner, NodeHistory::default());
             reputations.get_mut(&miner).unwrap().settle_head(head);
         }
     }
@@ -127,12 +118,12 @@ fn settle_reputations(reputations: &mut HashMap<StdByteArray, NodeHistory>, mine
         match reputations.get_mut(&stamper){
             Some(history) => {
                 // update the history
-                history.settle_tail(&tail, head);
+                history.settle_tail(tail, head);
             }
             None => {
                 // create new history
-                reputations.insert(miner.clone(), NodeHistory::default());
-                reputations.get_mut(&miner).unwrap().settle_tail(&tail, head);
+                reputations.insert(miner, NodeHistory::default());
+                reputations.get_mut(&miner).unwrap().settle_tail(tail, head);
             }
         }
     }
@@ -148,16 +139,15 @@ pub async fn dicover_chain(mut node: Node) -> Result<(), std::io::Error> {
     for (_, peer) in peers.iter_mut() {
         // send the chain shard request to the peer
         let response = peer.communicate(&Message::ChainShardRequest, &(node.clone().into())).await?;
-        match response {
-            Message::ChainShardResponse(shard) => {
-                // add the shard to the chain
-                if shard.validate(){
-                    chain_shards.push(shard);
-                }
-                // TODO perhaps blacklist the peer
+        if let Message::ChainShardResponse(shard) = response {
+            // add the shard to the chain
+               
+            // TODO perhaps blacklist the peer
+            if shard.validate(){
+                chain_shards.push(shard);
             }
-            _ => {}
-        }
+        }  
+
     }
     drop(peers);
     // find deepest out of peers
@@ -170,7 +160,7 @@ pub async fn dicover_chain(mut node: Node) -> Result<(), std::io::Error> {
 
 /// Find the deepest chain shard - they shoudl in theory be the same but we want the longest
 /// TODO: Maybe we should check agreement of hashes and such, but with POW deepest should be accurate
-pub fn deepest_shard(shards: &Vec<ChainShard>) -> Result<ChainShard, std::io::Error> {
+pub fn deepest_shard(shards: &[ChainShard]) -> Result<ChainShard, std::io::Error> {
     let shard = shards.iter().max_by_key(|shard| shard.leaves.iter().max_by_key(|leaf| shard.headers[*leaf].depth).unwrap());
     match shard {
         Some(shard) => Ok(shard.clone()),
@@ -283,7 +273,7 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
                 // and record the reputations
                 let miner = block.header.miner_address.unwrap();
                 let tail = block.header.tail;
-                let head = block.header.clone();
+                let head = block.header;
                 let mut reputations = node.inner.reputations.lock().await;
                 settle_reputations(&mut reputations, miner, &tail, head);
             }

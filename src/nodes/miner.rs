@@ -1,3 +1,5 @@
+use sled::transaction;
+
 use crate::{crypto::hashing::{DefaultHash, HashFunction}, primitives::block::{Block, BlockTail}, protocol::pow::mine};
 
 use super::{messages::Message, node::{Broadcaster, Node}};
@@ -55,16 +57,13 @@ async fn monitor_transaction_pool(miner: Miner) {
             miner.node.miner_pool.as_ref().unwrap().pop_transaction()
         ).await.unwrap_or(None);
 
-        match transaction{
-            Some(transaction) => {
-                transactions.push(transaction);
-                // grab unix timestamp
-                last_polled_at = Some(std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs());
-            },
-            None => {}
+        if let Some(transaction) = transaction{
+            transactions.push(transaction);
+            // grab unix timestamp
+            last_polled_at = Some(std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs());
         }
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -109,9 +108,9 @@ async fn monitor_block_pool(miner: Miner) {
         let block = miner.node.miner_pool.as_ref().unwrap().pop_ready_block().await;
         match block{
             Some(mut block) => {
-                block.header.miner_address = Some(miner.node.inner.public_key.clone());
+                block.header.miner_address = Some(miner.node.inner.public_key);
                 block.header.tail.clean(&block.header.clone()); // removes broken signatures
-                mine(&mut block, miner.node.inner.public_key.clone(), DefaultHash::new()).await;
+                mine(&mut block, miner.node.inner.public_key, DefaultHash::new()).await;
                 // after mining the block, just transmit
                 // TODO this doesnt fully belong here - also handle broadcast error
                 let _ = miner.node.broadcast(&Message::BlockTransmission(block)).await;

@@ -143,7 +143,7 @@ pub async fn serve_peers(node: Node) {
                 Ok(message) => {
                     let nbytes = bincode::serialized_size(&message).unwrap() as u32;
                     // write the size of the message as 4 bytes - 4 bytes because we are using u32
-                    stream.write(&nbytes.to_le_bytes()[..4]).await.unwrap();
+                    stream.write_all(&nbytes.to_le_bytes()[..4]).await.unwrap();
                     stream
                         .write_all(&bincode::serialize(&message).unwrap())
                         .await
@@ -159,7 +159,7 @@ async fn send_error_message(stream: &mut TcpStream, e: impl std::error::Error) {
     // writye message size
     let nbytes = bincode::serialized_size(&Message::Error(e.to_string())).unwrap() as u32;
     // write the size of the message as 4 bytes - 4 bytes because we are using u32
-    stream.write(&nbytes.to_le_bytes()[..4]).await.unwrap();
+    stream.write_all(&nbytes.to_le_bytes()[..4]).await.unwrap();
     // write the error message to the stream
     stream
         .write_all(&bincode::serialize(&Message::Error(e.to_string())).unwrap())

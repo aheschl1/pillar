@@ -68,6 +68,7 @@ impl Hashable for Message{
 
 pub enum Versions{
     V1V4 = 1,
+    #[allow(dead_code)]
     V1V6 = 2,
 }
 /// Returns the expected bincode-encoded size in bytes for a `Message::Declaration(Peer, u64)`

@@ -179,25 +179,11 @@ impl Hashable for Transaction {
     }
 }
 
-impl Into<StdByteArray> for Transaction {
-    fn into(self) -> StdByteArray {
-        self.hash
+impl From<Transaction> for StdByteArray {
+    fn from(transaction: Transaction) -> Self {
+        transaction.hash
     }
 }
-
-
-/**
- * if let Some(_) = self.signature {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::AlreadyExists,
-                "Transaction already signed",
-            ));
-        }
-        let signature = signer.sign(&self.hash);
-        self.signature = Some(signature.to_bytes());
-        Ok(())
- */
-
 
 impl Signable<64> for Transaction {
     
@@ -206,7 +192,7 @@ impl Signable<64> for Transaction {
     }
     
     fn sign<const K: usize, const P: usize>(&mut self, signing_function: &mut impl crate::crypto::signing::SigFunction<K, P, 64>) -> [u8; 64]{
-        if let Some(_) = self.signature {
+        if self.signature.is_some() {
             panic!("Transaction already signed");
         }
         let signature = signing_function.sign(self);

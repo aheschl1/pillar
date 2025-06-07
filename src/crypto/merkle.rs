@@ -261,24 +261,24 @@ mod tests {
         assert!(merkle_tree.leaves.is_some());
 
         let mut height = 0;
-        let mut current_node = merkle_tree.root.clone();
+        let mut current_node = merkle_tree.root;
         while let Some(node) = current_node {
             let node = merkle_tree.nodes.get(node).unwrap();
             if node.left.is_some() {
                 height += 1;
-                current_node = node.left.clone();
+                current_node = node.left;
             } else {
                 break;
             }
         }
         assert_eq!(height, 2);
         // verify each parent has two children or 0 children
-        let mut current_node = merkle_tree.root.clone();
+        let mut current_node = merkle_tree.root;
         while let Some(node) = current_node {
             let node = merkle_tree.nodes.get(node).unwrap();
             if node.left.is_some() {
                 assert!(node.right.is_some());
-                current_node = node.left.clone();
+                current_node = node.left;
             } else {
                 break;
             }
@@ -323,8 +323,8 @@ mod tests {
         );
 
         let data = vec![&transaction1, &transaction2, &transaction3, &transaction4];
-        let mut merkle_tree = generate_tree(data, &mut hash_function).unwrap();
-        let proof = generate_proof_of_inclusion(&mut merkle_tree, transaction1.hash, &mut hash_function).unwrap();
+        let merkle_tree = generate_tree(data, &mut hash_function).unwrap();
+        let proof = generate_proof_of_inclusion(&merkle_tree, transaction1.hash, &mut hash_function).unwrap();
         assert_eq!(proof.hashes.len(), 2);
     }
 
@@ -365,8 +365,8 @@ mod tests {
         );
 
         let data = vec![&transaction1, &transaction2, &transaction3, &transaction4];
-        let mut merkle_tree = generate_tree(data, &mut hash_function).unwrap();
-        let proof = generate_proof_of_inclusion(&mut merkle_tree, transaction3.hash, &mut hash_function).unwrap();
+        let merkle_tree = generate_tree(data, &mut hash_function).unwrap();
+        let proof = generate_proof_of_inclusion(&merkle_tree, transaction3.hash, &mut hash_function).unwrap();
         assert_eq!(proof.hashes.len(), 2);
         // pass
         assert!(verify_proof_of_inclusion(transaction3, &proof, merkle_tree.nodes[merkle_tree.root.unwrap()].hash, &mut hash_function));
@@ -444,8 +444,8 @@ mod tests {
         );
 
         let data = vec![&transaction1, &transaction2, &transaction3];
-        let mut merkle_tree = generate_tree(data, &mut hash_function).unwrap();
-        let proof = generate_proof_of_inclusion(&mut merkle_tree, transaction1.hash, &mut hash_function).unwrap();
+        let merkle_tree = generate_tree(data, &mut hash_function).unwrap();
+        let proof = generate_proof_of_inclusion(&merkle_tree, transaction1.hash, &mut hash_function).unwrap();
         assert_eq!(proof.hashes.len(), 2);
         // test verification
         assert!(verify_proof_of_inclusion(transaction1, &proof, merkle_tree.nodes[merkle_tree.root.unwrap()].hash, &mut hash_function));

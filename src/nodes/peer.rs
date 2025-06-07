@@ -7,7 +7,7 @@ use crate::nodes::node::StdByteArray;
 
 use super::messages::Message;
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash, Clone)]
 pub struct Peer{
     /// The public key of the peer
     pub public_key: StdByteArray,
@@ -15,16 +15,6 @@ pub struct Peer{
     pub ip_address: IpAddr,
     /// The port of the peer
     pub port: u16,
-}
-
-impl Clone for Peer {
-    fn clone(&self) -> Self {
-        Peer {
-            public_key: self.public_key,
-            ip_address: self.ip_address.clone(),
-            port: self.port
-        }
-    }
 }
 
 impl Peer{

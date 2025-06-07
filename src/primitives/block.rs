@@ -35,7 +35,7 @@ impl<'de> Deserialize<'de> for Block {
             // transactions is a vector of transactions in this block
             pub transactions: Vec<Transaction>,
             // hash is the sha3_256 hash of the block header - is none if it hasnt been mined
-            pub hash: Option<StdByteArray>,
+            pub _hash: Option<StdByteArray>,
         }
 
         let helper = PartialBlock::deserialize(deserializer)?;
@@ -105,7 +105,7 @@ impl BlockTail {
                     // if the address is already seen, remove it
                     self.stamps[i] = Stamp::default();
                     empty.push_back(i);
-                } else if empty.len() > 0 {
+                } else if !empty.is_empty() {
                     self.stamps.swap(i, empty.pop_front().unwrap());
                     empty.push_back(i);
                 }
@@ -266,7 +266,7 @@ impl Hashable for BlockHeader {
     /// 
     /// * The SHA3-256 hash of the block header
     fn hash(&self, hash_function: &mut impl HashFunction) -> Result<StdByteArray, std::io::Error>{
-        if let None = self.miner_address {
+        if self.miner_address.is_none() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "Miner address is not set"
@@ -288,6 +288,7 @@ impl Hashable for BlockHeader {
 
 impl Block {
     /// Create a new block
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         previous_hash: StdByteArray,
         nonce: u64,
@@ -315,7 +316,7 @@ impl Block {
         Block {
             header,
             transactions,
-            hash: if hash.is_ok() {Some(hash.unwrap())} else {None},
+            hash: if let Ok(item) = hash {Some(item)} else {None},
             merkle_tree
         }
     }
@@ -355,10 +356,9 @@ impl Signable<64> for BlockHeader {
     }
 }
 
-
-impl Into<StdByteArray> for Block{
-    fn into(self) -> StdByteArray{
-        self.hash.unwrap()
+impl From<Block> for StdByteArray {
+    fn from(block: Block) -> Self {
+        block.hash.unwrap()
     }
 }
 
