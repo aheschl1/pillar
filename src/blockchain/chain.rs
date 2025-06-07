@@ -18,7 +18,8 @@ pub struct Chain {
     pub blocks: HashMap<StdByteArray, Block>,
     /// header cache
     pub headers: HashMap<StdByteArray, BlockHeader>,
-    /// The current depth (number of blocks) in the chain.
+    /// The current depth of the tallet leaf.
+    /// one block is depth 0
     pub depth: u64,
     /// the block at the deepest depth
     pub deepest_hash: StdByteArray,
@@ -290,7 +291,7 @@ mod tests {
     #[test]
     fn test_chain_creation() {
         let chain = Chain::new_with_genesis();
-        assert_eq!(chain.depth, 1);
+        assert_eq!(chain.depth, 0); // the depth is depth of tallest block
         assert_eq!(chain.blocks.len(), 1);
         assert_eq!(chain.leaves.len(), 1);
     }
