@@ -18,18 +18,26 @@ pub async fn broadcast_knowledge(node: Node) -> Result<(), std::io::Error> {
     let mut hasher = DefaultHash::new();
     loop {
         // send a message to all peers
-        if let Some(pool) = &node.inner.miner_pool {
+        if let Some(pool) = &node.miner_pool {
             // broadcast out of mining pool
             // while pool.ready_block_count() > 0 {
             //     node.broadcast(&Message::BlockTransmission(pool.pop_ready_block().unwrap()))
             //     .await?;
             // }
-
             while pool.proposed_block_count() > 0 {
-                node.broadcast(&Message::BlockTransmission(
-                    pool.pop_block_preposition().unwrap(),
-                ))
-                .await?;
+                let m = Message::BlockTransmission(
+                    pool.pop_block_preposition().await.unwrap(),
+                );
+                let hash = m.hash(&mut hasher).unwrap();
+                let mut broadcased = node.inner.broadcasted_already.lock().await;
+                // do not broadcast if already broadcasted
+                if broadcased.contains(&hash) {
+                    continue;
+                }
+                // add the message to the broadcasted list
+                broadcased.insert(hash);
+                // broadcast the message
+                node.broadcast(&m).await?;
             }
         }
         let mut i = 0;
@@ -55,7 +63,7 @@ pub async fn broadcast_knowledge(node: Node) -> Result<(), std::io::Error> {
 /// After handling the peer, it reads for the actual message. Then, it calls off to the serve_message function.
 /// The response from serve_message is finally returned back to the peer
 pub async fn serve_peers(node: Node) {
-    let listener = TcpListener::bind(format!("{}:{}", node.inner.ip_address, node.inner.port))
+    let listener = TcpListener::bind(format!("{}:{}", node.ip_address, node.port))
         .await
         .unwrap();
     loop {
@@ -122,8 +130,7 @@ pub async fn serve_peers(node: Node) {
             // read actual the message
             let mut buffer = vec![0; message_length as usize];
             let _ = stream.read_exact(&mut buffer).await.unwrap();
-            let message: Result<Message, Box<bincode::ErrorKind>> =
-                bincode::deserialize(&buffer);
+            let message: Result<Message, Box<bincode::ErrorKind>> = bincode::deserialize(&buffer);
             if message.is_err() {
                 // halt
                 send_error_message(&mut stream, message.unwrap_err()).await;

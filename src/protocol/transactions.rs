@@ -1,6 +1,6 @@
 use flume::Receiver;
 
-use crate::{accounting::account::Account, crypto::{hashing::{DefaultHash, HashFunction}, signing::{SigFunction, Signable}}, nodes::{messages::Message, node::{Broadcaster, Node, StdByteArray}}, primitives::{block::BlockHeader, transaction::{self, Transaction, TransactionFilter}}};
+use crate::{accounting::account::Account, crypto::{hashing::{DefaultHash, HashFunction, Hashable}, signing::{SigFunction, Signable}}, nodes::{messages::Message, node::{Broadcaster, Node, StdByteArray}}, primitives::{block::BlockHeader, transaction::{self, Transaction, TransactionFilter}}};
 
 /// Submit a transaction to the network
 /// 
@@ -22,13 +22,19 @@ pub async fn submit_transaction<const K: usize, const P: usize>(
     signer: &mut impl SigFunction<K, P, 64>,
     receiver: StdByteArray,
     amount: u64,
-    register_completion_callback: bool
+    register_completion_callback: bool,
+    timestamp: Option<u64>
 ) -> Result<Option<Receiver<BlockHeader>>, std::io::Error> {
     let nonce = sender.nonce; sender.nonce += 1;
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("Time went backwards")
-        .as_secs();
+    let timestamp = match timestamp{
+        Some(t) => t,
+        None => {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_secs()
+        }
+    };
     let mut transaction = Transaction::new(
         sender.address, 
         receiver, 
@@ -40,7 +46,10 @@ pub async fn submit_transaction<const K: usize, const P: usize>(
     // sign with the signer
     transaction.sign(signer);
     // broadcast and wait for peer responses
-    let results = node.broadcast(&Message::TransactionBroadcast(transaction)).await?;
+    let message = Message::TransactionBroadcast(transaction);
+    // we do not want this to wait in broadcast queue, so we will lock it out immediately
+    node.inner.broadcasted_already.lock().await.insert(message.hash(&mut DefaultHash::new()).unwrap());
+    let results = node.broadcast(&message).await?;
     // check if the transaction was acknowledged at least once
     let ok = results.iter().any(|x| {
         matches!(x, Message::TransactionAck)

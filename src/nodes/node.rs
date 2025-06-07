@@ -91,16 +91,10 @@ pub struct NodeInner {
     pub public_key: StdByteArray,
     /// The private key of the node
     pub private_key: StdByteArray,
-    /// The IP address of the node
-    pub ip_address: IpAddr,
-    /// The port of the node
-    pub port: u16,
     // known peers
     pub peers: Mutex<HashMap<StdByteArray, Peer>>,
     // the blockchain
     pub chain: Mutex<Option<Chain>>,
-    /// transactions to be serviced
-    pub miner_pool: Option<MinerPool>,
     /// transactions to be broadcasted
     pub broadcast_receiver: Receiver<Message>,
     /// transaction input
@@ -108,7 +102,7 @@ pub struct NodeInner {
     // a collection of things already broadcasted
     pub broadcasted_already: Mutex<HashSet<StdByteArray>>,
     // transaction filter queue
-    pub transaction_filters: Arc<Mutex<Vec<(TransactionFilter, Peer)>>>,
+    pub transaction_filters: Mutex<Vec<(TransactionFilter, Peer)>>,
     /// mapping of reputations for peers
     pub reputations: Mutex<HashMap<StdByteArray, NodeHistory>>,
     /// registered filters for the local node - producer will be this node, and consumer will be some backgroung thread that polls
@@ -121,7 +115,13 @@ pub struct NodeInner {
 
 #[derive(Clone)]
 pub struct Node {
-    pub inner: Arc<NodeInner>
+    pub inner: Arc<NodeInner>,
+    /// The IP address of the node
+    pub ip_address: IpAddr,
+    /// The port of the node
+    pub port: u16,
+    /// transactions to be serviced
+    pub miner_pool: Option<MinerPool>,
 }
 
 
@@ -151,13 +151,10 @@ impl Node {
         let (state, maybe_chain) = get_initial_state(&**database.as_ref().unwrap());
         Node {
             inner: NodeInner {
-                public_key: public_key.into(),
+            public_key: public_key.into(),
             private_key: private_key.into(),
-            ip_address,
-            port: port.into(),
             peers: Mutex::new(peer_map),
             chain: Mutex::new(maybe_chain),
-            miner_pool: transaction_pool,
             broadcasted_already,
             broadcast_receiver,
             broadcast_sender,
@@ -166,13 +163,17 @@ impl Node {
             filter_callbacks: Mutex::new(HashMap::new()), // initially no callbacks
             state: Mutex::new(state), // initially in discovery mode
             datastore: database,
-            }.into()
+            }.into(),
+            ip_address,
+            port: port.into(),
+            miner_pool: transaction_pool,
         }
     }
     
     /// when called, launches a new thread that listens for incoming connections
     pub async fn serve(&self) {
         // spawn a new thread to handle the connection
+        log::info!("Node is starting up on {}:{}", self.ip_address, self.port);
         let state = self.inner.state.lock().await.clone();
         let handle = match state {
             NodeState::ICD => {
@@ -244,9 +245,9 @@ impl Node {
             },
             Message::TransactionBroadcast(transaction) => {
                 // add the transaction to the pool
-                if let Some(ref pool) = self.inner.miner_pool{
+                if let Some(ref pool) = self.miner_pool{
                     if state.is_consume() {
-                        pool.add_transaction(transaction.clone());
+                        pool.add_transaction(transaction.clone()).await;
                     }
                 }
                 // to be broadcasted
@@ -401,21 +402,21 @@ impl Node {
         }
         if has_our_stamp && n_stamps == N_TRANSMISSION_SIGNATURES{
             // this means that it was already full - do NOT transmit just assign to mine
-            match self.inner.miner_pool{
+            match self.miner_pool{
                 None => {},
                 Some(ref pool) => {
                     // add the block to the pool
-                    pool.add_ready_block(block.clone());
+                    pool.add_ready_block(block.clone()).await;
                 }
             }
         }else if n_stamps == N_TRANSMISSION_SIGNATURES - 1{
             // this means that we were the last to sign. forward and assign to mine
             self.inner.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap(); // forward
-            match self.inner.miner_pool{
+            match self.miner_pool{
                 None => {},
                 Some(ref pool) => {
                     // add the block to the pool
-                    pool.add_ready_block(block.clone());
+                    pool.add_ready_block(block.clone()).await;
                 }
             }
         }else{
@@ -426,13 +427,13 @@ impl Node {
 
     /// spawn a new thread to match transaction callback requests against the bock
     async fn handle_callbacks(&self, block: &Block){
-        let filters = self.inner.transaction_filters.clone();
         let block_clone = block.clone();
         let initpeer: Peer = self.clone().into();
         let selfclone = self.clone();
         tokio::spawn(async move {
             // check filters for callback
-            for ( filter, peer) in filters.lock().await.iter_mut() {
+            let mut filters = selfclone.inner.transaction_filters.lock().await;
+            for ( filter, peer) in filters.iter_mut() {
                 if filter.matches(&block_clone){
                     peer.communicate(&Message::TransactionFilterResponse(filter.clone(), block_clone.header), &initpeer).await.unwrap();
                     // check if there is a registered callback
@@ -498,13 +499,13 @@ impl Node {
 }
 impl Into<Peer> for Node {
     fn into(self) -> Peer {
-        Peer::new(self.inner.public_key, self.inner.ip_address, self.inner.port)
+        Peer::new(self.inner.public_key, self.ip_address, self.port)
     }
 }
 
 impl Into<Peer> for &Node {
     fn into(self) -> Peer {
-        Peer::new(self.inner.public_key, self.inner.ip_address, self.inner.port)
+        Peer::new(self.inner.public_key, self.ip_address, self.port)
     }
 }
 
@@ -533,10 +534,12 @@ impl Broadcaster for Node {
 #[cfg(test)]
 mod tests{
 
-    use crate::{crypto::signing::{DefaultSigner, SigFunction, SigVerFunction}, nodes::peer::Peer, persistence::database::{Datastore, GenesisDatastore}, protocol::{peers::discover_peers, transactions::submit_transaction}};
+    use crate::{crypto::{hashing::{DefaultHash, HashFunction, Hashable}, signing::{DefaultSigner, SigFunction, SigVerFunction, Signable}}, nodes::{messages::Message, miner::{Miner, MAX_TRANSACTION_WAIT_TIME}, peer::Peer}, persistence::database::{Datastore, GenesisDatastore}, primitives::{block::Block, pool::MinerPool, transaction::Transaction}, protocol::{peers::discover_peers, transactions::submit_transaction}};
 
     use super::Node;
+    use core::time;
     use std::{net::{IpAddr, Ipv4Addr}, sync::Arc};
+    
 
     #[tokio::test]
     async fn test_create_empty_node() {
@@ -560,11 +563,11 @@ mod tests{
 
         assert_eq!(node.inner.public_key, public_key);
         assert_eq!(node.inner.private_key, private_key);
-        assert_eq!(node.inner.ip_address, ip_address);
-        assert_eq!(node.inner.port, port);
+        assert_eq!(node.ip_address, ip_address);
+        assert_eq!(node.port, port);
         assert!(node.inner.peers.lock().await.is_empty());
         assert!(node.inner.chain.lock().await.is_none());
-        assert!(node.inner.miner_pool.is_none());
+        assert!(node.miner_pool.is_none());
         assert!(node.inner.transaction_filters.lock().await.is_empty());
         assert!(node.inner.reputations.lock().await.is_empty());
         assert!(node.inner.filter_callbacks.lock().await.is_empty());
@@ -593,11 +596,11 @@ mod tests{
 
         assert_eq!(node.inner.public_key, public_key);
         assert_eq!(node.inner.private_key, private_key);
-        assert_eq!(node.inner.ip_address, ip_address);
-        assert_eq!(node.inner.port, port);
+        assert_eq!(node.ip_address, ip_address);
+        assert_eq!(node.port, port);
         assert!(node.inner.peers.lock().await.is_empty());
         assert!(node.inner.chain.lock().await.is_some());
-        assert!(node.inner.miner_pool.is_none());
+        assert!(node.miner_pool.is_none());
         assert!(node.inner.transaction_filters.lock().await.is_empty());
         assert!(node.inner.reputations.lock().await.is_empty());
         assert!(node.inner.filter_callbacks.lock().await.is_empty());
@@ -880,7 +883,7 @@ mod tests{
             None,
         );
 
-        let mut node_b = Node::new(
+        let node_b = Node::new(
             public_key_b,
             private_key_b,
             ip_address_b,
@@ -894,7 +897,7 @@ mod tests{
         node_a.serve().await;
 
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
+        
         // Node A sends a peer request to Node B
         discover_peers(&mut node_a).await.unwrap();
 
@@ -916,18 +919,212 @@ mod tests{
         let sender_account = chain.as_mut().unwrap().account_manager.get_or_create_account(&public_key_a);
         drop(chain);
 
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_secs();
         let result = submit_transaction(
             &mut node_a, 
             &mut sender_account.clone().lock().unwrap(), 
             &mut signing_a, 
             public_key_b, 
             0, 
-            false
+            false,
+            Some(timestamp)
         ).await.unwrap();
 
         assert!(result.is_none());
 
-        panic!();
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        
+        // node a already broadcasted
+
+        let mut transaction = Transaction::new(
+            sender_account.lock().unwrap().address, 
+            public_key_b, 
+            0, 
+            timestamp,
+            0, 
+            &mut DefaultHash::new()
+        );
+        transaction.sign(&mut signing_a);
+
+        let message_to_hash = Message::TransactionBroadcast(transaction.clone());
+
+        // also, node b should be forward by now
+        assert!(node_b.inner.state.lock().await.is_forward());
+
+        let already_b = node_a.inner.broadcasted_already.lock().await;
+        assert!(already_b.contains(&message_to_hash.hash(&mut DefaultHash::new()).unwrap()));
+        drop(already_b);
+        let already_b = node_b.inner.broadcasted_already.lock().await;
+        assert!(already_b.contains(&message_to_hash.hash(&mut DefaultHash::new()).unwrap()));
+
+        // at this point, everything is broadcasted - and recorded. this means we had no loop, we are happy.
+
+        // make sure the accounts do NOT exist for the receiver - because it has never been settled.
+        let chain_a = node_a.inner.chain.lock().await;
+        let account_a = chain_a.as_ref().unwrap().account_manager.get_account(&public_key_a).unwrap();
+        let account_b = chain_a.as_ref().unwrap().account_manager.get_account(&public_key_b);
+        assert!(account_b.is_none());
+        assert_eq!(account_a.lock().unwrap().balance, 0); // because we made it
+        drop(chain_a);
+        let chain_b = node_b.inner.chain.lock().await;
+        let account_b = chain_b.as_ref().unwrap().account_manager.get_account(&public_key_b);
+        let account_a = chain_b.as_ref().unwrap().account_manager.get_account(&public_key_a);
+        assert!(account_b.is_none());
+        assert!(account_a.is_none());  // on node b, it has no record of either yet as the transactions are not in blocks
+        drop(chain_b);
+
+    }
+
+    #[tokio::test]
+
+    async fn test_transaction_and_block_proposal(){
+
+        let mut signing_a = DefaultSigner::generate_random();
+        let public_key_a = signing_a.get_verifying_function().to_bytes();
+        let private_key_a = signing_a.to_bytes();
+
+        let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 9));
+        let port_a = 8020;
+
+        let signing_b = DefaultSigner::generate_random();
+        let public_key_b = signing_b.get_verifying_function().to_bytes();
+        let private_key_b = signing_b.to_bytes();
+
+        let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 8));
+        let port_b = 8021;
+
+        let datastore = GenesisDatastore::new();
+
+        let mut node_a = Node::new(
+            public_key_a,
+            private_key_a,
+            ip_address_a,
+            port_a,
+            vec![Peer::new(public_key_b, ip_address_b, port_b)],
+            Some(Arc::new(datastore.clone())),
+            None,
+        );
+
+        let node_b = Node::new(
+            public_key_b,
+            private_key_b,
+            ip_address_b,
+            port_b,
+            vec![],
+            Some(Arc::new(datastore.clone())),
+            Some(MinerPool::new()), // we will mine from this node
+        );
+
+        let miner_b = Miner::new(node_b.clone()).unwrap();
+
+        miner_b.serve().await;
+        node_a.serve().await;
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        // Node A sends a peer request to Node B
+        println!("Node A starting discovery");
+
+        discover_peers(&mut node_a).await.unwrap();
+        println!("Node A discovered Node B");
+
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        // Verify that Node B knows Node A
+        let peers_b = node_b.inner.peers.lock().await;
+        assert!(peers_b.contains_key(&public_key_a));
+
+        drop(peers_b);
+
+        let peers_a = node_a.inner.peers.lock().await;
+        assert!(peers_a.contains_key(&public_key_b));
+        assert!(!peers_a.contains_key(&public_key_a)); // Node A does not know itself
+        drop(peers_a);
+        // now, A makes a transaction of 0 dollars to B
+
+
+        let mut chain = node_a.inner.chain.lock().await;
+        let sender_account = chain.as_mut().unwrap().account_manager.get_or_create_account(&public_key_a);
+        drop(chain);
+
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_secs();
+        let result = submit_transaction(
+            &mut node_a, 
+            &mut sender_account.clone().lock().unwrap(), 
+            &mut signing_a, 
+            public_key_b, 
+            0, 
+            false,
+            Some(timestamp)
+        ).await.unwrap();
+
+        assert!(result.is_none());
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        
+        // node a already broadcasted
+
+        let mut transaction = Transaction::new(
+            sender_account.lock().unwrap().address, 
+            public_key_b, 
+            0, 
+            timestamp,
+            0, 
+            &mut DefaultHash::new()
+        );
+        transaction.sign(&mut signing_a);
+
+        let message_to_hash = Message::TransactionBroadcast(transaction.clone());
+
+        // also, node b should be forward by now
+
+        assert!(node_b.inner.state.lock().await.is_forward());
+
+        let already_b = node_a.inner.broadcasted_already.lock().await;
+        assert!(already_b.contains(&message_to_hash.hash(&mut DefaultHash::new()).unwrap()));
+        assert_eq!(already_b.len(), 1);
+        drop(already_b);
+        let already_b = node_b.inner.broadcasted_already.lock().await;
+        assert!(already_b.contains(&message_to_hash.hash(&mut DefaultHash::new()).unwrap()));
+        assert_eq!(already_b.len(), 1);
+        drop(already_b);
+
+        // at this point, everything is broadcasted - and recorded. this means we had no loop, we are happy.
+
+        // make sure the accounts do NOT exist for the receiver - because it has never been settled.
+
+        let chain_a = node_a.inner.chain.lock().await;
+        let account_a = chain_a.as_ref().unwrap().account_manager.get_account(&public_key_a).unwrap();
+        let account_b = chain_a.as_ref().unwrap().account_manager.get_account(&public_key_b);
+        assert!(account_b.is_none());
+        assert_eq!(account_a.lock().unwrap().balance, 0); // because we made it
+        drop(chain_a);
+        let chain_b = node_b.inner.chain.lock().await;
+        let account_b = chain_b.as_ref().unwrap().account_manager.get_account(&public_key_b);
+        let account_a = chain_b.as_ref().unwrap().account_manager.get_account(&public_key_a);
+        assert!(account_b.is_none());
+        assert!(account_a.is_none());  // on node b, it has no record of either yet as the transactions are not in blocks
+        drop(chain_b);
+
+        // miners wait 10 seconds for more transactions to come in
+        println!("waiting for miner to process transactions");
+        tokio::time::sleep(std::time::Duration::from_secs(MAX_TRANSACTION_WAIT_TIME)).await;
+        // now, by this time it should have been consumed into a block proposition.
+        // this block proposition will be sent out from node_b to node_a.
+        // we will check the already broadcasted messages first.
+        // we cannot know the exact hash, but check that 2 are in there
+        let already_b = node_b.inner.broadcasted_already.lock().await;
+        assert_eq!(already_b.len(), 3); // at least the transaction and the block
+        drop(already_b);
+        let already_b = node_a.inner.broadcasted_already.lock().await;
+        assert_eq!(already_b.len(), 3); // at least the transaction and the block
+        drop(already_b);
 
     }
         

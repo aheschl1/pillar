@@ -37,43 +37,43 @@ impl MinerPool{
     }
 
     /// Adds a transaction to the pool
-    pub fn add_transaction(&self, transaction: Transaction) {
+    pub async fn add_transaction(&self, transaction: Transaction) {
         // send the transaction to the receiver
-        self.transaction_sender.send(transaction).unwrap();
+        self.transaction_sender.send_async(transaction).await.unwrap();
     }
 
     /// Returns the transaction at the front of the pool
-    pub fn pop_transaction(&self) -> Option<Transaction> {
+    pub async fn pop_transaction(&self) -> Option<Transaction> {
         // receive the transaction from the sender
-        match self.transaction_receiver.recv() {
+        match self.transaction_receiver.recv_async().await {
             Ok(transaction) => Some(transaction),
             Err(_) => None,
         }
     }
 
     /// Returns the block at the front of the pool
-    pub fn pop_block_preposition(&self) -> Option<Block> {
+    pub async fn pop_block_preposition(&self) -> Option<Block> {
         // receive the block from the sender
-        match self.block_poroposition_receiver.recv() {
+        match self.block_poroposition_receiver.recv_async().await {
             Ok(block) => Some(block),
             Err(_) => None,
         }
     }
 
     /// Adds a block to the pool
-    pub fn add_block_proposition(&self, block: Block) {
+    pub async fn add_block_proposition(&self, block: Block) {
         // send the block to the receiver
-        self.block_proposition_sender.send(block).unwrap();
+        self.block_proposition_sender.send_async(block).await.unwrap();
     }
 
-    pub fn add_ready_block(&self, block: Block) {
+    pub async fn add_ready_block(&self, block: Block) {
         // send the block to the receiver
-        self.block_ready_sender.send(block).unwrap();
+        self.block_ready_sender.send_async(block).await.unwrap();
     }
     
-    pub fn pop_ready_block(&self) -> Option<Block> {
+    pub async fn pop_ready_block(&self) -> Option<Block> {
         // receive the block from the sender
-        match self.block_ready_receiver.recv() {
+        match self.block_ready_receiver.recv_async().await {
             Ok(block) => Some(block),
             Err(_) => None,
         }
@@ -81,11 +81,11 @@ impl MinerPool{
 
     pub fn ready_block_count(&self) -> usize {
         // read the block count
-        self.block_poroposition_receiver.len()
+        self.block_ready_receiver.len()
     }
 
     pub fn proposed_block_count(&self) -> usize {
         // read the block count
-        self.block_ready_receiver.len()
+        self.block_poroposition_receiver.len()
     }
 }
