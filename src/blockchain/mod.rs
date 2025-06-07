@@ -25,7 +25,10 @@ pub trait TrimmableChain {
             let mut current_node = headers.get(leaf);
             while let Some(node) = current_node {
                 let hash = node.hash(&mut DefaultHash::new()).unwrap();
-                if seen.contains_key(&hash) {
+                if let std::collections::hash_map::Entry::Vacant(e) = seen.entry(hash) {
+                    // indicate that this node is seem
+                    e.insert(*leaf);
+                } else {
                     let fork = seen[&hash];
                     let fork_depth = headers[&fork].depth;
                     if fork_depth >= current_fork_depth + 10 {
@@ -33,9 +36,6 @@ pub trait TrimmableChain {
                         forks_to_kill.insert(*leaf); // leave this fork early - everything downstream has been marked, and we kill eitherway
                         break;
                     }
-                } else {
-                    // indicate that this node is seem
-                    seen.insert(hash, *leaf);
                 }
                 current_node = headers.get(&node.previous_hash);
             }

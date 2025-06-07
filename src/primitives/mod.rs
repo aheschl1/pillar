@@ -5,7 +5,7 @@ pub mod pool;
 #[cfg(test)]
 mod tests{
     use crate::{crypto::{hashing::{DefaultHash, HashFunction, Hashable}, signing::{DefaultSigner, SigFunction, SigVerFunction, Signable}}, primitives::{block::{BlockHeader, BlockTail}, transaction::{Transaction, TransactionHeader}}};
-    use rand_core::OsRng;
+    
     // use rand::rngs::OsRng;
 
     #[test]

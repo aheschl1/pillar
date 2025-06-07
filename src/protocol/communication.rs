@@ -178,7 +178,7 @@ mod tests {
             peer::Peer,
         }, primitives::transaction::Transaction
     };
-    use core::{panic, time};
+    use core::panic;
     use std::net::{IpAddr, Ipv4Addr};
     use std::str::FromStr;
 

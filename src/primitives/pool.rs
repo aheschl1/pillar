@@ -1,4 +1,3 @@
-use std::sync::{Arc, Mutex};
 use flume::{Receiver, Sender};
 
 use super::{block::Block, transaction::Transaction};

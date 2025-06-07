@@ -1,6 +1,6 @@
 use flume::Receiver;
 
-use crate::{accounting::account::Account, crypto::{hashing::{DefaultHash, HashFunction, Hashable}, signing::{SigFunction, Signable}}, nodes::{messages::Message, node::{Broadcaster, Node, StdByteArray}}, primitives::{block::BlockHeader, transaction::{self, Transaction, TransactionFilter}}};
+use crate::{accounting::account::Account, crypto::{hashing::{DefaultHash, HashFunction, Hashable}, signing::{SigFunction, Signable}}, nodes::{messages::Message, node::{Broadcaster, Node, StdByteArray}}, primitives::{block::BlockHeader, transaction::{Transaction}}};
 
 /// Submit a transaction to the network
 /// 

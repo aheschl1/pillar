@@ -301,7 +301,7 @@ impl Block {
     ) -> Self {
         let merkle_tree = generate_tree(transactions.iter().collect(), hasher).unwrap();
         let tail = BlockTail {
-            stamps: stamps
+            stamps
         };
         let header = BlockHeader::new(
             previous_hash, 

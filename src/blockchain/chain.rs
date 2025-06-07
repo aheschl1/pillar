@@ -36,17 +36,17 @@ impl Chain {
         let mut blocks = HashMap::new();
         let genisis_hash = genesis_block.hash.unwrap();
         let mut headers = HashMap::new();
-        headers.insert(genisis_hash, genesis_block.header.clone());
+        headers.insert(genisis_hash, genesis_block.header);
         let mut leaves = HashSet::new();
         leaves.insert(genisis_hash);
 
         blocks.insert(genisis_hash, genesis_block);
         Chain {
-            blocks: blocks,
+            blocks,
             depth: 1,
             deepest_hash: genisis_hash,
-            leaves: leaves,
-            headers: headers,
+            leaves,
+            headers,
             account_manager: AccountManager::new(),
         }
     }
@@ -61,7 +61,7 @@ impl Chain {
         let mut seen_prevs: HashSet<StdByteArray> = HashSet::new();
 
         for (hash, block) in &blocks {
-            headers.insert(*hash, block.header.clone());
+            headers.insert(*hash, block.header);
             all_hashes.insert(*hash);
             seen_prevs.insert(block.header.previous_hash);
 
@@ -113,7 +113,7 @@ impl Chain {
         // we need to make sure that there are no duplicated nonce values under the same user
         let per_user: HashMap<StdByteArray, Vec<&Transaction>> =
             transactions
-                .into_iter()
+                .iter()
                 .fold(HashMap::new(), |mut acc, tx| {
                     acc.entry(tx.header.sender) // assuming this gives you the StdByteArray key
                         .or_default()
@@ -208,7 +208,7 @@ impl Chain {
         if account.lock().unwrap().balance < transaction.header.amount {
             return false;
         } 
-        return true;
+        true
     }
 
     /// Verifies the validity of a block, including its transactions and metadata.
@@ -224,7 +224,7 @@ impl Chain {
         self.blocks.insert(block.hash.unwrap(), block.clone());
         self.leaves.remove(&block.header.previous_hash);
         self.leaves.insert(block.hash.unwrap());
-        self.headers.insert(block.hash.unwrap(), block.header.clone());
+        self.headers.insert(block.hash.unwrap(), block.header);
         // update the depth - the depth of this block is checked in the verification
         // perhaps this is a fork deeper in the chain, so we do not always update 
         if block.header.depth > self.depth {

@@ -1,5 +1,5 @@
 use ed25519::signature::SignerMut;
-use ed25519_dalek::{SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{SigningKey, VerifyingKey};
 use rand_core::OsRng;
 
 use crate::nodes::node::StdByteArray;

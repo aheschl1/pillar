@@ -43,7 +43,7 @@ impl Account{
             address,
             balance,
             nonce: 0,
-            history: history
+            history
         }
     }
 }
@@ -135,7 +135,7 @@ impl AccountManager{
 mod tests {
     use super::*;
     use crate::primitives::block::Block;
-    use crate::primitives::transaction::{Transaction, TransactionHeader};
+    use crate::primitives::transaction::Transaction;
     use crate::crypto::hashing::{DefaultHash, HashFunction};
 
     #[test]

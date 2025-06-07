@@ -83,11 +83,7 @@ impl MerkleTree {
             None => None,
             Some(root) => {
                 let root = self.nodes.get(root);
-                if let Some(root) = root {
-                    Some(root.hash)
-                }else{
-                    None
-                }
+                root.map(|root| root.hash)
             }
         }
     }
@@ -163,7 +159,7 @@ pub fn generate_proof_of_inclusion(merkle_tree: &MerkleTree, data: StdByteArray,
     let target_hash = hash_function.digest().expect("Hashing failed");
 
     // Find matching leaf
-    let mut current_key = leaves.iter().find(|&&key| nodes[key].hash == target_hash)?.clone();
+    let mut current_key = *leaves.iter().find(|&&key| nodes[key].hash == target_hash)?;
     
     let mut hashes = Vec::new();
     let mut directions = Vec::new();

@@ -1,7 +1,6 @@
-use core::hash;
-use std::{collections::HashSet, hash::Hash, net::{IpAddr, Ipv4Addr, Ipv6Addr}};
+use std::collections::HashSet;
 
-use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, crypto::{hashing::{DefaultHash, HashFunction, Hashable}, merkle::MerkleProof}, nodes::node::StdByteArray, primitives::{block::{Block, BlockHeader}, transaction::{Transaction, TransactionFilter}}};
+use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, crypto::{hashing::{HashFunction, Hashable}, merkle::MerkleProof}, nodes::node::StdByteArray, primitives::{block::{Block, BlockHeader}, transaction::{Transaction, TransactionFilter}}};
 use serde::{Serialize, Deserialize};
 use super::peer::Peer;
 

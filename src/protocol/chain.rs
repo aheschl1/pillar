@@ -1,10 +1,10 @@
-use std::{collections::{HashMap, HashSet}, hash::DefaultHasher};
+use std::collections::{HashMap, HashSet};
 
 use rand::{rng, seq::{IndexedRandom, IteratorRandom}};
 
 use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, crypto::{hashing::{DefaultHash, HashFunction, Hashable}, merkle::generate_tree}, nodes::{messages::Message, node::{Broadcaster, Node, StdByteArray}, peer::Peer}, primitives::{block::{Block, BlockHeader, BlockTail}, transaction::Transaction}, reputation::history::NodeHistory};
 
-use super::{peers::discover_peers, reputation::N_TRANSMISSION_SIGNATURES};
+use super::peers::discover_peers;
 
 /// Queries a peer to send a block.
 async fn query_block_from_peer(

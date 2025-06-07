@@ -1,6 +1,6 @@
 use super::peer::Peer;
 use flume::{Receiver, Sender};
-use std::{collections::{HashMap, HashSet}, net::IpAddr, ops::Deref, sync::Arc};
+use std::{collections::{HashMap, HashSet}, net::IpAddr, sync::Arc};
 use tokio::sync::Mutex;
 
 use super::messages::Message;
@@ -151,8 +151,8 @@ impl Node {
         let (state, maybe_chain) = get_initial_state(&**database.as_ref().unwrap());
         Node {
             inner: NodeInner {
-            public_key: public_key,
-            private_key: private_key,
+            public_key,
+            private_key,
             peers: Mutex::new(peer_map),
             chain: Mutex::new(maybe_chain),
             broadcasted_already,
@@ -165,7 +165,7 @@ impl Node {
             datastore: database,
             }.into(),
             ip_address,
-            port: port,
+            port,
             miner_pool: transaction_pool,
         }
     }
@@ -247,7 +247,7 @@ impl Node {
                 // add the transaction to the pool
                 if let Some(ref pool) = self.miner_pool{
                     if state.is_consume() {
-                        pool.add_transaction(transaction.clone()).await;
+                        pool.add_transaction(*transaction).await;
                     }
                 }
                 // to be broadcasted
@@ -457,7 +457,7 @@ impl Node {
         // add the stamp to the block
         let stamp = Stamp {
             address: self.inner.public_key,
-            signature: signature,
+            signature,
         };
         block.header.tail.stamp(stamp)
     }
@@ -535,10 +535,10 @@ impl Broadcaster for Node {
 #[cfg(test)]
 mod tests{
 
-    use crate::{crypto::{hashing::{DefaultHash, HashFunction, Hashable}, signing::{DefaultSigner, SigFunction, SigVerFunction, Signable}}, nodes::{messages::Message, miner::{Miner, MAX_TRANSACTION_WAIT_TIME}, peer::Peer}, persistence::database::{Datastore, GenesisDatastore}, primitives::{block::Block, pool::MinerPool, transaction::Transaction}, protocol::{peers::discover_peers, transactions::submit_transaction}};
+    use crate::{crypto::{hashing::{DefaultHash, HashFunction, Hashable}, signing::{DefaultSigner, SigFunction, SigVerFunction, Signable}}, nodes::{messages::Message, miner::{Miner, MAX_TRANSACTION_WAIT_TIME}, peer::Peer}, persistence::database::{Datastore, GenesisDatastore}, primitives::{pool::MinerPool, transaction::Transaction}, protocol::{peers::discover_peers, transactions::submit_transaction}};
 
     use super::Node;
-    use core::time;
+    
     use std::{net::{IpAddr, Ipv4Addr}, sync::Arc};
     
 

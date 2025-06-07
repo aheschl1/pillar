@@ -1,4 +1,3 @@
-use sled::transaction;
 
 use crate::{crypto::hashing::{DefaultHash, HashFunction}, primitives::block::{Block, BlockTail}, protocol::pow::mine};
 
@@ -18,15 +17,15 @@ impl Miner{
     /// Takes ownership of the node
     pub fn new(node: Node) -> Result<Self, std::io::Error> {
         let miner_pool = &node.miner_pool;
-        if let Some(_) = miner_pool{
-            return Ok(Miner {
-                node: node,
-            });
+        if miner_pool.is_some(){
+            Ok(Miner {
+                node,
+            })
         }else{
-            return Err(std::io::Error::new(
+            Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 "miner_pool pool not found",
-            ));
+            ))
         }
     }
 
@@ -130,7 +129,7 @@ async fn monitor_block_pool(miner: Miner) {
 mod test{
     use std::{net::{IpAddr, Ipv4Addr}, str::FromStr, sync::Arc};
 
-    use crate::{crypto::hashing::{DefaultHash, HashFunction}, persistence::database::GenesisDatastore, primitives::{block::{Block, BlockTail}, pool::MinerPool, transaction::Transaction}, protocol::{pow::mine, reputation::N_TRANSMISSION_SIGNATURES}};
+    use crate::{crypto::hashing::{DefaultHash, HashFunction}, persistence::database::GenesisDatastore, primitives::{block::{Block, BlockTail}, pool::MinerPool, transaction::Transaction}, protocol::pow::mine};
     use crate::nodes::miner::Miner;
     use super::Node;
 

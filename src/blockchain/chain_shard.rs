@@ -67,7 +67,7 @@ impl From<Chain> for ChainShard{
             chain
             .blocks
             .iter()
-            .map(|(hash, block)| (hash.clone(), block.header.clone())).collect::<HashMap<_, _>>();
+            .map(|(hash, block)| (*hash, block.header)).collect::<HashMap<_, _>>();
         
         let leaves = chain.leaves;
 
