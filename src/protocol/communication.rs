@@ -14,10 +14,15 @@ use crate::{
 };
 
 /// Background process that consumes mined blocks, and transactions which must be forwarded
-pub async fn broadcast_knowledge(node: Node) -> Result<(), std::io::Error> {
+pub async fn broadcast_knowledge(node: Node, stop_signal: Option<flume::Receiver<()>>) -> Result<(), std::io::Error> {
     let mut hasher = DefaultHash::new();
     loop {
         // send a message to all peers
+        if let Some(signal) = &stop_signal {
+            if signal.try_recv().is_ok() {
+                return Ok(());
+            }
+        }
         if let Some(pool) = &node.miner_pool {
             // broadcast out of mining pool
             // while pool.ready_block_count() > 0 {
@@ -62,13 +67,28 @@ pub async fn broadcast_knowledge(node: Node) -> Result<(), std::io::Error> {
 /// For each connection, listens for a peer declaration. Then, it adds this peer to the peer list if not alteady there
 /// After handling the peer, it reads for the actual message. Then, it calls off to the serve_message function.
 /// The response from serve_message is finally returned back to the peer
-pub async fn serve_peers(node: Node) {
+pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
     let listener = TcpListener::bind(format!("{}:{}", node.ip_address, node.port))
         .await
         .unwrap();
     loop {
         // handle connection
-        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut stream = match timeout(tokio::time::Duration::from_secs(3),listener.accept()).await {
+            Ok(Ok((stream, _))) => stream,
+            Ok(Err(e)) => {
+                eprintln!("Error accepting connection: {}", e);
+                continue;
+            },
+            Err(_) => {
+                // check if we should stop
+                if let Some(signal) = &stop_signal {
+                    if signal.try_recv().is_ok() {
+                        break;
+                    }
+                }
+                continue; // timeout, try again
+            }     
+        };
         // spawn a new thread to handle the connection
         let mut self_clone = node.clone();
         tokio::spawn(async move {
@@ -188,7 +208,7 @@ mod tests {
         let port = 8084;
         let node = Node::new([1; 32], [2; 32], ip_address, port, vec![], None, None);
 
-        tokio::spawn(serve_peers(node.clone()));
+        tokio::spawn(serve_peers(node.clone(), None));
 
         tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 
@@ -218,8 +238,8 @@ mod tests {
         let port = 8080;
         let node = Node::new([1; 32], [2; 32], ip_address, port, vec![], None, None);
 
-        tokio::spawn(serve_peers(node.clone()));
-        tokio::spawn(broadcast_knowledge(node.clone()));
+        tokio::spawn(serve_peers(node.clone(), None));
+        tokio::spawn(broadcast_knowledge(node.clone(), None));
 
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
@@ -291,7 +311,7 @@ mod tests {
         let port = 8090;
         let node = Node::new([1; 32], [2; 32], ip_address, port, vec![], None, None);
 
-        tokio::spawn(serve_peers(node));
+        tokio::spawn(serve_peers(node,None));
 
         // sleep to allow the server to start
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -317,6 +337,48 @@ mod tests {
             Message::Error(_) => {},
             _ => panic!("Expected an error message"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_timeout_broadcast(){
+        let ip_address = IpAddr::V4(Ipv4Addr::from_str("127.0.0.9").unwrap());
+        let port = 8091;
+        let node = Node::new([1; 32], [2; 32], ip_address, port, vec![], None, None);
+
+        let (sender, stop_signal) = flume::bounded(1); // Create a stop signal receiver
+        let handle = tokio::spawn(broadcast_knowledge(node.clone(), Some(stop_signal.clone())));
+
+        // Sleep for a short duration to allow the broadcast loop to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // Send a stop signal to the broadcast loop
+        let now = std::time::Instant::now();
+        sender.send(()).unwrap();
+        // Wait for a short duration to ensure the broadcast loop has time to process the stop signal
+        let _ = handle.await.unwrap();
+        let elapsed = now.elapsed();
+        // Check that the broadcast loop stopped within a reasonable time
+        assert!(elapsed.as_millis() < 500, "Broadcast loop did not stop in time");
+    }
+
+    #[tokio::test]
+    async fn test_timeout_serve(){
+        let ip_address = IpAddr::V4(Ipv4Addr::from_str("127.0.0.9").unwrap());
+        let port = 8091;
+        let node = Node::new([1; 32], [2; 32], ip_address, port, vec![], None, None);
+
+        let (sender, stop_signal) = flume::bounded(1); // Create a stop signal receiver
+        let handle = tokio::spawn(serve_peers(node.clone(), Some(stop_signal.clone())));
+        // Sleep for a short duration to allow the server to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        // Send a stop signal to the server
+        let now = std::time::Instant::now();
+        sender.send(()).unwrap();
+        // Wait for a short duration to ensure the server has time to process the stop signal
+        let _ = handle.await.unwrap();
+        let elapsed = now.elapsed();
+        // Check that the server stopped within a reasonable time
+        assert!(elapsed.as_secs() < 3, "Server did not stop in time");
     }
 
 }

@@ -1,7 +1,7 @@
 use super::peer::Peer;
 use flume::{Receiver, Sender};
 use std::{collections::{HashMap, HashSet}, net::IpAddr, sync::Arc};
-use tokio::sync::Mutex;
+use tokio::{sync::Mutex, task::JoinHandle};
 
 use super::messages::Message;
 
@@ -122,6 +122,9 @@ pub struct Node {
     pub port: u16,
     /// transactions to be serviced
     pub miner_pool: Option<MinerPool>,
+    /// kill handles
+    kill_broadcast: Option<(flume::Sender<()>, Arc<std::sync::Mutex<JoinHandle<Result<(), std::io::Error>>>>)>,
+    kill_serve: Option<(flume::Sender<()>, Arc<std::sync::Mutex<JoinHandle<()>>>)>,
 }
 
 
@@ -149,6 +152,7 @@ impl Node {
             .map(|peer| (peer.public_key, peer.clone()))
             .collect::<HashMap<_, _>>();
         let (state, maybe_chain) = get_initial_state(&**database.as_ref().unwrap());
+        
         Node {
             inner: NodeInner {
             public_key,
@@ -167,13 +171,20 @@ impl Node {
             ip_address,
             port,
             miner_pool: transaction_pool,
+            kill_broadcast: None,
+            kill_serve: None,
         }
     }
     
     /// when called, launches a new thread that listens for incoming connections
-    pub async fn serve(&self) {
+    pub async fn serve(&mut self) {
         // spawn a new thread to handle the connection
         println!("Node is starting up on {}:{}", self.ip_address, self.port);
+        
+        let broadcast_killer = flume::bounded(1);
+        let serve_killer = flume::bounded(1);
+
+
         let state = self.inner.state.lock().await.clone();
         let handle = match state {
             NodeState::ICD => {
@@ -209,8 +220,27 @@ impl Node {
 
             });
         }
-        tokio::spawn(serve_peers(self.clone()));
-        tokio::spawn(broadcast_knowledge(self.clone()));
+        let spawn_handle = tokio::spawn(serve_peers(self.clone(), Some(serve_killer.1.clone())));
+        let b_handle = tokio::spawn(broadcast_knowledge(self.clone(), Some(broadcast_killer.1.clone())));
+        self.kill_broadcast = Some((broadcast_killer.0, Arc::new(std::sync::Mutex::new(b_handle))));
+        self.kill_serve = Some((serve_killer.0, Arc::new(std::sync::Mutex::new(spawn_handle))));
+    }
+
+    pub async fn stop(&mut self) {
+        // stop the broadcast and serve threads
+        let _ = self.kill_broadcast.as_ref().unwrap().0.send(());
+        let _ = self.kill_serve.as_ref().unwrap().0.send(());
+        // wait for the threads to finish
+        if let Some(handle) = &self.kill_broadcast {
+            let h = handle.1.lock().unwrap();
+            // h.abort(); // TODO THIS IS NOT RIGHT
+        }
+        if let Some(handle) = &self.kill_serve {
+            let h = handle.1.lock().unwrap();
+            // h.abort(); // TODO THIS IS NOT RIGHT
+        }
+        *self.inner.state.lock().await = NodeState::ChainOutdated;
+        println!("Node stopping.");
     }
 
     /// Register a transaction filter callback - adds the callback channel and adds it to the transaction filter queue
@@ -620,7 +650,7 @@ mod tests{
         let datastore = GenesisDatastore::new();
         let transaction_pool = None;
 
-        let node = Node::new(
+        let mut node = Node::new(
             public_key,
             private_key,
             ip_address,
@@ -660,7 +690,7 @@ mod tests{
         let datastore = GenesisDatastore::new();
         let transaction_pool = None;
 
-        let node1 = Node::new(
+        let mut node1 = Node::new(
             public_key,
             private_key,
             ip_address,
@@ -758,7 +788,7 @@ mod tests{
             None,
         );
 
-        let node_b = Node::new(
+        let mut node_b = Node::new(
             public_key_b,
             private_key_b,
             ip_address_b,
@@ -768,7 +798,7 @@ mod tests{
             None,
         );
 
-        let node_c = Node::new(
+        let mut node_c = Node::new(
             public_key_c,
             private_key_c,
             ip_address_c,
@@ -884,7 +914,7 @@ mod tests{
             None,
         );
 
-        let node_b = Node::new(
+        let mut node_b = Node::new(
             public_key_b,
             private_key_b,
             ip_address_b,
@@ -986,7 +1016,7 @@ mod tests{
         public_key_b: StdByteArray,
         public_key_a: StdByteArray
     ){
-        let miner_b = Miner::new(node_b.clone()).unwrap();
+        let mut miner_b = Miner::new(node_b.clone()).unwrap();
 
         miner_b.serve().await;
         node_a.serve().await;
@@ -1302,62 +1332,27 @@ mod tests{
         assert!(a_b > a_a); // B has more reputation than A
     }
 
-    #[tokio::test]
-    async fn test_new_node_online(){
-
-        let mut signing_a = DefaultSigner::generate_random();
-        let public_key_a = signing_a.get_verifying_function().to_bytes();
-        let private_key_a = signing_a.to_bytes();
-        let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 3));
-        let port_a = 8015;
-        let signing_b = DefaultSigner::generate_random();
-        let public_key_b = signing_b.get_verifying_function().to_bytes();
-        let private_key_b = signing_b.to_bytes();
-        let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 4));
-        let port_b = 8016;
-        let datastore = GenesisDatastore::new();
-        let mut node_a = Node::new(
-            public_key_a,
-            private_key_a,
-            ip_address_a,
-            port_a,
-            vec![Peer::new(public_key_b, ip_address_b, port_b)],
-            Some(Arc::new(datastore.clone())),
-            None,
-        );
-        let node_b = Node::new(
-            public_key_b,
-            private_key_b,
-            ip_address_b,
-            port_b,
-            vec![],
-            Some(Arc::new(datastore.clone())),
-            Some(MinerPool::new()), // we will mine from this node
-        );
+    /// Launches three nodes - matching the third one in delay
+    /// There are two blocks - genesis + 1.
+    /// They are synced.
+    async fn inner_test_new_node_online(
+        node_a: &mut Node,
+        node_b: &mut Node,
+        node_c: &mut Node,
+        signing_a: &mut DefaultSigner,
+        public_key_b: StdByteArray,
+        public_key_a: StdByteArray,
+        public_key_c: StdByteArray
+    ) {
 
         inner_test_transaction_and_block_proposal(
-            &mut node_a,
+            node_a,
             &node_b,
-            &mut signing_a,
+            signing_a,
             public_key_b,
             public_key_a
         ).await;
 
-        // new node - node c
-        let mut signing_c = DefaultSigner::generate_random();
-        let public_key_c = signing_c.get_verifying_function().to_bytes();
-        let private_key_c = signing_c.to_bytes();
-        let ip_address_c = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 5));
-        let port_c = 8022;
-        let mut node_c = Node::new(
-            public_key_c,
-            private_key_c,
-            ip_address_c,
-            port_c,
-            vec![Peer::new(public_key_a, ip_address_a, port_a)],
-            Some(Arc::new(EmptyDatastore::new())), // empty datastore, needs ICD
-            None,
-        );
         // node c serves
         assert!(node_c.inner.state.lock().await.clone() == super::NodeState::ICD);
         node_c.serve().await;
@@ -1375,7 +1370,23 @@ mod tests{
         let chain_c = node_c.inner.chain.lock().await;
         assert!(chain_c.as_ref().unwrap().depth == 1); // 2 blocks
         assert!(chain_c.as_ref().unwrap().blocks.len() == 2); // 3 blocks
+        let chain_a = node_a.inner.chain.lock().await;
+        // check hash equalities
+        let mut ablocks = chain_a.as_ref().unwrap().blocks.values().collect::<Vec<_>>();
+        ablocks.sort_by_key(|b| b.header.depth);
+        let mut cblocks = chain_c.as_ref().unwrap().blocks.values().collect::<Vec<_>>();
+        cblocks.sort_by_key(|b| b.header.depth);
+
+        assert_eq!(
+            ablocks[0].hash.unwrap(), 
+            cblocks[0].hash.unwrap(), 
+        );
+        assert_eq!(
+            ablocks[1].hash.unwrap(), 
+            cblocks[1].hash.unwrap(), 
+        );        
         drop(chain_c);
+        drop(chain_a);
         assert!(node_c.inner.state.lock().await.clone() == super::NodeState::Serving);
         // make sure reputations are correct
         let reputations_c = node_c.inner.reputations.lock().await;
@@ -1419,6 +1430,168 @@ mod tests{
         assert!(b_a == c_a);
         assert!(b_b == c_b);
         assert!(c_b > c_a); // C has more reputation than A
+
+    }
+
+    #[tokio::test]
+    async fn test_new_node_online(){
+
+        let mut signing_a = DefaultSigner::generate_random();
+        let public_key_a = signing_a.get_verifying_function().to_bytes();
+        let private_key_a = signing_a.to_bytes();
+        let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 3));
+        let port_a = 8015;
+        let signing_b = DefaultSigner::generate_random();
+        let public_key_b = signing_b.get_verifying_function().to_bytes();
+        let private_key_b = signing_b.to_bytes();
+        let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 4));
+        let port_b = 8016;
+        let datastore = GenesisDatastore::new();
+        let mut node_a = Node::new(
+            public_key_a,
+            private_key_a,
+            ip_address_a,
+            port_a,
+            vec![Peer::new(public_key_b, ip_address_b, port_b)],
+            Some(Arc::new(datastore.clone())),
+            None,
+        );
+        let mut node_b = Node::new(
+            public_key_b,
+            private_key_b,
+            ip_address_b,
+            port_b,
+            vec![],
+            Some(Arc::new(datastore.clone())),
+            Some(MinerPool::new()), // we will mine from this node
+        );
+        // new node - node c
+        let signing_c = DefaultSigner::generate_random();
+        let public_key_c = signing_c.get_verifying_function().to_bytes();
+        let private_key_c = signing_c.to_bytes();
+        let ip_address_c = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 5));
+        let port_c = 8022;
+        let mut node_c = Node::new(
+            public_key_c,
+            private_key_c,
+            ip_address_c,
+            port_c,
+            vec![Peer::new(public_key_a, ip_address_a, port_a)],
+            Some(Arc::new(EmptyDatastore::new())), // empty datastore, needs ICD
+            None,
+        );
+
+        inner_test_new_node_online(
+            &mut node_a,
+            &mut node_b,
+            &mut node_c,
+            &mut signing_a,
+            public_key_b,
+            public_key_a,
+            public_key_c
+        ).await;
+        
+    }
+
+    #[tokio::test]
+    async fn test_sync_later(){
+        let mut signing_a = DefaultSigner::generate_random();
+        let public_key_a = signing_a.get_verifying_function().to_bytes();
+        let private_key_a = signing_a.to_bytes();
+        let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 3));
+        let port_a = 8008;
+        let signing_b = DefaultSigner::generate_random();
+        let public_key_b = signing_b.get_verifying_function().to_bytes();
+        let private_key_b = signing_b.to_bytes();
+        let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 4));
+        let port_b = 8009;
+        let datastore = GenesisDatastore::new();
+        let mut node_a = Node::new(
+            public_key_a,
+            private_key_a,
+            ip_address_a,
+            port_a,
+            vec![Peer::new(public_key_b, ip_address_b, port_b)],
+            Some(Arc::new(datastore.clone())),
+            None,
+        );
+        let mut node_b = Node::new(
+            public_key_b,
+            private_key_b,
+            ip_address_b,
+            port_b,
+            vec![],
+            Some(Arc::new(datastore.clone())),
+            Some(MinerPool::new()), // we will mine from this node
+        );
+        // node c
+        let mut signing_c = DefaultSigner::generate_random();
+        let public_key_c = signing_c.get_verifying_function().to_bytes();
+        let private_key_c = signing_c.to_bytes();
+        let ip_address_c = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 5));
+        let port_c = 8010;
+        let mut node_c = Node::new(
+            public_key_c,
+            private_key_c,
+            ip_address_c,
+            port_c,
+            vec![Peer::new(public_key_a, ip_address_a, port_a)],
+            Some(Arc::new(EmptyDatastore::new())), // empty datastore, needs ICD
+            None,
+        );
+
+        inner_test_new_node_online(
+            &mut node_a,
+            &mut node_b,
+            &mut node_c,
+            &mut signing_a,
+            public_key_b,
+            public_key_a,
+            public_key_c
+        ).await;
+        // now, let A go offline. C will submit a transaction.
+        println!("Stopping node A - expect ConnetionRefused errors");
+        node_a.stop().await;
+        // pause a sec - TODO remove this after fixing the join on stoping
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        // now, C will submit a transaction to B
+        let acc = node_c.inner.chain.lock().await.as_mut().unwrap().account_manager.get_or_create_account(&public_key_c);
+        let _ = submit_transaction(
+            &mut node_c, 
+            &mut acc.lock().unwrap(), 
+            &mut signing_c,
+            public_key_b,
+            0,
+            false, 
+            None
+        ).await.unwrap();
+        // pause a sec
+        tokio::time::sleep(std::time::Duration::from_secs(15)).await; // time to settle, and give up waiting for full block
+        // now both shold have 3 blocks
+        let chain_b = node_b.inner.chain.lock().await;
+        assert!(chain_b.as_ref().unwrap().depth == 2); // 3 blocks
+        assert!(chain_b.as_ref().unwrap().blocks.len() == 3); // 3 blocks
+        drop(chain_b);
+        // now c 
+        let chain_c = node_c.inner.chain.lock().await;
+        assert!(chain_c.as_ref().unwrap().depth == 2); // 3 blocks
+        assert!(chain_c.as_ref().unwrap().blocks.len() == 3); // 3 blocks
+        drop(chain_c);
+        // put A back online
+        println!("Restarting node A");
+        node_a.serve().await;
+        assert!(node_a.inner.state.lock().await.clone() == super::NodeState::ChainSyncing);
+        // wait for a bit
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        // check if node a knows about node b and c
+        let peers_a = node_a.inner.peers.lock().await;
+        assert!(peers_a.contains_key(&public_key_b));
+        assert!(peers_a.contains_key(&public_key_c));
+        drop(peers_a);
+        // now check that it collected the block
+        let chain_a = node_a.inner.chain.lock().await;
+        assert_eq!(chain_a.as_ref().unwrap().depth, 2); // 3 blocks
+        assert_eq!(chain_a.as_ref().unwrap().blocks.len(), 3); // 3 blocks
     }
         
 }

@@ -31,7 +31,7 @@ impl Miner{
 
     /// Starts monitoring of the pool in a background process
     /// and serves the node
-    pub async fn serve(&self){
+    pub async fn serve(&mut self){
         if self.node.inner.chain.lock().await.is_none(){
             panic!("Cannot serve the miner before initial chain download.")
         }

@@ -188,7 +188,7 @@ pub fn get_genesis_block() -> Block{
 /// May take ownership of mutexed chain for a while
 pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
     if node.inner.peers.lock().await.is_empty(){
-        log::warn!("No peers to sync with, skipping chain sync");
+        println!("No peers to sync with, skipping chain sync");
         return Ok(());
     }
     // the sync request
@@ -201,7 +201,6 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
     let request = Message::ChainSyncRequest(leaves.clone());
     // broadcast the request
     let responses = node.broadcast(&request).await?;
-
     if responses.is_empty() {
         println!("No responses to chain sync request, skipping sync");
         return Ok(());
