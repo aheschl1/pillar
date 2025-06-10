@@ -1309,12 +1309,12 @@ mod tests{
         let public_key_a = signing_a.get_verifying_function().to_bytes();
         let private_key_a = signing_a.to_bytes();
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 3));
-        let port_a = 8020;
+        let port_a = 8015;
         let signing_b = DefaultSigner::generate_random();
         let public_key_b = signing_b.get_verifying_function().to_bytes();
         let private_key_b = signing_b.to_bytes();
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 4));
-        let port_b = 8021;
+        let port_b = 8016;
         let datastore = GenesisDatastore::new();
         let mut node_a = Node::new(
             public_key_a,
