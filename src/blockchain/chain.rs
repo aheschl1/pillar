@@ -101,7 +101,10 @@ impl Chain {
         let previous_block = self.blocks.get(&previous_hash);
         let valid = match previous_block {
             Some(last_block) => (last_block.header.depth + 1 == block.header.depth) && (block.header.timestamp >= last_block.header.timestamp),
-            None => false
+            None => {
+                println!("Previous block not found: {:?}", previous_hash);
+                false
+            }
         };
 
         if !valid {
@@ -221,6 +224,7 @@ impl Chain {
     /// Verifies the validity of a block, including its transactions and metadata.
     pub fn verify_block(&mut self, block: &Block) -> bool {
         let mut result = self.validate_block(block);
+        println!("Validating Block - Result = {}", result);
         result = result && self.validate_transaction_set(&block.transactions);
         result
     }

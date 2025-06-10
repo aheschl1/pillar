@@ -192,11 +192,12 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
         return Ok(());
     }
     // the sync request
-    let chain = node.inner.chain.lock().await;
+    let mut chain = node.inner.chain.lock().await;
     if chain.is_none() {
         return Err(std::io::Error::other("No chain to sync"));
     }
-    let leaves = chain.as_ref().unwrap().leaves.clone();
+    let chain = chain.as_mut().unwrap();
+    let leaves = chain.leaves.clone();
     
     let request = Message::ChainSyncRequest(leaves.clone());
     // broadcast the request
@@ -205,6 +206,7 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
         println!("No responses to chain sync request, skipping sync");
         return Ok(());
     }
+    println!("Received {} responses to chain sync request", responses.len());
 
     // sync up with the reponses
     let mut extensions: HashMap<StdByteArray, (Chain, u64)> = HashMap::new();
@@ -217,7 +219,10 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
                     let leaf = &shard.deepest_hash;
                     let mut curr = shard.blocks.get(leaf).cloned();
                     while let Some(current_block) = curr{
-                        if shard.verify_block(&current_block){
+                        // two things can happen here - if the existing chain has the previous block
+                        // then we need to validate the block on that chain - otherwise validate on the shard
+                        let validated = if chain.blocks.contains_key(&current_block.header.previous_hash) {chain.verify_block(&current_block)} else {shard.verify_block(&current_block)};
+                        if validated{
                             // good, recurse
                             if leaves.contains(&current_block.header.previous_hash.clone()){
                                 // we have reached it. record this verified shard
@@ -248,7 +253,6 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
     }
     // each response has been verified and we have the deepest for each leaf
     // now we need to merge the chains
-    let mut chain = chain.clone().unwrap();
     for (_, (chain_extension, _)) in extensions.iter(){
         // we need to find the block in the chain
         for extension_leaf in chain_extension.leaves.iter(){ // include the forks

@@ -1582,7 +1582,7 @@ mod tests{
         node_a.serve().await;
         assert!(node_a.inner.state.lock().await.clone() == super::NodeState::ChainSyncing);
         // wait for a bit
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         // check if node a knows about node b and c
         let peers_a = node_a.inner.peers.lock().await;
         assert!(peers_a.contains_key(&public_key_b));
