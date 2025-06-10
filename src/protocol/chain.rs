@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::{clone, collections::{HashMap, HashSet}};
 
 use rand::{rng, seq::{IndexedRandom, IteratorRandom}};
 
@@ -46,30 +46,26 @@ async fn query_block_from_peer(
 async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std::io::Error> {
     let mut threads = Vec::new();
     // get many blocks simultaneously
-    let (tx, block_channel) = flume::unbounded();
     for (hash, _) in shard.headers{
         let nodeclone = node.clone();
-        let sender = tx.clone();
         let handle = tokio::spawn(async move{
             loop{ // keep asking for the node until we pass
                 let mut peer = nodeclone.clone().inner.peers.lock().await.values().choose(&mut rng()).unwrap().clone(); // random peer
                 let block = query_block_from_peer(&mut peer, &nodeclone.clone().into(), hash).await;
                 if let Ok(block) = block {
                     // we got the block, send it to the channel
-                    sender.send(block).unwrap();
-                    break;
+                    return block;
                 }
             }
         });
         threads.push(handle);
     }
     // let the threads finish
+    let mut blocks: Vec<Block> = Vec::new();
     for thread in threads {
-        thread.await.unwrap();
+        blocks.push(thread.await.unwrap());
     }
-    // now all blocks should be in the channel
     // we need to work our way up by depth
-    let mut blocks: Vec<Block> = block_channel.iter().collect();
     // sort by depth
     blocks.sort_by_key(|x| x.header.depth);
     // note: we know that there is exactly one genesis from shard validation
@@ -78,7 +74,6 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std
     for block in &blocks[1..]{ // skip the first - genesis
         let mut block = block.to_owned();
         let miner = block.header.miner_address.unwrap();
-        let tail = block.header.tail;
         let head = block.header;
         let hash = block.hash.unwrap();
         loop{ // we need to keep going until it passes full validation
@@ -89,7 +84,7 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std
                 }
                 _ => {
                     // we need to update the reputations
-                    settle_reputations(&mut reputations, miner, &tail, head);
+                    settle_reputations(&mut reputations, miner, head);
                     break;
                 }
             }
@@ -100,7 +95,7 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std
 
 /// This function takes a header and a tail of a block, as well as its miner.
 /// Then, it updates a reputations map to reflect new knowledge
-fn settle_reputations(reputations: &mut HashMap<StdByteArray, NodeHistory>, miner: StdByteArray, tail: &BlockTail, head: BlockHeader){
+fn settle_reputations(reputations: &mut HashMap<StdByteArray, NodeHistory>, miner: StdByteArray, head: BlockHeader){
     // passed validation - we need to record reputations
     match reputations.get_mut(&miner){
         Some(history) => {
@@ -114,16 +109,17 @@ fn settle_reputations(reputations: &mut HashMap<StdByteArray, NodeHistory>, mine
         }
     }
     // now each signature gets an award
-    for stamper in tail.get_stampers(){
-        match reputations.get_mut(&stamper){
+    for stamper in head.tail.iter_stamps(){
+        match reputations.get_mut(&stamper.address){
             Some(history) => {
                 // update the history
-                history.settle_tail(tail, head);
+                history.settle_tail(&head.tail, head);
             }
             None => {
                 // create new history
-                reputations.insert(miner, NodeHistory::new(stamper, vec![], vec![], 0));
-                reputations.get_mut(&miner).unwrap().settle_tail(tail, head);
+                reputations.insert(stamper.address, NodeHistory::new(stamper.address, vec![], vec![], 0));
+                let history = reputations.get_mut(&stamper.address).unwrap();
+                history.settle_tail(&head.tail, head);
             }
         }
     }
@@ -140,12 +136,11 @@ pub async fn dicover_chain(mut node: Node) -> Result<(), std::io::Error> {
         // send the chain shard request to the peer
         let response = peer.communicate(&Message::ChainShardRequest, &(node.clone().into())).await?;
         if let Message::ChainShardResponse(shard) = response {
-            // add the shard to the chain
-               
-            // TODO perhaps blacklist the peer
+            // add the shard to the chain   
             if shard.validate(){
                 chain_shards.push(shard);
             }
+            // TODO perhaps blacklist the peer
         }  
 
     }
@@ -275,7 +270,7 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
                 let tail = block.header.tail;
                 let head = block.header;
                 let mut reputations = node.inner.reputations.lock().await;
-                settle_reputations(&mut reputations, miner, &tail, head);
+                settle_reputations(&mut reputations, miner, head);
             }
         }
     }

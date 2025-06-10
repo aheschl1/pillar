@@ -173,17 +173,17 @@ impl Node {
     /// when called, launches a new thread that listens for incoming connections
     pub async fn serve(&self) {
         // spawn a new thread to handle the connection
-        log::info!("Node is starting up on {}:{}", self.ip_address, self.port);
+        println!("Node is starting up on {}:{}", self.ip_address, self.port);
         let state = self.inner.state.lock().await.clone();
         let handle = match state {
             NodeState::ICD => {
-                log::info!("Starting ICD.");
+                println!("Starting ICD.");
                 *self.inner.state.lock().await = NodeState::ChainLoading; // update state to chain loading
                 let handle = tokio::spawn(dicover_chain(self.clone()));
                 Some(handle)
             },
             NodeState::ChainOutdated => {
-                log::info!("Node has an outdated chain. Starting sync.");
+                println!("Node has an outdated chain. Starting sync.");
                 *self.inner.state.lock().await = NodeState::ChainSyncing; // update state to chain syncing
                 let handle = tokio::spawn(sync_chain(self.clone()));
                 Some(handle)
@@ -198,13 +198,13 @@ impl Node {
                 let result = handle.await;
                 match result {
                     Ok(Ok(_)) => {
-                        log::info!("Node started successfully.");
+                        println!("Node started successfully.");
                         let mut state = self_clone.inner.state.lock().await;
                         // update to serving
                         *state = NodeState::Serving;
                     },
-                    Ok(Err(e)) => log::error!("Node failed to start: {:?}", e),
-                    Err(e) => log::error!("Failed to start node: {:?}", e),
+                    Ok(Err(e)) => println!("Node failed to start: {:?}", e),
+                    Err(e) => println!("Failed to start node: {:?}", e),
                 }
 
             });
@@ -535,7 +535,7 @@ impl Broadcaster for Node {
 #[cfg(test)]
 mod tests{
 
-    use crate::{crypto::{hashing::{DefaultHash, HashFunction, Hashable}, signing::{DefaultSigner, SigFunction, SigVerFunction, Signable}}, nodes::{messages::Message, miner::{Miner, MAX_TRANSACTION_WAIT_TIME}, peer::Peer}, persistence::database::{Datastore, GenesisDatastore}, primitives::{pool::MinerPool, transaction::Transaction}, protocol::{peers::discover_peers, transactions::submit_transaction}};
+    use crate::{crypto::{hashing::{DefaultHash, HashFunction, Hashable}, signing::{DefaultSigner, SigFunction, SigVerFunction, Signable}}, nodes::{messages::Message, miner::{Miner, MAX_TRANSACTION_WAIT_TIME}, node::StdByteArray, peer::Peer}, persistence::database::{Datastore, EmptyDatastore, GenesisDatastore}, primitives::{pool::MinerPool, transaction::Transaction}, protocol::{peers::discover_peers, transactions::submit_transaction}};
 
     use super::Node;
     
@@ -979,45 +979,13 @@ mod tests{
 
     }
 
-    #[tokio::test]
-    async fn test_transaction_and_block_proposal(){
-
-        let mut signing_a = DefaultSigner::generate_random();
-        let public_key_a = signing_a.get_verifying_function().to_bytes();
-        let private_key_a = signing_a.to_bytes();
-
-        let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 9));
-        let port_a = 8020;
-
-        let signing_b = DefaultSigner::generate_random();
-        let public_key_b = signing_b.get_verifying_function().to_bytes();
-        let private_key_b = signing_b.to_bytes();
-
-        let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 8));
-        let port_b = 8021;
-
-        let datastore = GenesisDatastore::new();
-
-        let mut node_a = Node::new(
-            public_key_a,
-            private_key_a,
-            ip_address_a,
-            port_a,
-            vec![Peer::new(public_key_b, ip_address_b, port_b)],
-            Some(Arc::new(datastore.clone())),
-            None,
-        );
-
-        let node_b = Node::new(
-            public_key_b,
-            private_key_b,
-            ip_address_b,
-            port_b,
-            vec![],
-            Some(Arc::new(datastore.clone())),
-            Some(MinerPool::new()), // we will mine from this node
-        );
-
+    async fn inner_test_transaction_and_block_proposal(
+        node_a: &mut Node,
+        node_b: &Node,
+        signing_a: &mut DefaultSigner,
+        public_key_b: StdByteArray,
+        public_key_a: StdByteArray
+    ){
         let miner_b = Miner::new(node_b.clone()).unwrap();
 
         miner_b.serve().await;
@@ -1028,7 +996,7 @@ mod tests{
         // Node A sends a peer request to Node B
         println!("Node A starting discovery");
 
-        discover_peers(&mut node_a).await.unwrap();
+        discover_peers(node_a).await.unwrap();
         println!("Node A discovered Node B");
 
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
@@ -1056,9 +1024,9 @@ mod tests{
             .as_secs();
 
         let result = submit_transaction(
-            &mut node_a, 
+            node_a, 
             &mut sender_account.lock().unwrap(), 
-            &mut signing_a, 
+            signing_a, 
             public_key_b, 
             0, 
             false,
@@ -1079,7 +1047,7 @@ mod tests{
             0, 
             &mut DefaultHash::new()
         );
-        transaction.sign(&mut signing_a);
+        transaction.sign(signing_a);
 
         let message_to_hash = Message::TransactionBroadcast(transaction);
 
@@ -1175,7 +1143,282 @@ mod tests{
         assert!(a_a == b_a);
         assert!(a_b == b_b);
         assert!(a_b > a_a);
+    }
 
+    #[tokio::test]
+    async fn test_transaction_and_block_proposal(){
+
+        let mut signing_a = DefaultSigner::generate_random();
+        let public_key_a = signing_a.get_verifying_function().to_bytes();
+        let private_key_a = signing_a.to_bytes();
+
+        let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 9));
+        let port_a = 8020;
+
+        let signing_b = DefaultSigner::generate_random();
+        let public_key_b = signing_b.get_verifying_function().to_bytes();
+        let private_key_b = signing_b.to_bytes();
+
+        let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 8));
+        let port_b = 8021;
+
+        let datastore = GenesisDatastore::new();
+
+        let mut node_a = Node::new(
+            public_key_a,
+            private_key_a,
+            ip_address_a,
+            port_a,
+            vec![Peer::new(public_key_b, ip_address_b, port_b)],
+            Some(Arc::new(datastore.clone())),
+            None,
+        );
+
+        let node_b = Node::new(
+            public_key_b,
+            private_key_b,
+            ip_address_b,
+            port_b,
+            vec![],
+            Some(Arc::new(datastore.clone())),
+            Some(MinerPool::new()), // we will mine from this node
+        );
+
+        inner_test_transaction_and_block_proposal(
+            &mut node_a,
+            &node_b,
+            &mut signing_a,
+            public_key_b,
+            public_key_a
+        ).await;
+
+    }
+
+
+    #[tokio::test]
+    async fn test_double_transaction(){
+
+        let mut signing_a = DefaultSigner::generate_random();
+        let public_key_a = signing_a.get_verifying_function().to_bytes();
+        let private_key_a = signing_a.to_bytes();
+        let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 3));
+        let port_a = 8020;
+        let mut signing_b = DefaultSigner::generate_random();
+        let public_key_b = signing_b.get_verifying_function().to_bytes();
+        let private_key_b = signing_b.to_bytes();
+        let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 4));
+        let port_b = 8021;
+        let datastore = GenesisDatastore::new();
+        let mut node_a = Node::new(
+            public_key_a,
+            private_key_a,
+            ip_address_a,
+            port_a,
+            vec![Peer::new(public_key_b, ip_address_b, port_b)],
+            Some(Arc::new(datastore.clone())),
+            None,
+        );
+        let mut node_b = Node::new(
+            public_key_b,
+            private_key_b,
+            ip_address_b,
+            port_b,
+            vec![],
+            Some(Arc::new(datastore.clone())),
+            Some(MinerPool::new()), // we will mine from this node
+        );
+
+        inner_test_transaction_and_block_proposal(
+            &mut node_a,
+            &node_b,
+            &mut signing_a,
+            public_key_b,
+            public_key_a
+        ).await;
+
+        // one transaction has passed, now we will try to make another one
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_secs();
+
+        let account = node_b.inner.chain.lock().await.as_mut().unwrap().account_manager.get_account(&public_key_b).unwrap();
+        let result = submit_transaction(
+            &mut node_b, 
+            &mut account.lock().unwrap(), 
+            &mut signing_b,
+            public_key_a,
+            0,
+            false, 
+            Some(timestamp)
+        ).await.unwrap();
+        assert!(result.is_none());
+        // at this point, there should be 8 total broadcasts each - after a pause
+        tokio::time::sleep(std::time::Duration::from_secs(MAX_TRANSACTION_WAIT_TIME+5)).await;
+        let already_b = node_b.inner.broadcasted_already.lock().await;
+        assert!(already_b.len() == 8);
+        drop(already_b);
+        let already_b = node_a.inner.broadcasted_already.lock().await;
+        assert!(already_b.len() == 8);
+        drop(already_b);
+        
+        // now, make sure the chains are length 2
+        let chain_b = node_b.inner.chain.lock().await;
+        assert!(chain_b.as_ref().unwrap().depth == 2); // 3 blocks
+        assert!(chain_b.as_ref().unwrap().blocks.len() == 3); // 3 blocks
+        drop(chain_b);
+        // assert the block is in the chain of node_a
+        let chain_a = node_a.inner.chain.lock().await;
+        assert!(chain_a.as_ref().unwrap().depth == 2); // 3 blocks
+        assert!(chain_a.as_ref().unwrap().blocks.len() == 3); // 3 blocks
+        drop(chain_a);
+        // check reputations.
+        let reputations_b = node_b.inner.reputations.lock().await;
+        assert!(reputations_b.contains_key(&public_key_a));
+        assert!(reputations_b.contains_key(&public_key_b));
+        let history_a = reputations_b.get(&public_key_a).unwrap();
+        assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
+        assert_eq!(history_a.blocks_stamped.len(), 2); // 2 blocks stamped
+        let b_a = history_a.compute_reputation();
+        let history_b = reputations_b.get(&public_key_b).unwrap();
+        assert_eq!(history_b.blocks_mined.len(), 2); // 2 blocks mined
+        assert_eq!(history_b.blocks_stamped.len(), 2); // 2 blocks stamped
+        let b_b = history_b.compute_reputation();
+        drop(reputations_b);
+        let reputations_a = node_a.inner.reputations.lock().await;
+        assert!(reputations_a.contains_key(&public_key_a));
+        assert!(reputations_a.contains_key(&public_key_b));
+        let history_a = reputations_a.get(&public_key_a).unwrap();
+        assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
+        assert_eq!(history_a.blocks_stamped.len(), 2); // 2 blocks stamped
+        let a_a = history_a.compute_reputation();
+        let history_b = reputations_a.get(&public_key_b).unwrap();
+        assert_eq!(history_b.blocks_mined.len(), 2); // 2 blocks mined
+        assert_eq!(history_b.blocks_stamped.len(), 2); // 2 blocks stamped
+        let a_b = history_b.compute_reputation();
+        drop(reputations_a);
+        assert!(a_a == b_a);
+        assert!(a_b == b_b);
+        assert!(a_b > a_a); // B has more reputation than A
+    }
+
+    #[tokio::test]
+    async fn test_new_node_online(){
+
+        let mut signing_a = DefaultSigner::generate_random();
+        let public_key_a = signing_a.get_verifying_function().to_bytes();
+        let private_key_a = signing_a.to_bytes();
+        let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 3));
+        let port_a = 8020;
+        let signing_b = DefaultSigner::generate_random();
+        let public_key_b = signing_b.get_verifying_function().to_bytes();
+        let private_key_b = signing_b.to_bytes();
+        let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 4));
+        let port_b = 8021;
+        let datastore = GenesisDatastore::new();
+        let mut node_a = Node::new(
+            public_key_a,
+            private_key_a,
+            ip_address_a,
+            port_a,
+            vec![Peer::new(public_key_b, ip_address_b, port_b)],
+            Some(Arc::new(datastore.clone())),
+            None,
+        );
+        let node_b = Node::new(
+            public_key_b,
+            private_key_b,
+            ip_address_b,
+            port_b,
+            vec![],
+            Some(Arc::new(datastore.clone())),
+            Some(MinerPool::new()), // we will mine from this node
+        );
+
+        inner_test_transaction_and_block_proposal(
+            &mut node_a,
+            &node_b,
+            &mut signing_a,
+            public_key_b,
+            public_key_a
+        ).await;
+
+        // new node - node c
+        let mut signing_c = DefaultSigner::generate_random();
+        let public_key_c = signing_c.get_verifying_function().to_bytes();
+        let private_key_c = signing_c.to_bytes();
+        let ip_address_c = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 5));
+        let port_c = 8022;
+        let mut node_c = Node::new(
+            public_key_c,
+            private_key_c,
+            ip_address_c,
+            port_c,
+            vec![Peer::new(public_key_a, ip_address_a, port_a)],
+            Some(Arc::new(EmptyDatastore::new())), // empty datastore, needs ICD
+            None,
+        );
+        // node c serves
+        assert!(node_c.inner.state.lock().await.clone() == super::NodeState::ICD);
+        node_c.serve().await;
+        // now, the node should launch chain discovery
+        assert!(node_c.inner.state.lock().await.clone() == super::NodeState::ChainLoading);
+        // wait for a bit
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        // check if node c knows about node a and b
+        let peers_c = node_c.inner.peers.lock().await;
+        assert!(peers_c.contains_key(&public_key_a));
+        assert!(peers_c.contains_key(&public_key_b));
+        assert!(!peers_c.contains_key(&public_key_c)); // node c does not know about itself
+        drop(peers_c);
+        // make sure chain is length 3
+        let chain_c = node_c.inner.chain.lock().await;
+        assert!(chain_c.as_ref().unwrap().depth == 1); // 2 blocks
+        assert!(chain_c.as_ref().unwrap().blocks.len() == 2); // 3 blocks
+        drop(chain_c);
+        assert!(node_c.inner.state.lock().await.clone() == super::NodeState::Serving);
+        // make sure reputations are correct
+        let reputations_c = node_c.inner.reputations.lock().await;
+        assert!(reputations_c.contains_key(&public_key_a));
+        assert!(reputations_c.contains_key(&public_key_b));
+        let history_a = reputations_c.get(&public_key_a).unwrap();
+        assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
+        assert_eq!(history_a.blocks_stamped.len(), 1); // 2 blocks stamped
+        let c_a = history_a.compute_reputation();
+        let history_b = reputations_c.get(&public_key_b).unwrap();
+        assert_eq!(history_b.blocks_mined.len(), 1); // 2 blocks mined
+        assert_eq!(history_b.blocks_stamped.len(), 1); // 2 blocks stamped
+        let c_b = history_b.compute_reputation();
+        drop(reputations_c);
+        let reputations_a = node_a.inner.reputations.lock().await;
+        assert!(reputations_a.contains_key(&public_key_a));
+        assert!(reputations_a.contains_key(&public_key_b));
+        let history_a = reputations_a.get(&public_key_a).unwrap();
+        assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
+        assert_eq!(history_a.blocks_stamped.len(), 1); // 2 blocks stamped
+        let a_a = history_a.compute_reputation();
+        let history_b = reputations_a.get(&public_key_b).unwrap();
+        assert_eq!(history_b.blocks_mined.len(), 1); // 2 blocks mined
+        assert_eq!(history_b.blocks_stamped.len(), 1); // 2 blocks stamped
+        let a_b = history_b.compute_reputation();
+        drop(reputations_a);
+        let reputations_b = node_b.inner.reputations.lock().await;
+        assert!(reputations_b.contains_key(&public_key_a));
+        assert!(reputations_b.contains_key(&public_key_b));
+        let history_a = reputations_b.get(&public_key_a).unwrap();
+        assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
+        assert_eq!(history_a.blocks_stamped.len(), 1); // 2 blocks stamped
+        let b_a = history_a.compute_reputation();
+        let history_b = reputations_b.get(&public_key_b).unwrap();
+        assert_eq!(history_b.blocks_mined.len(), 1); // 2 blocks mined
+        assert_eq!(history_b.blocks_stamped.len(), 1); // 2 blocks stamped
+        let b_b = history_b.compute_reputation();
+        drop(reputations_b);
+        assert!(a_a == c_a);
+        assert!(a_b == c_b);
+        assert!(b_a == c_a);
+        assert!(b_b == c_b);
+        assert!(c_b > c_a); // C has more reputation than A
     }
         
 }

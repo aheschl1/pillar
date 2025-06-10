@@ -2,6 +2,9 @@
 /// get more difficult after every 500 blocks
 /// the schedule is 4 + 2*(depth // 500)
 pub fn get_difficulty_from_depth(depth: u64) -> u64{
+    if depth == 0{
+        return 0; // genesis block
+    }
     4+2*(depth/500)
 }
 
@@ -11,7 +14,7 @@ mod test{
 
     #[test]
     fn test_initial(){
-        for i in 0..499{
+        for i in 1..499{
             assert!(get_difficulty_from_depth(i) == 4);
         }
     }

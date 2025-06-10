@@ -19,8 +19,8 @@ impl ChainShard{
     /// ensures the hashs are good, and the depths work
     pub fn validate(&self) -> bool{
         let mut genesis_found = false;
-        // validate header
-        for (declared_hash, header) in self.headers.iter(){
+
+        for (declared_hash, header) in &self.headers {
             if header.depth == 0{
                 if genesis_found{
                     return false;
@@ -44,7 +44,7 @@ impl ChainShard{
             let previous_block = self.headers.get(&previous_hash);
             let valid = match previous_block {
                 Some(last_block) => (last_block.depth + 1 == header.depth) && (header.timestamp >= last_block.timestamp),
-                None => false
+                None => header.depth == 0 // genesis block has no previous hash
             };
             if !valid {
                 return false;
