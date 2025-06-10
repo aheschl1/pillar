@@ -1632,12 +1632,12 @@ mod tests{
         let public_key_a = signing_a.get_verifying_function().to_bytes();
         let private_key_a = signing_a.to_bytes();
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 8));
-        let port_a = 8008;
+        let port_a = 7999;
         let signing_b = DefaultSigner::generate_random();
         let public_key_b = signing_b.get_verifying_function().to_bytes();
         let private_key_b = signing_b.to_bytes();
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 9));
-        let port_b = 8009;
+        let port_b = 7998;
         let datastore = GenesisDatastore::new();
         let mut node_a = Node::new(
             public_key_a,
@@ -1662,7 +1662,7 @@ mod tests{
         let public_key_c = signing_c.get_verifying_function().to_bytes();
         let private_key_c = signing_c.to_bytes();
         let ip_address_c = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 5));
-        let port_c = 8010;
+        let port_c = 7997;
         let mut node_c = Node::new(
             public_key_c,
             private_key_c,
