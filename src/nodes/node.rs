@@ -1625,5 +1625,159 @@ mod tests{
         // now, node A should be in serving state
         assert!(node_a.inner.state.lock().await.clone() == super::NodeState::Serving);
     }
-        
+    
+    #[tokio::test]
+    async fn test_sync_two_blocks(){
+        let mut signing_a = DefaultSigner::generate_random();
+        let public_key_a = signing_a.get_verifying_function().to_bytes();
+        let private_key_a = signing_a.to_bytes();
+        let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 3));
+        let port_a = 8008;
+        let signing_b = DefaultSigner::generate_random();
+        let public_key_b = signing_b.get_verifying_function().to_bytes();
+        let private_key_b = signing_b.to_bytes();
+        let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 4));
+        let port_b = 8009;
+        let datastore = GenesisDatastore::new();
+        let mut node_a = Node::new(
+            public_key_a,
+            private_key_a,
+            ip_address_a,
+            port_a,
+            vec![Peer::new(public_key_b, ip_address_b, port_b)],
+            Some(Arc::new(datastore.clone())),
+            None,
+        );
+        let mut node_b = Node::new(
+            public_key_b,
+            private_key_b,
+            ip_address_b,
+            port_b,
+            vec![],
+            Some(Arc::new(datastore.clone())),
+            Some(MinerPool::new()), // we will mine from this node
+        );
+        // node c
+        let mut signing_c = DefaultSigner::generate_random();
+        let public_key_c = signing_c.get_verifying_function().to_bytes();
+        let private_key_c = signing_c.to_bytes();
+        let ip_address_c = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 5));
+        let port_c = 8010;
+        let mut node_c = Node::new(
+            public_key_c,
+            private_key_c,
+            ip_address_c,
+            port_c,
+            vec![Peer::new(public_key_a, ip_address_a, port_a)],
+            Some(Arc::new(EmptyDatastore::new())), // empty datastore, needs ICD
+            None,
+        );
+
+        inner_test_new_node_online(
+            &mut node_a,
+            &mut node_b,
+            &mut node_c,
+            &mut signing_a,
+            public_key_b,
+            public_key_a,
+            public_key_c
+        ).await;
+        // now, let A go offline. C will submit a transaction.
+        println!("Stopping node A - expect ConnetionRefused errors");
+        node_a.stop().await;
+        // pause a sec - TODO remove this after fixing the join on stoping
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        // now, C will submit a transaction to B
+        let acc = node_c.inner.chain.lock().await.as_mut().unwrap().account_manager.get_or_create_account(&public_key_c);
+        let _ = submit_transaction(
+            &mut node_c, 
+            &mut acc.lock().unwrap(), 
+            &mut signing_c,
+            public_key_b,
+            0,
+            false, 
+            None
+        ).await.unwrap();
+        // pause a sec
+        tokio::time::sleep(std::time::Duration::from_secs(15)).await; // time to settle, and give up waiting for full block
+        // now both shold have 3 blocks
+        let chain_b = node_b.inner.chain.lock().await;
+        assert!(chain_b.as_ref().unwrap().depth == 2); // 3 blocks
+        assert!(chain_b.as_ref().unwrap().blocks.len() == 3); // 3 blocks
+        drop(chain_b);
+        // now c 
+        let chain_c = node_c.inner.chain.lock().await;
+        assert!(chain_c.as_ref().unwrap().depth == 2); // 3 blocks
+        assert!(chain_c.as_ref().unwrap().blocks.len() == 3); // 3 blocks
+        drop(chain_c);
+        // DO A SECOND TRANSACTION TO GET 2 BLOCKS OUTDATED
+        let _ = submit_transaction(
+            &mut node_c, 
+            &mut acc.lock().unwrap(), 
+            &mut signing_c,
+            public_key_b,
+            0,
+            false, 
+            None
+        ).await.unwrap();
+        // pause a sec
+        tokio::time::sleep(std::time::Duration::from_secs(15)).await; // time to settle, and give up waiting for full block
+        // now both shold have 4 blocks
+        let chain_b = node_b.inner.chain.lock().await;
+        assert!(chain_b.as_ref().unwrap().depth == 3); // 4 blocks
+        assert!(chain_b.as_ref().unwrap().blocks.len() == 4); // 4 blocks
+        drop(chain_b);
+        // now c
+        let chain_c = node_c.inner.chain.lock().await;
+        assert!(chain_c.as_ref().unwrap().depth == 3); // 4 blocks
+        assert!(chain_c.as_ref().unwrap().blocks.len() == 4); // 4 blocks
+        drop(chain_c);
+        // put A back online
+        println!("Restarting node A");
+        node_a.serve().await;
+        assert!(node_a.inner.state.lock().await.clone() == super::NodeState::ChainSyncing);
+        // wait for a bit
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        // check if node a knows about node b and c
+        let peers_a = node_a.inner.peers.lock().await;
+        assert!(peers_a.contains_key(&public_key_b));
+        assert!(peers_a.contains_key(&public_key_c));
+        drop(peers_a);
+        // now check that it collected the block
+        let chain_a = node_a.inner.chain.lock().await;
+        assert_eq!(chain_a.as_ref().unwrap().depth, 3); // 3 blocks
+        assert_eq!(chain_a.as_ref().unwrap().blocks.len(), 4); // 3 blocks
+        // double check reputations
+        let reputations_a = node_a.inner.reputations.lock().await;
+        assert!(reputations_a.contains_key(&public_key_a));
+        assert!(reputations_a.contains_key(&public_key_b));
+        assert!(reputations_a.contains_key(&public_key_c));
+        let history_c = reputations_a.get(&public_key_c).unwrap();
+        assert_eq!(history_c.blocks_mined.len(), 0); // 0 blocks mined
+        assert_eq!(history_c.blocks_stamped.len(), 2); // 2 blocks stamped
+        let a_c = history_c.compute_reputation();
+        let history_b = reputations_a.get(&public_key_b).unwrap();
+        assert_eq!(history_b.blocks_mined.len(), 3); // 2 blocks mined
+        assert_eq!(history_b.blocks_stamped.len(), 3); // 2 blocks stamped
+        let a_b = history_b.compute_reputation();
+        // now check against C
+        let reputations_c = node_c.inner.reputations.lock().await;
+        assert!(reputations_c.contains_key(&public_key_a));
+        assert!(reputations_c.contains_key(&public_key_b));
+        assert!(reputations_c.contains_key(&public_key_c));
+        let history_c = reputations_c.get(&public_key_c).unwrap();
+        assert_eq!(history_c.blocks_mined.len(), 0); // 0 blocks mined
+        assert_eq!(history_c.blocks_stamped.len(), 2); // 2 blocks stamped
+        let c_c = history_c.compute_reputation();
+        let history_b = reputations_c.get(&public_key_b).unwrap();
+        assert_eq!(history_b.blocks_mined.len(), 3); // 2 blocks mined
+        assert_eq!(history_b.blocks_stamped.len(), 3); // 2 blocks stamped
+        let c_b = history_b.compute_reputation();
+        drop(reputations_c);
+        assert!(a_c == c_c);
+        assert!(a_b == c_b);
+        assert!(c_b > c_c); // C has more reputation than A
+        // now, node A should be in serving state
+        assert!(node_a.inner.state.lock().await.clone() == super::NodeState::Serving);
+    }
 }

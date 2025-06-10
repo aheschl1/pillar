@@ -16,7 +16,7 @@ use super::TrimmableChain;
 pub struct Chain {
     /// The blocks in the chain.
     pub blocks: HashMap<StdByteArray, Block>,
-    /// header cache
+    /// header cache TODO maybe eliminate this
     pub headers: HashMap<StdByteArray, BlockHeader>,
     /// The current depth of the tallet leaf.
     /// one block is depth 0
