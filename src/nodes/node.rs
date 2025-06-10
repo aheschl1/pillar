@@ -1592,6 +1592,38 @@ mod tests{
         let chain_a = node_a.inner.chain.lock().await;
         assert_eq!(chain_a.as_ref().unwrap().depth, 2); // 3 blocks
         assert_eq!(chain_a.as_ref().unwrap().blocks.len(), 3); // 3 blocks
+        // double check reputations
+        let reputations_a = node_a.inner.reputations.lock().await;
+        assert!(reputations_a.contains_key(&public_key_a));
+        assert!(reputations_a.contains_key(&public_key_b));
+        assert!(reputations_a.contains_key(&public_key_c));
+        let history_c = reputations_a.get(&public_key_c).unwrap();
+        assert_eq!(history_c.blocks_mined.len(), 0); // 0 blocks mined
+        assert_eq!(history_c.blocks_stamped.len(), 1); // 2 blocks stamped
+        let a_c = history_c.compute_reputation();
+        let history_b = reputations_a.get(&public_key_b).unwrap();
+        assert_eq!(history_b.blocks_mined.len(), 2); // 2 blocks mined
+        assert_eq!(history_b.blocks_stamped.len(), 2); // 2 blocks stamped
+        let a_b = history_b.compute_reputation();
+        // now check against C
+        let reputations_c = node_c.inner.reputations.lock().await;
+        assert!(reputations_c.contains_key(&public_key_a));
+        assert!(reputations_c.contains_key(&public_key_b));
+        assert!(reputations_c.contains_key(&public_key_c));
+        let history_c = reputations_c.get(&public_key_c).unwrap();
+        assert_eq!(history_c.blocks_mined.len(), 0); // 0 blocks mined
+        assert_eq!(history_c.blocks_stamped.len(), 1); // 2 blocks stamped
+        let c_c = history_c.compute_reputation();
+        let history_b = reputations_c.get(&public_key_b).unwrap();
+        assert_eq!(history_b.blocks_mined.len(), 2); // 2 blocks mined
+        assert_eq!(history_b.blocks_stamped.len(), 2); // 2 blocks stamped
+        let c_b = history_b.compute_reputation();
+        drop(reputations_c);
+        assert!(a_c == c_c);
+        assert!(a_b == c_b);
+        assert!(c_b > c_c); // C has more reputation than A
+        // now, node A should be in serving state
+        assert!(node_a.inner.state.lock().await.clone() == super::NodeState::Serving);
     }
         
 }
