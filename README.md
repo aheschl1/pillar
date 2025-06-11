@@ -13,4 +13,4 @@ Currently in heavy development.
 
 The flow can be rougly seen in the following image.
 
-![Flow](./net_flow.png)
+![Flow](./figures/net_flow.png)
