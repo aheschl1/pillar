@@ -44,7 +44,9 @@ pub async fn submit_transaction<const K: usize, const P: usize>(
         &mut DefaultHash::new()
     );
     // sign with the signer
+
     transaction.sign(signer);
+
     // broadcast and wait for peer responses
     let message = Message::TransactionBroadcast(transaction);
     // we do not want this to wait in broadcast queue, so we will lock it out immediately

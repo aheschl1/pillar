@@ -549,7 +549,7 @@ impl Broadcaster for Node {
     async fn broadcast(&self, message: &Message) -> Result<Vec<Message>, std::io::Error> {
         // send a message to all peers
         let mut responses = Vec::new();
-        let mut peers = self.inner.peers.lock().await;
+        let mut peers = self.inner.peers.lock().await.clone(); // do not hold lock
         for (_, peer) in peers.iter_mut(){
             let response = peer.communicate(message, &self.into()).await;
             if let Err(e) = response {
@@ -1779,5 +1779,94 @@ mod tests{
         assert!(c_b > c_c); // C has more reputation than A
         // now, node A should be in serving state
         assert!(node_a.inner.state.lock().await.clone() == super::NodeState::Serving);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_transaction_one_block(){
+        let mut signing_a = DefaultSigner::generate_random();
+        let public_key_a = signing_a.get_verifying_function().to_bytes();
+        let private_key_a = signing_a.to_bytes();
+        let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 8));
+        let port_a = 7997;
+        let signing_b = DefaultSigner::generate_random();
+        let public_key_b = signing_b.get_verifying_function().to_bytes();
+        let private_key_b = signing_b.to_bytes();
+        let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 9));
+        let port_b = 7996;
+        let datastore = GenesisDatastore::new();
+        let mut node_a = Node::new(
+            public_key_a,
+            private_key_a,
+            ip_address_a,
+            port_a,
+            vec![Peer::new(public_key_b, ip_address_b, port_b)],
+            Some(Arc::new(datastore.clone())),
+            None,
+        );
+        let node_b = Node::new(
+            public_key_b,
+            private_key_b,
+            ip_address_b,
+            port_b,
+            vec![],
+            Some(Arc::new(datastore.clone())),
+            Some(MinerPool::new()), // we will mine from this node
+        );
+
+        let mut miner_b = Miner::new(node_b.clone()).unwrap();
+
+        miner_b.serve().await;
+        node_a.serve().await;
+
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await; // wait for the nodes to connect
+        // check states
+        assert!(node_a.inner.state.lock().await.clone() == super::NodeState::Serving);
+        assert!(node_b.inner.state.lock().await.clone() == super::NodeState::Serving);
+        let acc = node_a.inner.chain.lock().await.as_mut().unwrap().account_manager.get_or_create_account(&public_key_a);
+        println!("Submitting multiple transactions from A to B");
+        submit_transaction(
+            &mut node_a, 
+            &mut acc.lock().unwrap(),
+            &mut signing_a,
+            public_key_b,
+            0,
+            false,
+            None
+        ).await.unwrap(); 
+        println!("Submitting multiple transactions from A to B");
+        submit_transaction(
+            &mut node_a, 
+            &mut acc.lock().unwrap(),
+            &mut signing_a,
+            public_key_b,
+            0,
+            false,
+            None
+        ).await.unwrap();
+        drop(acc);
+        println!("waiting on transactions to be processed");
+        tokio::time::sleep(std::time::Duration::from_secs(2*MAX_TRANSACTION_WAIT_TIME)).await; // wait for the transactions to be processed
+        println!("transactions processed, checking the chain");
+        // now, lets check that a is in bs peer list
+        let peers_b = node_b.inner.peers.lock().await;
+        assert!(peers_b.contains_key(&public_key_a));
+        drop(peers_b);
+        // now, grab the chains - check depth
+        let chain_b = node_b.inner.chain.lock().await;
+        assert_eq!(chain_b.as_ref().unwrap().depth, 1); // 2 blocks
+        assert_eq!(chain_b.as_ref().unwrap().blocks.len(), 2); // 3 blocks
+        // check that the leaf has 2 transactions
+        let chain_b = chain_b.as_ref().unwrap();
+        let leaf = chain_b.blocks.get(&chain_b.deepest_hash).unwrap();
+        assert_eq!(leaf.transactions.len(), 2); // 2 transactions
+        // now, check the chain of a
+        let chain_a = node_a.inner.chain.lock().await;
+        assert_eq!(chain_a.as_ref().unwrap().depth, 1); // 3 blocks
+        assert_eq!(chain_a.as_ref().unwrap().blocks.len(), 2); // 3 blocks
+        // check that the leaf has 2 transactions
+        let chain_a = chain_a.as_ref().unwrap();
+        let leaf = chain_a.blocks.get(&chain_a.deepest_hash).unwrap();
+        assert_eq!(leaf.transactions.len(), 2); // 2 transactions
+
     }
 }

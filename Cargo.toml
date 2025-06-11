@@ -3,6 +3,10 @@ name = "votingchain"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "votingchain"
+path = "src/lib.rs"
+
 [dependencies]
 crypto = "0.5.1"
 ed25519 = "2.2.3"
