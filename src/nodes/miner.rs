@@ -107,7 +107,12 @@ async fn monitor_block_pool(miner: Miner) {
             Some(mut block) => {
                 block.header.miner_address = Some(miner.node.inner.public_key);
                 block.header.tail.clean(&block.header.clone()); // removes broken signatures
-                mine(&mut block, miner.node.inner.public_key, DefaultHash::new()).await;
+                mine(
+                    &mut block, 
+                    miner.node.inner.public_key,
+                    Some(miner.node.miner_pool.as_ref().unwrap().mine_abort_receiver.clone()),
+                    DefaultHash::new()
+                ).await;
                 // after mining the block, just transmit
                 // TODO this doesnt fully belong here - also handle broadcast error
                 let _ = miner.node.broadcast(&Message::BlockTransmission(block)).await;
@@ -164,7 +169,7 @@ mod test{
             1, &mut hasher);
 
         // mine the block
-        mine(&mut block, miner.node.inner.public_key, hasher).await;
+        mine(&mut block, miner.node.inner.public_key, None, hasher).await;
         
         assert!(block.header.nonce > 0);
         assert!(block.header.miner_address.is_some());

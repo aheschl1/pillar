@@ -15,6 +15,9 @@ pub struct MinerPool {
     // ready blocks
     block_ready_sender: Sender<Block>,
     block_ready_receiver: Receiver<Block>,
+    // mine abort signal
+    pub mine_abort_sender: Sender<u64>,
+    pub mine_abort_receiver: Receiver<u64>,
 }
 
 /// Transaction pool for now is just a vector of transactions
@@ -25,6 +28,7 @@ impl MinerPool{
         let (transaction_sender, transaction_receiver) = flume::unbounded();
         let (block_sender, block_receiver) = flume::unbounded();
         let (block_ready_sender, block_ready_receiver) = flume::unbounded();
+        let (mine_abort_sender, mine_abort_receiver) = flume::unbounded();
         MinerPool {
             transaction_receiver,
             transaction_sender,
@@ -32,6 +36,8 @@ impl MinerPool{
             block_poroposition_receiver: block_receiver,
             block_ready_sender,
             block_ready_receiver,
+            mine_abort_sender,
+            mine_abort_receiver,
         }
     }
 

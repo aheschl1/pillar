@@ -324,7 +324,7 @@ mod tests {
             &mut DefaultHash::new()
         );
         chain.account_manager.add_account(Account::new(sender, 0));
-        mine(&mut block, sender, DefaultHash::new()).await;
+        mine(&mut block, sender, None, DefaultHash::new()).await;
         let result = chain.add_new_block(block);
         assert!(result.is_ok());
     }
@@ -381,7 +381,7 @@ mod tests {
                 depth,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, DefaultHash::new()).await;
+            mine(&mut block, sender, None, DefaultHash::new()).await;
             parent_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -401,7 +401,7 @@ mod tests {
             1,
             &mut DefaultHash::new(),
         );
-        mine(&mut fork_block, sender, DefaultHash::new()).await;
+        mine(&mut fork_block, sender, None, DefaultHash::new()).await;
         chain.add_new_block(fork_block.clone()).unwrap();
 
         assert!(chain.blocks.contains_key(&fork_block.hash.unwrap()));
@@ -440,7 +440,7 @@ mod tests {
                 depth,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, DefaultHash::new()).await;
+            mine(&mut block, sender, None, DefaultHash::new()).await;
             parent_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -458,7 +458,7 @@ mod tests {
             1,
             &mut DefaultHash::new(),
         );
-        mine(&mut fork_block, sender, DefaultHash::new()).await;
+        mine(&mut fork_block, sender, None, DefaultHash::new()).await;
         let fork_hash = fork_block.hash.unwrap();
         chain.add_new_block(fork_block).unwrap();
 
@@ -492,7 +492,7 @@ mod tests {
                 depth,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, DefaultHash::new()).await;
+            mine(&mut block, sender, None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -512,7 +512,7 @@ mod tests {
                 1,
                 &mut DefaultHash::new(),
             );
-            mine(&mut fork_block, sender, DefaultHash::new()).await;
+            mine(&mut fork_block, sender, None, DefaultHash::new()).await;
             let hash = fork_block.hash.unwrap();
             fork_hashes.push(hash);
             chain.add_new_block(fork_block).unwrap();
@@ -571,7 +571,7 @@ mod tests {
                 depth,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, DefaultHash::new()).await;
+            mine(&mut block, sender, None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -595,7 +595,7 @@ mod tests {
                     depth,
                     &mut DefaultHash::new(),
                 );
-                mine(&mut fork_block, sender, DefaultHash::new()).await;
+                mine(&mut fork_block, sender, None, DefaultHash::new()).await;
                 parent_hash = fork_block.hash.unwrap();
                 if depth == fork_length {
                     fork_hashes.push(parent_hash);
@@ -649,7 +649,7 @@ mod tests {
                 depth,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, DefaultHash::new()).await;
+            mine(&mut block, sender, None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -669,7 +669,7 @@ mod tests {
                 depth,
                 &mut DefaultHash::new(),
             );
-            mine(&mut fork_block, sender, DefaultHash::new()).await;
+            mine(&mut fork_block, sender, None, DefaultHash::new()).await;
             fork_hash = fork_block.hash.unwrap();
             chain.add_new_block(fork_block).unwrap();
         }
@@ -711,7 +711,7 @@ mod tests {
                 depth,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, DefaultHash::new()).await;
+            mine(&mut block, sender, None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -731,7 +731,7 @@ mod tests {
                 depth,
                 &mut DefaultHash::new(),
             );
-            mine(&mut fork_block, sender, DefaultHash::new()).await;
+            mine(&mut fork_block, sender, None, DefaultHash::new()).await;
             fork_hash = fork_block.hash.unwrap();
             chain.add_new_block(fork_block).unwrap();
         }

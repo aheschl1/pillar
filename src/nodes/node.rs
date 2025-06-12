@@ -402,6 +402,10 @@ impl Node {
 
         if block.header.miner_address.is_some(){ // meaning it is reqrd time
             chain.add_new_block(block.clone())?; // if we pass this line, valid block
+            if let Some(ref pool) = self.miner_pool{
+                // signal to stop trying to mine the current block
+                let _ = pool.mine_abort_sender.send(block.header.depth);
+            }
             // initialize broadcast
             self.inner.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap(); // forward
             // the stamping process is done. do, if there is a miner address, then stamping is done on this block.

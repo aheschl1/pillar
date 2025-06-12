@@ -1,3 +1,5 @@
+use flume::Receiver;
+
 use crate::{crypto::hashing::{HashFunction, Hashable}, nodes::node::StdByteArray, primitives::block::Block};
 
 use super::difficulty::get_difficulty_from_depth;
@@ -17,7 +19,7 @@ pub fn is_valid_hash(difficulty: u64, hash: &StdByteArray) -> bool {
     leading_zeros >= difficulty
 }
 
-pub async fn mine(block: &mut Block, address: StdByteArray, mut hash_function: impl HashFunction){
+pub async fn mine(block: &mut Block, address: StdByteArray, abort_signal: Option<Receiver<u64>>, mut hash_function: impl HashFunction){
     // the block is already pupulated
     block.header.nonce = 0;
     block.header.miner_address = Some(address);
@@ -31,6 +33,12 @@ pub async fn mine(block: &mut Block, address: StdByteArray, mut hash_function: i
             },
             Err(_) => {
                 panic!("Hashing failed");
+            }
+        }
+        if let Some(ref signal) = abort_signal{
+            if let Ok(d) = signal.try_recv() {
+                // if we receive a signal to abort, we stop mining
+                if d == block.header.depth {return;}
             }
         }
         block.header.nonce += 1;

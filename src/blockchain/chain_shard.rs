@@ -125,7 +125,7 @@ mod tests {
                 depth,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, DefaultHash::new()).await;
+            mine(&mut block, sender, None, DefaultHash::new()).await;
             parent_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -145,7 +145,7 @@ mod tests {
             1,
             &mut DefaultHash::new(),
         );
-        mine(&mut fork_block, sender, DefaultHash::new()).await;
+        mine(&mut fork_block, sender, None, DefaultHash::new()).await;
         chain.add_new_block(fork_block.clone()).unwrap();
 
         assert!(chain.blocks.contains_key(&fork_block.hash.unwrap()));
@@ -185,7 +185,7 @@ mod tests {
                 depth,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, DefaultHash::new()).await;
+            mine(&mut block, sender, None, DefaultHash::new()).await;
             parent_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -203,7 +203,7 @@ mod tests {
             1,
             &mut DefaultHash::new(),
         );
-        mine(&mut fork_block, sender, DefaultHash::new()).await;
+        mine(&mut fork_block, sender, None, DefaultHash::new()).await;
         let fork_hash = fork_block.hash.unwrap();
         chain.add_new_block(fork_block).unwrap();
 
@@ -238,7 +238,7 @@ mod tests {
                 depth,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, DefaultHash::new()).await;
+            mine(&mut block, sender, None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -258,7 +258,7 @@ mod tests {
                 1,
                 &mut DefaultHash::new(),
             );
-            mine(&mut fork_block, sender, DefaultHash::new()).await;
+            mine(&mut fork_block, sender, None, DefaultHash::new()).await;
             let hash = fork_block.hash.unwrap();
             fork_hashes.push(hash);
             chain.add_new_block(fork_block).unwrap();
