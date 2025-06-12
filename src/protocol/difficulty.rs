@@ -21,7 +21,7 @@ pub fn get_reward_from_depth_and_stampers(depth: u64, n_stampers: usize) -> u64{
     if n_stampers == 0 {
         0
     } else {
-        INITIAL_BLOCK_REWARD / (depth as f64).sqrt().floor() as u64 * (n_stampers / N_TRANSMISSION_SIGNATURES) as u64
+        (INITIAL_BLOCK_REWARD * n_stampers as u64) / ((depth as f64).sqrt().floor() as u64 * N_TRANSMISSION_SIGNATURES as u64)
     }
 
 }

@@ -1136,10 +1136,6 @@ mod tests{
         assert!(chain_a.as_ref().unwrap().blocks.len() == 2); // 2 blocks
         drop(chain_a);
         // check reputations.
-        
-        
-        
-        
 
         let reputations_b = node_b.inner.reputations.lock().await;
         assert!(reputations_b.contains_key(&public_key_a));
@@ -1173,6 +1169,19 @@ mod tests{
         assert!(a_a == b_a);
         assert!(a_b == b_b);
         assert!(a_b > a_a);
+
+        // check miner got paid
+        let chain_b = node_b.inner.chain.lock().await;
+        let account_b = chain_b.as_ref().unwrap().account_manager.get_account(&public_key_b).unwrap();
+        assert!(account_b.lock().unwrap().balance > 0); // miner got paid
+        let balance_b = account_b.lock().unwrap().balance;
+        drop(chain_b);
+        let chain_a = node_a.inner.chain.lock().await;
+        let account_b = chain_a.as_ref().unwrap().account_manager.get_account(&public_key_b).unwrap();
+        assert!(account_b.lock().unwrap().balance > 0); // miner got paid
+        assert_eq!(account_b.lock().unwrap().balance, balance_b); // balance is the same on both nodes
+        drop(chain_a);
+
     }
 
     #[tokio::test]
@@ -1852,7 +1861,7 @@ mod tests{
         assert!(peers_b.contains_key(&public_key_a));
         drop(peers_b);
         // now, grab the chains - check depth
-        let chain_b = node_b.inner.chain.lock().await;
+        let chain_b = miner_b.node.inner.chain.lock().await;
         assert_eq!(chain_b.as_ref().unwrap().depth, 1); // 2 blocks
         assert_eq!(chain_b.as_ref().unwrap().blocks.len(), 2); // 3 blocks
         // check that the leaf has 2 transactions
