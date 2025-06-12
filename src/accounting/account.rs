@@ -2,7 +2,7 @@ use std::{cmp::Ordering, collections::HashMap, hash::Hash, sync::{Arc, Mutex}};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{nodes::node::StdByteArray, primitives::block::Block};
+use crate::{nodes::node::StdByteArray, primitives::block::Block, protocol::difficulty::get_reward_from_depth_and_stampers};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransactionStub{
@@ -149,6 +149,18 @@ impl AccountManager{
             sender.history.push(history.clone());
             receiver.history.push(history);
         }
+        // add the miner reward. this reward will be based upon the blocks difficulty, and the number of stamps.
+        let reward = get_reward_from_depth_and_stampers(block.header.depth, block.header.tail.n_stamps());
+        // settle the transaction with the miner
+        let miner_address = block.header.miner_address.unwrap();
+        let miner_account = self.get_or_create_account(&miner_address);
+        let mut miner_account = miner_account.lock().unwrap();
+        miner_account.balance += reward;
+        // now add to its history
+        miner_account.history.push(TransactionStub {
+            block_hash: block.hash.unwrap(),
+            transaction_hash: [0; 32], // This is a placeholder, as the miner reward does not have a transaction hash
+        });
     }
 }
 
@@ -202,7 +214,7 @@ mod tests {
             0,
             0,
             vec![transaction],
-            None,
+            Some([0; 32]), // mock
             Default::default(),
             1,
             &mut hasher,
@@ -239,7 +251,7 @@ mod tests {
             0,
             0,
             vec![transaction],
-            None,
+            Some([0; 32]), // mock
             Default::default(),
             1,
             &mut hasher,
