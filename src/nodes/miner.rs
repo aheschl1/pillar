@@ -1,3 +1,5 @@
+use tracing::{span, Level};
+use tracing::instrument;
 
 use crate::{crypto::hashing::{DefaultHash, HashFunction}, primitives::block::{Block, BlockTail}, protocol::pow::mine};
 
@@ -46,12 +48,13 @@ impl Miner{
 /// monitors the nodes transaction pool
 /// Takes ownership of a copy of the miner
 /// TODO: decide how many transactions to mine at once
+#[instrument(skip_all, name="Miner::monitor_transaction_pool")]
 async fn monitor_transaction_pool(miner: Miner) {
     // monitor the pool for transactions
     let mut transactions = vec![];
     let mut last_polled_at: Option<u64> = None;
     loop {
-        println!("waiting for transactions to mine...");
+        tracing::trace!("waiting for transactions to mine...");
         let transaction = tokio::time::timeout(
             tokio::time::Duration::from_secs(MAX_TRANSACTION_WAIT_TIME), 
             miner.node.miner_pool.as_ref().unwrap().pop_transaction()

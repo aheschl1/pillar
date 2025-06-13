@@ -1,6 +1,7 @@
 use std::{clone, collections::{HashMap, HashSet}};
 
 use rand::{rng, seq::{IndexedRandom, IteratorRandom}};
+use tracing::instrument;
 
 use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, crypto::{hashing::{DefaultHash, HashFunction, Hashable}, merkle::generate_tree}, nodes::{messages::Message, node::{Broadcaster, Node, StdByteArray}, peer::Peer}, primitives::{block::{Block, BlockHeader, BlockTail}, transaction::Transaction}, reputation::history::NodeHistory};
 
@@ -187,9 +188,10 @@ pub fn get_genesis_block() -> Block{
 /// Includes verification of new blocks and trimming of synced blocks
 /// May take ownership of mutexed chain for a while
 /// TODO this may try to duplicate if there are forks in extensions - fix the final portion of the sync
+#[instrument(fields(node = ?node.inner.public_key))]
 pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
     if node.inner.peers.lock().await.is_empty(){
-        println!("No peers to sync with, skipping chain sync");
+        tracing::info!("No peers to sync with, skipping chain sync");
         return Ok(());
     }
     // the sync request
@@ -204,10 +206,10 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
     // broadcast the request
     let responses = node.broadcast(&request).await?;
     if responses.is_empty() {
-        println!("No responses to chain sync request, skipping sync");
+        tracing::info!("No responses to chain sync request, skipping sync");
         return Ok(());
     }
-    println!("Received {} responses to chain sync request", responses.len());
+    tracing::debug!("Received {} responses to chain sync request", responses.len());
 
     // sync up with the reponses
     let mut extensions: HashMap<StdByteArray, (Chain, u64)> = HashMap::new();
@@ -219,11 +221,11 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
                     // figure out which leaf this connect to. we can start at any arbitrary leaf because they will all end up at the same place
                     let leaf = &shard.deepest_hash;
                     let mut curr = shard.blocks.get(leaf).cloned();
-                    println!("Length of shard: {}", shard.blocks.len());
+                    tracing::debug!("Length of shard: {}", shard.blocks.len());
                     while let Some(current_block) = curr{
                         // two things can happen here - if the existing chain has the previous block
                         // then we need to validate the block on that chain - otherwise validate on the shard
-                        println!("Found connection {:?}", leaves.contains(&current_block.header.previous_hash));
+                        tracing::debug!("Found connection {:?}", leaves.contains(&current_block.header.previous_hash));
                         if leaves.contains(&current_block.header.previous_hash) && chain.verify_block(&current_block){ // double check that this is a valid connection by verifying the block
                             // we have reached it. record this verified shard
                             if let Some((_, existing_depth)) = extensions.get(&current_block.header.previous_hash) {
@@ -243,11 +245,11 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
                 }
             }
             _ => {
-                println!("Received unexpected message during chain sync: {:?}", response);
+                tracing::debug!("Received unexpected message during chain sync: {:?}", response);
             }
         }
     }
-    println!("Found {} extensions - the first is of length {}", extensions.len(), if extensions.is_empty() { 0 } else { extensions.values().nth(0).unwrap().0.blocks.len() });
+    tracing::debug!("Found {} extensions - the first is of length {}", extensions.len(), if extensions.is_empty() { 0 } else { extensions.values().nth(0).unwrap().0.blocks.len() });
     // each response has been verified and we have the deepest for each leaf
     // now we need to merge the chains
     for (_, (chain_extension, _)) in extensions.iter(){
@@ -262,7 +264,7 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
                 curr = chain_extension.blocks.get(&current_block.header.previous_hash);
             }
             // now we add them to the chain
-            println!("Adding {} blocks to the chain", to_add.len());
+            tracing::debug!("Adding {} blocks to the chain", to_add.len());
             for block in to_add.iter().rev(){
                 // verifies again
                 chain.add_new_block(block.clone())?;
@@ -274,9 +276,9 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
             }
         }
     }
-    println!("Sync complete, chain length is now {}", chain.blocks.len());
+    tracing::info!("Sync complete, chain length is now {}", chain.blocks.len());
     chain.trim(); // cleanup any old forks
-    println!("Chain trimmed, length is now {}", chain.blocks.len());
+    tracing::debug!("Chain trimmed, length is now {}", chain.blocks.len());
     // done
     Ok(())
 }

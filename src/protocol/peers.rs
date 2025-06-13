@@ -39,7 +39,7 @@ pub async fn discover_peers(node: &mut Node) -> Result<(), std::io::Error> {
         }
     }
     // extend the peers list with the new peers
-    // node.peers.lock().await.extend(new_peers);
+    // node.peers.lock().unwrap().extend(new_peers);
     node.maybe_update_peers(new_peers).await;
     Ok(())
 }

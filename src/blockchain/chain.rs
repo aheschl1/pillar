@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
 use crate::{
     accounting::account::AccountManager, crypto::{hashing::{DefaultHash, HashFunction}, signing::{DefaultVerifier, SigVerFunction}}, nodes::node::StdByteArray, primitives::{
@@ -53,6 +54,10 @@ impl Chain {
     }
 
     /// Create a chain without a genesis block.
+    #[instrument(
+        skip_all,
+        name = "Chain::new_from_blocks",
+    )]
     pub fn new_from_blocks(blocks: HashMap<StdByteArray, Block>) -> Self{
         let mut headers = HashMap::new();
         let mut deepest_hash = [0; 32];
@@ -71,6 +76,7 @@ impl Chain {
                 deepest_hash = *hash;
             }
         }
+        tracing::debug!("Chain created with {} blocks, deepest hash: {:?}, depth: {}", blocks.len(), deepest_hash, depth);
         // leaves is those that are not seen as previous hashes
         let leaves = all_hashes
             .difference(&seen_prevs)
@@ -88,12 +94,15 @@ impl Chain {
     }
     
     /// Validates the structure and metadata of a block.
+    #[instrument(skip_all, fields(block = ?block.hash))]
     fn validate_block(&self, block: &Block) -> bool {
         // check hash validity
         if block.hash.is_none() {
+            tracing::info!("Block hash is None - Failing");
             return false;
         }
         if !block.header.validate(block.hash.unwrap(), &mut DefaultHash::new()) {
+            tracing::info!("Block header is not validated - Failing");
             return false;
         }
         // check the previous hash exists
@@ -102,19 +111,23 @@ impl Chain {
         let valid = match previous_block {
             Some(last_block) => (last_block.header.depth + 1 == block.header.depth) && (block.header.timestamp >= last_block.header.timestamp),
             None => {
-                println!("Previous block not found: {:?}", previous_hash);
+                tracing::info!("Previous block not found: {:?}", previous_hash);
                 false
             }
         };
 
+        
         if !valid {
+            tracing::info!("Block depth or timestamp is invalid - Failing");
             return false;
         }
 
+        tracing::info!("Block is valid - Continuing");
         true
     }
 
     /// Ensures that all transactions in a block are valid and do not exceed available funds.
+    #[instrument(skip_all, fields(transactions = ?transactions.iter().map(|t|t.hash).collect::<Vec<_>>()))]
     fn validate_transaction_set(&mut self, transactions: &Vec<Transaction>) -> bool {
         // we need to make sure that there are no duplicated nonce values under the same user
         let per_user: HashMap<StdByteArray, Vec<&Transaction>> =
@@ -126,6 +139,8 @@ impl Chain {
                         .push(tx);
                     acc
                 });
+        tracing::debug!("Per user transactions: {:?}", per_user);
+        tracing::info!("Validating transaction set with {} users", per_user.len());
         for (user, transactions) in per_user.iter() {
 
             let account = self.account_manager.get_or_create_account(user);
@@ -138,6 +153,7 @@ impl Chain {
             // return true;
             let total_sum: u64 = transactions.iter().map(|t| t.header.amount).sum();
             if account.as_ref().lock().unwrap().balance < total_sum {
+                tracing::info!("Account balance is insufficient for user {:?} - Failing", user);
                 return false;
             }
             let mut nonces = vec![];
@@ -146,6 +162,7 @@ impl Chain {
                 nonces.push(transaction.header.nonce);
                 let result = self.validate_transaction(transaction);
                 if !result {
+                    tracing::info!("Invalid transaction - Failing");
                     return false;
                 }
             }
@@ -153,11 +170,13 @@ impl Chain {
             nonces.sort();
             for i in 0..nonces.len() - 1 {
                 if nonces[i] + 1 != nonces[i + 1] {
+                    tracing::info!("Nonces are not contiguous for user {:?} - Failing", user);
                     return false;
                 }
             }
             // and the first one needs to be the accounts nonce
             if nonces[0] != account.lock().unwrap().nonce {
+                tracing::info!("First nonce does not match account nonce for user {:?} - Failing", user);
                 return false;
             }
         }
@@ -190,6 +209,7 @@ impl Chain {
     /// 2. The transaction hash is valid.
     /// 3. The sender has sufficient balance.
     /// 4. The nonce matches the sender's expected value.
+    #[instrument(skip_all, fields(transaction = ?transaction.hash))]
     fn validate_transaction(&self, transaction: &Transaction) -> bool {
         let sender = transaction.header.sender;
         let signature = transaction.signature;
@@ -203,19 +223,23 @@ impl Chain {
             None => false,
         };
         if !signing_validity {
+            tracing::info!("Transaction signature is invalid - Failing");
             return false;
         }
         // check the hash
         if transaction.hash != transaction.header.hash(&mut DefaultHash::new()) {
+            tracing::info!("Transaction hash is invalid - Failing");
             return false;
         }
         // verify balance
         let account = self.account_manager.get_account(&sender);
         if account.is_none() {
+            tracing::info!("Account for sender does not exist - Failing");
             return false;
         }
         let account = account.clone().unwrap();
         if account.lock().unwrap().balance < transaction.header.amount {
+            tracing::info!("Account balance is insufficient - Failing");
             return false;
         } 
         true
@@ -224,21 +248,24 @@ impl Chain {
     /// Verifies the validity of a block, including its transactions and metadata.
     pub fn verify_block(&mut self, block: &Block) -> bool {
         let mut result = self.validate_block(block);
-        println!("Validating Block - Result = {}", result);
         result = result && self.validate_transaction_set(&block.transactions);
         result
     }
 
     /// Call this only after a block has been verified
+    #[instrument(skip_all, fields(block = ?block.hash))]
     fn settle_new_block(&mut self, block: Block){
         self.account_manager.update_from_block(&block);
+        tracing::debug!("Account settled");
         self.blocks.insert(block.hash.unwrap(), block.clone());
         self.leaves.remove(&block.header.previous_hash);
         self.leaves.insert(block.hash.unwrap());
         self.headers.insert(block.hash.unwrap(), block.header);
+        tracing::debug!("Block settled in chain");
         // update the depth - the depth of this block is checked in the verification
         // perhaps this is a fork deeper in the chain, so we do not always update 
         if block.header.depth > self.depth {
+            tracing::info!("Chain depth expanded to {}", block.header.depth);
             self.deepest_hash = block.hash.unwrap();
             self.depth = block.header.depth;
         }
@@ -254,11 +281,15 @@ impl Chain {
     ///
     /// * `Ok(())` if the block is successfully added.
     /// * `Err(std::io::Error)` if the block is invalid.
+    #[instrument(skip_all, fields(block = ?block.hash))]
     pub fn add_new_block(&mut self, block: Block) -> Result<(), std::io::Error> {
         if self.verify_block(&block) {
+            tracing::info!("Block is valid, settling...");
             self.settle_new_block(block);
+            tracing::info!("Block settled in chain");
             Ok(())
         } else {
+            tracing::error!("Block is not valid, cannot add to chain");
             Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "Block is not valid",

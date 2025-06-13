@@ -4,6 +4,7 @@ use tokio::{
 };
 
 use tokio::time::{timeout, Duration};
+use tracing::{instrument, Instrument};
 
 use crate::{
     crypto::hashing::{DefaultHash, HashFunction, Hashable},
@@ -67,6 +68,7 @@ pub async fn broadcast_knowledge(node: Node, stop_signal: Option<flume::Receiver
 /// For each connection, listens for a peer declaration. Then, it adds this peer to the peer list if not alteady there
 /// After handling the peer, it reads for the actual message. Then, it calls off to the serve_message function.
 /// The response from serve_message is finally returned back to the peer
+#[instrument(skip_all, fields(ip = %node.ip_address, port = node.port))]
 pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
     let listener = TcpListener::bind(format!("{}:{}", node.ip_address, node.port))
         .await
@@ -76,7 +78,7 @@ pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
         let mut stream = match timeout(tokio::time::Duration::from_secs(3),listener.accept()).await {
             Ok(Ok((stream, _))) => stream,
             Ok(Err(e)) => {
-                eprintln!("Error accepting connection: {}", e);
+                tracing::error!("Error accepting connection: {}", e);
                 continue;
             },
             Err(_) => {

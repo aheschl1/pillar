@@ -12,6 +12,10 @@ Vision:
 
 Currently in heavy development.
 
+# Testing
+
+Running `cargo test` will launch tests, saving 
+
 The flow can be rougly seen in the following image.
 
 ![Flow](./figures/net_flow.png)
