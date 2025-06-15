@@ -87,6 +87,7 @@ fn get_initial_state(datastore: &dyn Datastore) -> (NodeState, Option<Chain>) {
 pub const STANDARD_ARRAY_LENGTH: usize = 32;
 
 pub type StdByteArray = [u8; STANDARD_ARRAY_LENGTH];
+pub type ReputationMap = HashMap<StdByteArray, NodeHistory>;
 
 pub struct NodeInner {
     pub public_key: StdByteArray,
@@ -105,7 +106,7 @@ pub struct NodeInner {
     // transaction filter queue
     pub transaction_filters: Mutex<Vec<(TransactionFilter, Peer)>>,
     /// mapping of reputations for peers
-    pub reputations: Mutex<HashMap<StdByteArray, NodeHistory>>,
+    pub reputations: Mutex<ReputationMap>,
     /// registered filters for the local node - producer will be this node, and consumer will be some backgroung thread that polls
     filter_callbacks: Mutex<HashMap<TransactionFilter, Sender<BlockHeader>>>,
     /// the state represents the nodes ability to communicate with other nodes

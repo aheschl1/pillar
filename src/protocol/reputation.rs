@@ -2,7 +2,7 @@
 use core::f64;
 use std::collections::{HashMap, HashSet};
 
-use crate::{nodes::{messages::Message, node::{Broadcaster, Node, StdByteArray}, peer::Peer}, primitives::block::BlockHeader, reputation::history::NodeHistory};
+use crate::{nodes::{messages::Message, node::{Broadcaster, Node, ReputationMap, StdByteArray}, peer::Peer}, primitives::block::BlockHeader, reputation::history::NodeHistory};
 
 const MINING_WORTH_HALF_LIFE: f64 = 8f64;
 const MINING_WORTH_MAX: f64 = 1f64;
@@ -42,7 +42,7 @@ pub fn block_worth_scaling_fn(block_time: u64) -> f64 {
 /// 
 /// # Returns
 /// * A vector of peers that are in the n-th percentile
-pub fn nth_percentile_peer(lower_n: f32, upper_n: f32, reputations: &HashMap<StdByteArray, NodeHistory>) -> Vec<StdByteArray>{
+pub fn nth_percentile_peer(lower_n: f32, upper_n: f32, reputations: &ReputationMap) -> Vec<StdByteArray>{
     if !(0.0..=1.0).contains(&lower_n)  || !(0.0..=1.0).contains(&upper_n) {
         panic!("n must be between 0 and 1");
     }
@@ -84,10 +84,10 @@ pub async fn query_for_peers_by_reputation(node: Node, lower_n: f32, upper_n: f3
 
 /// This function takes a header and a tail of a block, as well as its miner.
 /// Then, it updates a reputations map to reflect new knowledge
-pub fn settle_reputations(reputations: &mut HashMap<StdByteArray, NodeHistory>, head: BlockHeader){
+pub fn settle_reputations(reputations: &mut ReputationMap, head: BlockHeader){
     let miner = head.miner_address
         .expect("Expect a miner for settling reputations");
-    
+
     // passed validation - we need to record reputations
     match reputations.get_mut(&miner){
         Some(history) => {
