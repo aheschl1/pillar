@@ -2,7 +2,7 @@
 use core::f64;
 use std::collections::{HashMap, HashSet};
 
-use crate::{nodes::{messages::Message, node::{Broadcaster, Node, StdByteArray}, peer::Peer}, reputation::history::NodeHistory};
+use crate::{nodes::{messages::Message, node::{Broadcaster, Node, StdByteArray}, peer::Peer}, primitives::block::BlockHeader, reputation::history::NodeHistory};
 
 const MINING_WORTH_HALF_LIFE: f64 = 8f64;
 const MINING_WORTH_MAX: f64 = 1f64;
@@ -81,6 +81,42 @@ pub async fn query_for_peers_by_reputation(node: Node, lower_n: f32, upper_n: f3
     }
     Ok(final_response.iter().cloned().cloned().collect::<Vec<Peer>>()) // super sus souble clone here
 }
+
+/// This function takes a header and a tail of a block, as well as its miner.
+/// Then, it updates a reputations map to reflect new knowledge
+pub fn settle_reputations(reputations: &mut HashMap<StdByteArray, NodeHistory>, head: BlockHeader){
+    let miner = head.miner_address
+        .expect("Expect a miner for settling reputations");
+    
+    // passed validation - we need to record reputations
+    match reputations.get_mut(&miner){
+        Some(history) => {
+            // update the history
+            history.settle_head(head);
+        }
+        None => {
+            // create new history
+            reputations.insert(miner, NodeHistory::new(miner, vec![], vec![], 0));
+            reputations.get_mut(&miner).unwrap().settle_head(head);
+        }
+    }
+    // now each signature gets an award
+    for stamper in head.tail.iter_stamps(){
+        match reputations.get_mut(&stamper.address){
+            Some(history) => {
+                // update the history
+                history.settle_tail(&head.tail, head);
+            }
+            None => {
+                // create new history
+                reputations.insert(stamper.address, NodeHistory::new(stamper.address, vec![], vec![], 0));
+                let history = reputations.get_mut(&stamper.address).unwrap();
+                history.settle_tail(&head.tail, head);
+            }
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

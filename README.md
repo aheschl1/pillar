@@ -14,7 +14,9 @@ Currently in heavy development.
 
 # Testing
 
-Running `cargo test` will launch tests, saving 
+Running `cargo test` will launch tests, saving logs to `./test_output/{timestamp}/output.log`.
+
+Expect some errors from logging. This does not indicate test failure.
 
 The flow can be rougly seen in the following image.
 

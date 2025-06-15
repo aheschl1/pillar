@@ -15,7 +15,7 @@ use crate::{
     transaction::{FilterMatch, TransactionFilter}},
     protocol::{chain::{dicover_chain, service_sync, sync_chain},
     communication::{broadcast_knowledge, serve_peers},
-    reputation::{nth_percentile_peer, N_TRANSMISSION_SIGNATURES}},
+    reputation::{nth_percentile_peer, settle_reputations, N_TRANSMISSION_SIGNATURES}},
     reputation::history::NodeHistory
 };
  
@@ -236,8 +236,8 @@ impl Node {
             });
         }
         tracing::trace!("Node is now in state: {:?}", self.inner.state.lock().await);
-        let spawn_handle = tokio::spawn(serve_peers(self.clone(), Some(serve_killer.1.clone())));
-        let b_handle = tokio::spawn(broadcast_knowledge(self.clone(), Some(broadcast_killer.1.clone())));
+        let _ = tokio::spawn(serve_peers(self.clone(), Some(serve_killer.1.clone())));
+        let _ = tokio::spawn(broadcast_knowledge(self.clone(), Some(broadcast_killer.1.clone())));
         self.kill_broadcast = Some(broadcast_killer.0);
         self.kill_serve = Some(serve_killer.0);
         tracing::info!("Node processes finished launching. Broadcasting and serving threads are now running.");
@@ -324,7 +324,15 @@ impl Node {
                     tracing::info!("Going to settle this block.");
                     let chain = chain_lock.as_mut().unwrap();
                     self.settle_block(&mut block, chain).await?;
-                }else{
+                }
+                
+                // handle callback if mined
+                if state.is_track() && block.header.miner_address.is_some() {
+                    tracing::info!("Handling callbacks for block.");
+                    self.handle_callbacks(&block).await;
+                }
+
+                if state.is_forward(){
                     // TODO handle is_track instead
                     // if we do not have the chain, just forward the block if there is room in the stamps
                     if block.header.tail.n_stamps() < N_TRANSMISSION_SIGNATURES {
@@ -332,11 +340,6 @@ impl Node {
                         let _ = self.stamp_block(&mut block.clone());
                         self.inner.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap();
                     }
-                }
-                // handle callback if mined
-                if state.is_track() && block.header.miner_address.is_some() {
-                    tracing::info!("Handling callbacks for block.");
-                    self.handle_callbacks(&block).await;
                 }
                 Ok(Message::BlockAck)
             },
@@ -448,21 +451,8 @@ impl Node {
             self.inner.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap(); // forward
             // the stamping process is done. do, if there is a miner address, then stamping is done on this block.
             // update the reputation tracker with the block to rwared the miner
-            self.maybe_create_history(block.header.miner_address.unwrap()).await;
             let mut reputations = self.inner.reputations.lock().await;
-            let miner_history = reputations.get_mut(&block.header.miner_address.unwrap()).unwrap();
-            miner_history.settle_head(block.header); // SETTLE TO REWARD MINING
-            // REWARD STAMPERS
-            // 3. reward reputation for the new stamps
-            drop(reputations);
-            for stamp in block.header.tail.iter_stamps() {
-                self.maybe_create_history(stamp.address).await;
-            }
-            let mut reputations = self.inner.reputations.lock().await;
-            for stamp in block.header.tail.iter_stamps() {
-                let history = reputations.get_mut(&stamp.address).unwrap();
-                history.settle_tail(&block.header.tail, block.header); // SETTLE TO REWARD
-            }
+            settle_reputations(&mut reputations, block.header);
             tracing::info!("Reputations recorded for new block.");
             return Ok(());
         }

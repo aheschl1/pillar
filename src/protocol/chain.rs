@@ -3,7 +3,7 @@ use std::{clone, collections::{HashMap, HashSet}};
 use rand::{rng, seq::{IndexedRandom, IteratorRandom}};
 use tracing::instrument;
 
-use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, crypto::{hashing::{DefaultHash, HashFunction, Hashable}, merkle::generate_tree}, nodes::{messages::Message, node::{Broadcaster, Node, StdByteArray}, peer::Peer}, primitives::{block::{Block, BlockHeader, BlockTail}, transaction::Transaction}, reputation::history::NodeHistory};
+use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, crypto::{hashing::{DefaultHash, HashFunction, Hashable}, merkle::generate_tree}, nodes::{messages::Message, node::{Broadcaster, Node, StdByteArray}, peer::Peer}, primitives::{block::{Block, BlockHeader, BlockTail}, transaction::Transaction}, protocol::reputation::settle_reputations, reputation::history::NodeHistory};
 
 use super::peers::discover_peers;
 
@@ -85,7 +85,7 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std
                 }
                 _ => {
                     // we need to update the reputations
-                    settle_reputations(&mut reputations, miner, head);
+                    settle_reputations(&mut reputations, head);
                     break;
                 }
             }
@@ -94,37 +94,6 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std
     Ok(chain)
 }
 
-/// This function takes a header and a tail of a block, as well as its miner.
-/// Then, it updates a reputations map to reflect new knowledge
-fn settle_reputations(reputations: &mut HashMap<StdByteArray, NodeHistory>, miner: StdByteArray, head: BlockHeader){
-    // passed validation - we need to record reputations
-    match reputations.get_mut(&miner){
-        Some(history) => {
-            // update the history
-            history.settle_head(head);
-        }
-        None => {
-            // create new history
-            reputations.insert(miner, NodeHistory::new(miner, vec![], vec![], 0));
-            reputations.get_mut(&miner).unwrap().settle_head(head);
-        }
-    }
-    // now each signature gets an award
-    for stamper in head.tail.iter_stamps(){
-        match reputations.get_mut(&stamper.address){
-            Some(history) => {
-                // update the history
-                history.settle_tail(&head.tail, head);
-            }
-            None => {
-                // create new history
-                reputations.insert(stamper.address, NodeHistory::new(stamper.address, vec![], vec![], 0));
-                let history = reputations.get_mut(&stamper.address).unwrap();
-                history.settle_tail(&head.tail, head);
-            }
-        }
-    }
-}
 
 /// Discovery algorithm for the chain
 pub async fn dicover_chain(mut node: Node) -> Result<(), std::io::Error> {
@@ -269,10 +238,9 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
                 // verifies again
                 chain.add_new_block(block.clone())?;
                 // and record the reputations
-                let miner = block.header.miner_address.unwrap();
                 let head = block.header;
                 let mut reputations = node.inner.reputations.lock().await;
-                settle_reputations(&mut reputations, miner, head);
+                settle_reputations(&mut reputations, head);
             }
         }
     }
