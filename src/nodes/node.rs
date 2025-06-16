@@ -13,14 +13,14 @@ use crate::{
     primitives::{block::{Block, BlockHeader, Stamp},
     pool::MinerPool,
     transaction::{FilterMatch, TransactionFilter}},
-    protocol::{chain::{dicover_chain, service_sync, sync_chain},
+    protocol::{chain::{block_settle_consumer, dicover_chain, service_sync, sync_chain},
     communication::{broadcast_knowledge, serve_peers},
     reputation::{nth_percentile_peer, settle_reputations, N_TRANSMISSION_SIGNATURES}},
     reputation::history::NodeHistory
 };
  
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum NodeState{
+pub enum NodeState{
     ICD,
     ChainOutdated,
     ChainLoading,
@@ -31,19 +31,19 @@ enum NodeState{
 impl NodeState {
     /// If a state is_track, then the node should track incoming blocks and transactions
     /// These values should be added to chain at the soonest available moment
-    /// If is_track, then the node does not add requests immediately 
-    fn is_track(&self) -> bool {
+    pub fn is_track(&self) -> bool {
         // return true;
         matches!(self, 
             NodeState::ICD | 
             NodeState::ChainSyncing | 
             NodeState::ChainLoading | 
-            NodeState::ChainOutdated
+            NodeState::ChainOutdated |
+            NodeState::Serving
         )
     }
 
     /// If a state is_forward, then the node should forward incoming blocks and transactions
-    fn is_forward(&self) -> bool {
+    pub fn is_forward(&self) -> bool {
         // return true;
         matches!(self,
             NodeState::ICD |
@@ -56,7 +56,7 @@ impl NodeState {
 
     /// If a state is_consume, then the node should consume incoming blocks and transactions
     /// This means that state should be updated immediately. This includes consuming a tracking queue
-    fn is_consume(&self) -> bool {
+    pub fn is_consume(&self) -> bool {
         // return true;
         matches!(self, 
             NodeState::Serving
@@ -107,12 +107,15 @@ pub struct NodeInner {
     pub transaction_filters: Mutex<Vec<(TransactionFilter, Peer)>>,
     /// mapping of reputations for peers
     pub reputations: Mutex<ReputationMap>,
-    /// registered filters for the local node - producer will be this node, and consumer will be some backgroung thread that polls
-    filter_callbacks: Mutex<HashMap<TransactionFilter, Sender<BlockHeader>>>,
-    /// the state represents the nodes ability to communicate with other nodes
-    state: Mutex<NodeState>,
     /// the datastore
     pub datastore: Option<Arc<dyn Datastore>>,
+    /// A queue of blocks which are to be settled to the chain
+    pub settle_sender: Sender<Block>,
+    pub settle_receiver: Receiver<Block>,
+    /// the state represents the nodes ability to communicate with other nodes
+    pub state: Mutex<NodeState>,
+    /// registered filters for the local node - producer will be this node, and consumer will be some backgroung thread that polls
+    filter_callbacks: Mutex<HashMap<TransactionFilter, Sender<BlockHeader>>>,
 }
 
 #[derive(Clone)]
@@ -127,6 +130,7 @@ pub struct Node {
     /// kill handles
     kill_broadcast: Option<flume::Sender<()>>,
     kill_serve: Option<flume::Sender<()>>,
+    kill_settle: Option<flume::Sender<()>>,
 }
 
 
@@ -156,6 +160,7 @@ impl Node {
             database = Some(Arc::new(EmptyDatastore::new()));
         }
         let (broadcast_sender, broadcast_receiver) = flume::unbounded();
+        let (settle_sender, settle_receiver) = flume::unbounded();
         let transaction_filters = Mutex::new(Vec::new());
         let broadcasted_already = Mutex::new(HashSet::new());
         let peer_map = peers
@@ -178,6 +183,8 @@ impl Node {
             reputations: Mutex::new(HashMap::new()),
             filter_callbacks: Mutex::new(HashMap::new()), // initially no callbacks
             state: Mutex::new(state), // initially in discovery mode
+            settle_receiver,
+            settle_sender,
             datastore: database,
             }.into(),
             ip_address,
@@ -185,6 +192,7 @@ impl Node {
             miner_pool: transaction_pool,
             kill_broadcast: None,
             kill_serve: None,
+            kill_settle: None,
         }
     }
     
@@ -200,6 +208,7 @@ impl Node {
         
         let broadcast_killer = flume::bounded(1);
         let serve_killer = flume::bounded(1);
+        let settle_killer = flume::bounded(1);
     
         let state = self.inner.state.lock().await.clone();
         let handle = match state {
@@ -239,8 +248,10 @@ impl Node {
         tracing::trace!("Node is now in state: {:?}", self.inner.state.lock().await);
         let _ = tokio::spawn(serve_peers(self.clone(), Some(serve_killer.1.clone())));
         let _ = tokio::spawn(broadcast_knowledge(self.clone(), Some(broadcast_killer.1.clone())));
+        let _ = tokio::spawn(block_settle_consumer(self.clone(), Some(settle_killer.1.clone())));
         self.kill_broadcast = Some(broadcast_killer.0);
         self.kill_serve = Some(serve_killer.0);
+        self.kill_settle = Some(settle_killer.0);
         tracing::info!("Node processes finished launching. Broadcasting and serving threads are now running.");
     }
 
@@ -253,6 +264,7 @@ impl Node {
         // stop the broadcast and serve threads
         let _ = self.kill_broadcast.as_ref().unwrap().send(());
         let _ = self.kill_serve.as_ref().unwrap().send(());
+        let _ = self.kill_settle.as_ref().unwrap().send(());
         tracing::debug!("Kill signals sent.");
         *self.inner.state.lock().await = NodeState::ChainOutdated;
         tracing::info!("Node stopping.");
@@ -321,15 +333,15 @@ impl Node {
                 // add the block to the chain if we have downloaded it already - first it is verified TODO add to a queue to be added later
                 let mut block = block.clone();
                 if state.is_consume(){
-                    let mut chain_lock = self.inner.chain.lock().await;
                     tracing::info!("Going to settle this block.");
-                    let chain = chain_lock.as_mut().unwrap();
-                    self.settle_block(&mut block, chain).await?;
+                    self.settle_unmined_block(&mut block).await?;
                 }
                 
-                // handle callback if mined
+                // send block to be settled, 
+                // and handle callback if mined
                 if state.is_track() && block.header.miner_address.is_some() {
                     tracing::info!("Handling callbacks for block.");
+                    self.inner.settle_sender.send(block.clone()).unwrap();
                     self.handle_callbacks(&block).await;
                 }
 
@@ -339,8 +351,8 @@ impl Node {
                     if block.header.tail.n_stamps() < N_TRANSMISSION_SIGNATURES {
                         tracing::info!("Stamping and broadcasting");
                         let _ = self.stamp_block(&mut block.clone());
-                        self.inner.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap();
                     }
+                    self.inner.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap(); // forward
                 }
                 Ok(Message::BlockAck)
             },
@@ -434,31 +446,12 @@ impl Node {
     }
 
     /// After receiving a block - settle it to the chain
-    /// Includes the tracking of reputation, braodcasting, and responding to callbacks
-    #[instrument(name = "Node::settle_block", skip(self, block, chain), fields(
+    /// Includes the tracking of reputation, braodcasting, and responding to callbacks 
+    #[instrument(name = "Node::settle_unmined_block", skip(self, block), fields(
         block_hash = ?block.hash,
         miner_address = ?block.header.miner_address
     ))]
-    async fn settle_block(&self, block: &mut Block, chain: &mut Chain) -> Result<(), std::io::Error> {
-        if block.header.miner_address.is_some(){ // meaning it is reqrd time
-            tracing::info!("Settling mined block with miner address: {:?}", block.header.miner_address);
-            chain.add_new_block(block.clone())?; // if we pass this line, valid block
-            tracing::info!("Valid block added to chain.");
-            if let Some(ref pool) = self.miner_pool{
-                // signal to stop trying to mine the current block
-                let _ = pool.mine_abort_sender.send(block.header.depth);
-            }
-            // initialize broadcast
-            self.inner.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap(); // forward
-            // the stamping process is done. do, if there is a miner address, then stamping is done on this block.
-            // update the reputation tracker with the block to rwared the miner
-            let mut reputations = self.inner.reputations.lock().await;
-            settle_reputations(&mut reputations, block.header);
-            tracing::info!("Reputations recorded for new block.");
-            return Ok(());
-        }
-        // ================================================
-        // stamp and transmit
+    async fn settle_unmined_block(&self, block: &mut Block) -> Result<(), std::io::Error> {
         tracing::info!("Block is not mined, stamping and transmitting.");
         let mut n_stamps = block.header.tail.n_stamps();
         let has_our_stamp = block.header.tail.stamps.iter().any(|stamp| stamp.address == self.inner.public_key);
@@ -473,12 +466,7 @@ impl Node {
         if n_stamps < N_TRANSMISSION_SIGNATURES && !has_our_stamp {
             assert!(!already_broadcasted, "Block already broadcasted, but not stamped by us. This should not happen.");
             tracing::info!("Stamping block with our signature.");
-            let signature = self.signature_for(&block.header)?;
-            let stamp = Stamp {
-                address: self.inner.public_key,
-                signature,
-            };
-            let _ = block.header.tail.stamp(stamp); // if failure, then full - doesnt matter anyways
+            let _ = self.stamp_block(block);
             n_stamps += 1; // we have stamped the block
         }
 
@@ -489,7 +477,6 @@ impl Node {
         }
 
         tracing::debug!("starting broadcast");
-        self.inner.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap(); // forward
 
         Ok(())
     }

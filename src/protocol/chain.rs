@@ -1,6 +1,7 @@
 use std::{clone, collections::{HashMap, HashSet}};
 
 use rand::{rng, seq::{IndexedRandom, IteratorRandom}};
+use tokio::time::timeout;
 use tracing::instrument;
 
 use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, crypto::{hashing::{DefaultHash, HashFunction, Hashable}, merkle::generate_tree}, nodes::{messages::Message, node::{Broadcaster, Node, StdByteArray}, peer::Peer}, primitives::{block::{Block, BlockHeader, BlockTail}, transaction::Transaction}, protocol::reputation::settle_reputations, reputation::history::NodeHistory};
@@ -274,4 +275,39 @@ pub async fn service_sync(node: Node, leaves: &HashSet<StdByteArray>) -> Result<
     }).collect();
 
     Ok(chains)
+}
+
+
+/// Consumer for the block settle queue
+/// Waits until the node is_serve and then starts to consume blocks in the queue
+/// adding them to the chain
+#[instrument(fields(node = ?node.inner.public_key), skip_all)]
+pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiver<()>>){
+    loop{
+        if let Some(signal) = &stop_signal {
+            if signal.try_recv().is_ok() {break;}
+        }
+        let state = node.inner.state.lock().await.clone();
+        if !state.is_consume() {continue;}
+        let value = timeout(tokio::time::Duration::from_secs(3), node.inner.settle_receiver.recv_async()).await;
+        if let Ok(Ok(block)) = value{
+            tracing::debug!("Settling block...");
+            let mut chain_lock = node.inner.chain.lock().await;
+            let chain = chain_lock.as_mut().unwrap();
+            // then we settle the block
+            tracing::info!("Settling mined block with miner address: {:?}", block.header.miner_address);
+            if chain.add_new_block(block.clone()).is_err() {continue;} // failed to add the block
+            tracing::info!("Valid block added to chain.");
+            drop(chain_lock); // free lock cause why not
+            if let Some(ref pool) = node.miner_pool{
+                // signal to stop trying to mine the current block
+                let _ = pool.mine_abort_sender.send(block.header.depth);
+            }
+            // the stamping process is done. do, if there is a miner address, then stamping is done on this block.
+            // update the reputation tracker with the block to rwared the miner
+            let mut reputations = node.inner.reputations.lock().await;
+            settle_reputations(&mut reputations, block.header);
+            tracing::info!("Reputations recorded for new block.");
+        }
+    }
 }
