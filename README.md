@@ -1,7 +1,7 @@
 
 # Project
 
-Zero-trust decentralized ledger written in Rust.
+Zero-trust decentralized ledger.
 
 Vision:
 
