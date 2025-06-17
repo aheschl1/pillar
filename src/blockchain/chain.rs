@@ -261,7 +261,7 @@ impl Chain {
         self.leaves.remove(&block.header.previous_hash);
         self.leaves.insert(block.hash.unwrap());
         self.headers.insert(block.hash.unwrap(), block.header);
-        tracing::debug!("Block settled in chain");
+        tracing::debug!("Block settled in chain, but need to update depth.");
         // update the depth - the depth of this block is checked in the verification
         // perhaps this is a fork deeper in the chain, so we do not always update 
         if block.header.depth > self.depth {
@@ -286,7 +286,7 @@ impl Chain {
         if self.verify_block(&block) {
             tracing::info!("Block is valid, settling...");
             self.settle_new_block(block);
-            tracing::info!("Block settled in chain");
+            tracing::info!("Block settled in chain successfully");
             Ok(())
         } else {
             tracing::error!("Block is not valid, cannot add to chain");

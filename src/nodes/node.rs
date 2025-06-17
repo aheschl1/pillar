@@ -30,15 +30,14 @@ pub enum NodeState{
 
 impl NodeState {
     /// If a state is_track, then the node should track incoming blocks and transactions
-    /// These values should be added to chain at the soonest available moment
+    /// These values should be added to chain at the soonest available moment, but not immediately
     pub fn is_track(&self) -> bool {
         // return true;
         matches!(self, 
             NodeState::ICD | 
             NodeState::ChainSyncing | 
             NodeState::ChainLoading | 
-            NodeState::ChainOutdated |
-            NodeState::Serving
+            NodeState::ChainOutdated 
         )
     }
 
@@ -333,14 +332,14 @@ impl Node {
                 // add the block to the chain if we have downloaded it already - first it is verified TODO add to a queue to be added later
                 let mut block = block.clone();
                 if state.is_consume(){
-                    tracing::info!("Going to settle this block.");
+                    tracing::info!("Going to deal with this unmined block.");
                     self.settle_unmined_block(&mut block).await?;
                 }
                 
                 // send block to be settled, 
                 // and handle callback if mined
-                if state.is_track() && block.header.miner_address.is_some() {
-                    tracing::info!("Handling callbacks for block.");
+                if (state.is_track() || state.is_consume()) && block.header.miner_address.is_some() {
+                    tracing::info!("Handling callbacks and settle for mined block.");
                     self.inner.settle_sender.send(block.clone()).unwrap();
                     self.handle_callbacks(&block).await;
                 }
@@ -348,8 +347,8 @@ impl Node {
                 if state.is_forward(){
                     // TODO handle is_track instead
                     // if we do not have the chain, just forward the block if there is room in the stamps
-                    if block.header.tail.n_stamps() < N_TRANSMISSION_SIGNATURES {
-                        tracing::info!("Stamping and broadcasting");
+                    if block.header.tail.n_stamps() < N_TRANSMISSION_SIGNATURES && !state.is_consume(){
+                        tracing::info!("Stamping and broadcasting only because not ");
                         let _ = self.stamp_block(&mut block.clone());
                     }
                     self.inner.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap(); // forward
@@ -475,9 +474,6 @@ impl Node {
             tracing::info!("Adding block to miner pool.");
             self.miner_pool.as_ref().unwrap().add_ready_block(block.clone()).await;
         }
-
-        tracing::debug!("starting broadcast");
-
         Ok(())
     }
 
