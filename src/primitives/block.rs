@@ -4,7 +4,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::{serde_as, Bytes};
 
 use crate::crypto::hashing::{HashFunction, Hashable, DefaultHash};
-use crate::crypto::merkle::{generate_proof_of_inclusion, generate_tree, verify_proof_of_inclusion, MerkleProof, MerkleTree};
+use crate::crypto::merkle::{generate_tree, MerkleTree};
+use crate::crypto::proofs::{generate_proof_of_inclusion, verify_proof_of_inclusion, MerkleProof};
 use crate::crypto::signing::{DefaultVerifier, SigVerFunction, Signable};
 use crate::nodes::node::StdByteArray;
 use crate::protocol::difficulty::get_difficulty_from_depth;

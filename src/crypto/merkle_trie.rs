@@ -43,7 +43,7 @@ impl<T: for<'a> Deserialize<'a>> TrieNode<T>{
     }
 }
 
-struct MerkleTrie<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> {
+pub struct MerkleTrie<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> {
     _phantum: PhantomData<K>,
     nodes: SlotMap<NodeKey, TrieNode<V>>, // SlotMap to store Trie nodes
     roots: HashMap<StdByteArray, NodeKey>,
@@ -180,7 +180,7 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
             let mut current_node_key = new_root_key;
 
             for nibble in nibbles {
-                let index = nibble as usize;
+                let index: usize = nibble as usize;
                 let current_child_opt = self.nodes.get(current_node_key).unwrap().children[index];
 
                 let new_child_key = if let Some(child_key) = current_child_opt {
@@ -231,7 +231,7 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
                 valid = true;
             }
         }
-        
+
         if let Some(value) = &node.value {
             hasher.update(&[17]); // 17 is a marker for value presence
             hasher.update(&value);
@@ -307,6 +307,13 @@ mod tests {
         // make sure that in new_root they are unchanged
         assert_eq!(trie.get("account2", new_root), Some(account2));
         assert_eq!(trie.get("account3", new_root), Some(account3));
+        // now, check that we can update the original root with no impact to the new ones
+        let new_account2 = AccountState { balance: 700, nonce: 7 };
+        trie.insert("account4", new_account2.clone(), initial_root).unwrap();
+        assert_eq!(trie.get("account4", initial_root), Some(new_account2.clone()));
+        // make sure it is not in the new roots
+        assert_eq!(trie.get("account4", new_root), None);
+        assert_eq!(trie.get("account4", new_root2), None);
 
     }
 }

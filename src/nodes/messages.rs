@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, crypto::{hashing::{HashFunction, Hashable}, merkle::MerkleProof}, nodes::node::StdByteArray, primitives::{block::{Block, BlockHeader}, transaction::{Transaction, TransactionFilter}}};
+use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, crypto::{hashing::{HashFunction, Hashable}, proofs::MerkleProof}, nodes::node::StdByteArray, primitives::{block::{Block, BlockHeader}, transaction::{Transaction, TransactionFilter}}};
 use serde::{Serialize, Deserialize};
 use super::peer::Peer;
 
