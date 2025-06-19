@@ -120,4 +120,11 @@ mod implementations{
             hasher.digest()
         }
     }
+
+    impl Hashable for Vec<u8> {
+        fn hash(&self, hasher: &mut impl super::HashFunction) -> Result<crate::nodes::node::StdByteArray, std::io::Error> {
+            hasher.update(self.as_slice());
+            hasher.digest()
+        }
+    }
 }
