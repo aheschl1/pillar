@@ -94,3 +94,30 @@ impl Clone for DefaultHash {
         }
     }
 }
+
+
+mod implementations{
+    use crate::{crypto::hashing::Hashable, nodes::node::StdByteArray};
+
+    impl Hashable for &str{
+        fn hash(&self, hasher: &mut impl super::HashFunction) -> Result<crate::nodes::node::StdByteArray, std::io::Error> {
+            hasher.update(self.as_bytes());
+            hasher.digest()
+        }
+    }
+
+    impl Hashable for String {
+        fn hash(&self, hasher: &mut impl super::HashFunction) -> Result<crate::nodes::node::StdByteArray, std::io::Error> {
+            hasher.update(self.as_bytes());
+            hasher.digest()
+        }
+        
+    }
+
+    impl Hashable for StdByteArray {
+        fn hash(&self, hasher: &mut impl super::HashFunction) -> Result<crate::nodes::node::StdByteArray, std::io::Error> {
+            hasher.update(self.as_ref());
+            hasher.digest()
+        }
+    }
+}
