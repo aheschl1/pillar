@@ -1,10 +1,10 @@
-use std::{collections::{HashMap, HashSet}, marker::PhantomData};
+use std::{collections::{HashMap, HashSet}, marker::PhantomData, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use slotmap::{new_key_type, SlotMap};
 
-use crate::{crypto::{hashing::{DefaultHash, HashFunction, Hashable}, proofs::{MerkleProofV2, ProofStep, Provable}}, nodes::node::{Node, StdByteArray}};
-new_key_type! { struct NodeKey; }
+use crate::{crypto::{hashing::{DefaultHash, HashFunction, Hashable}, proofs::{TrieMerkleProof, ProofStep}}, nodes::node::{Node, StdByteArray}};
+new_key_type! { pub struct NodeKey; }
 
 /// In order to store account states, a Merkle Patricia Trie will be used
 /// At this moment, it will not be a radix tree for the sake of simplicity
@@ -17,10 +17,10 @@ new_key_type! { struct NodeKey; }
 /// 
 /// Generics K and V are not required for this to work; however it is good to avoid mismatches
 
-struct TrieNode<V: for<'a> Deserialize<'a>> {
+pub struct TrieNode<V: for<'a> Deserialize<'a>> {
     _phantum: PhantomData<V>,
-    children: [Option<NodeKey>; 16], // 16 children for each nibble (0-9, a-f)
-    value: Option<Vec<u8>>, // Account state
+    pub(crate) children: [Option<NodeKey>; 16], // 16 children for each nibble (0-9, a-f)
+    pub(crate) value: Option<Vec<u8>>, // Account state
 }
 
 impl<T: for<'a> Deserialize<'a>> Clone for TrieNode<T> {
@@ -45,12 +45,12 @@ impl<T: for<'a> Deserialize<'a>> TrieNode<T>{
 
 pub struct MerkleTrie<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> {
     _phantum: PhantomData<K>,
-    nodes: SlotMap<NodeKey, TrieNode<V>>, // SlotMap to store Trie nodes
-    roots: HashMap<StdByteArray, NodeKey>,
+    pub(crate) nodes: SlotMap<NodeKey, TrieNode<V>>, // SlotMap to store Trie nodes
+    pub(crate) roots: HashMap<StdByteArray, NodeKey>,
 }
 
 /// Hash and convert the key to nibbles
-fn to_nibbles(key: &impl Hashable) -> Vec<u8> {
+pub(crate) fn to_nibbles(key: &impl Hashable) -> Vec<u8> {
     let key = key.hash(&mut DefaultHash::new()).unwrap();
     key.iter().flat_map(|b| vec![b>>4, b&0x0F]).collect::<Vec<_>>()
 }
@@ -227,7 +227,7 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
     /// # Returns
     /// * `Some(StdByteArray)` if the hash is computed successfully.
     /// * `None` if the node does not exist or has no value.
-    fn get_hash_for(&self, node: NodeKey, hash_function: &mut impl HashFunction) -> Option<StdByteArray> {
+    pub fn get_hash_for(&self, node: NodeKey, hash_function: &mut impl HashFunction) -> Option<StdByteArray> {
         let node = self.nodes.get(node).expect("Node not found");
         let mut valid = false; 
         for (i, child) in node.children.iter().enumerate() {
@@ -249,65 +249,12 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
 
 }
 
-impl<K, V> Provable<K> for MerkleTrie<K, V>
-    where K: Hashable, V: Serialize + for<'a> Deserialize<'a>
-{   
-    /// Generate a Merkle proof for a specific value in the Merkle Trie.
-    /// # Arguments
-    /// * `target_key` - The key for which the proof is generated.
-    fn generate_proof_for_key(&self, target_key: K, root: Option<StdByteArray>, hash_function: &mut impl HashFunction) -> Option<MerkleProofV2> {
-        let value = self.get(&target_key, root.expect("Root must be provided"));
-        if value.is_none() {
-            return None; // If the key does not exist, no proof can be generated.
-        }
-        let path = to_nibbles(&target_key);
-        println!("{:?}", path);
-        let mut steps: Vec<ProofStep> = Vec::new();
-        
-        let mut current_node_key = Some(self.roots.get(&root.expect("Root must be provided")).unwrap().clone());
-        // work the way down, computing the proof steps along the way.
-        let mut nibble = Some(path[0]);
-        let mut i = 0;
-        while let Some(key) = current_node_key {
-            let current_node = self.nodes.get(key).expect("Node not found");
-            let mut siblings: Vec<(u8, StdByteArray)> = Vec::new();
-            for (j, child) in current_node.children.iter().enumerate() {
-                if (nibble.is_none() || j != nibble.unwrap() as usize) && child.is_some() {
-                    let sibling_key = child.unwrap();
-                    let sibling_hash = self.get_hash_for(sibling_key, hash_function).expect("Sibling hash not found");
-                    siblings.push((j as u8, sibling_hash));
-                }
-            }
-            steps.push(ProofStep {
-                native: nibble.unwrap_or(0), // where is the nibble in the path
-                siblings,
-                value: if let Some(value) = current_node.value.clone() {
-                    Some((current_node.children.len() as u8, value))
-                } else {None}
-            });
-            current_node_key = match nibble {
-                Some(n) => {
-                    i += 1;
-                    nibble = if i < path.len() { Some(path[i]) } else { None };
-                    current_node.children[n as usize]
-                },
-                None => None
-            };
-        }
-
-        return Some(MerkleProofV2::new(steps));
-    }
-
-    /// Generate a Merkle proof for a specific value in the Merkle Trie.
-    fn generate_proof_for_value(&self, _: K, _: Option<StdByteArray>, _: &mut impl HashFunction) -> Option<MerkleProofV2> {
-        unimplemented!("generate_proof_for_value is not implemented yet");
-    }
-}
 
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crypto::{hashing::DefaultHash, proofs::generate_proof_of_state};
 
     #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
     struct AccountState {
@@ -381,7 +328,7 @@ mod tests {
         let account1 = AccountState { balance: 200, nonce: 2 };
         trie.insert("account1", account1.clone(), initial_root).unwrap();
         
-        let proof = trie.generate_proof_for_key("account0", Some(initial_root), &mut DefaultHash::new()).expect("Proof generation failed");
+        let (proof, _) = generate_proof_of_state(&trie, "account0", Some(initial_root), &mut DefaultHash::new()).expect("Proof generation failed");
         let root_key = trie.roots.get(&initial_root).expect("Root not found");
         let valid = proof.verify(
             bincode::serialize(&initial_account_info).unwrap(), 
@@ -398,5 +345,101 @@ mod tests {
             &mut DefaultHash::new()
         );
         assert!(!valid2, "Proof verification should fail for a different account");
+    }
+
+    #[test]
+    fn test_proof_for_single_key() {
+        let initial_account_info = AccountState { balance: 100, nonce: 1 };
+        let (mut trie, initial_root) = MerkleTrie::<&str, AccountState>::new("account0", initial_account_info.clone());
+
+        let (proof, _) = generate_proof_of_state(&trie, "account0", Some(initial_root), &mut DefaultHash::new()).expect("Proof generation failed");
+        let root_key = trie.roots.get(&initial_root).expect("Root not found");
+        let valid = proof.verify(
+            bincode::serialize(&initial_account_info).unwrap(),
+            trie.get_hash_for(root_key.clone(), &mut DefaultHash::new()).unwrap(),
+            &mut DefaultHash::new(),
+        );
+        assert!(valid, "Proof verification failed for single key");
+    }
+
+    #[test]
+    fn test_proof_for_multiple_keys() {
+        let initial_account_info = AccountState { balance: 100, nonce: 1 };
+        let (mut trie, initial_root) = MerkleTrie::<&str, AccountState>::new("account0", initial_account_info.clone());
+
+        let account1 = AccountState { balance: 200, nonce: 2 };
+        let account2 = AccountState { balance: 300, nonce: 3 };
+        trie.insert("account1", account1.clone(), initial_root).unwrap();
+        trie.insert("account2", account2.clone(), initial_root).unwrap();
+
+        let (proof1, _) = generate_proof_of_state(&trie, "account1", Some(initial_root), &mut DefaultHash::new()).expect("Proof generation failed for account1");
+        let (proof2, _) = generate_proof_of_state(&trie, "account2", Some(initial_root), &mut DefaultHash::new()).expect("Proof generation failed for account2");
+
+        let root_key = trie.roots.get(&initial_root).expect("Root not found");
+
+        let valid1 = proof1.verify(
+            bincode::serialize(&account1).unwrap(),
+            trie.get_hash_for(root_key.clone(), &mut DefaultHash::new()).unwrap(),
+            &mut DefaultHash::new(),
+        );
+        assert!(valid1, "Proof verification failed for account1");
+
+        let valid2 = proof2.verify(
+            bincode::serialize(&account2).unwrap(),
+            trie.get_hash_for(root_key.clone(), &mut DefaultHash::new()).unwrap(),
+            &mut DefaultHash::new(),
+        );
+        assert!(valid2, "Proof verification failed for account2");
+    }
+
+    #[test]
+    fn test_proof_verification_failure() {
+        let initial_account_info = AccountState { balance: 100, nonce: 1 };
+        let (mut trie, initial_root) = MerkleTrie::<&str, AccountState>::new("account0", initial_account_info.clone());
+
+        let account1 = AccountState { balance: 200, nonce: 2 };
+        trie.insert("account1", account1.clone(), initial_root).unwrap();
+
+        let (proof, _) = generate_proof_of_state(&trie, "account1", Some(initial_root), &mut DefaultHash::new()).expect("Proof generation failed");
+
+        let root_key = trie.roots.get(&initial_root).expect("Root not found");
+
+        let invalid_account = AccountState { balance: 500, nonce: 5 };
+        let valid = proof.verify(
+            bincode::serialize(&invalid_account).unwrap(),
+            trie.get_hash_for(root_key.clone(), &mut DefaultHash::new()).unwrap(),
+            &mut DefaultHash::new(),
+        );
+        assert!(!valid, "Proof verification should fail for invalid account");
+    }
+
+    #[test]
+    fn test_proof_for_branch() {
+        let initial_account_info = AccountState { balance: 100, nonce: 1 };
+        let (mut trie, initial_root) = MerkleTrie::<&str, AccountState>::new("account0", initial_account_info.clone());
+
+        let account1 = AccountState { balance: 200, nonce: 2 };
+        trie.insert("account1", account1.clone(), initial_root).unwrap();
+
+        let branch_keys = vec![("account1", AccountState { balance: 300, nonce: 3 })];
+        let new_root = trie.branch(initial_root, branch_keys).unwrap();
+
+        let (proof, _) = generate_proof_of_state(&trie, "account1", Some(new_root), &mut DefaultHash::new()).expect("Proof generation failed for branch");
+
+        let root_key = trie.roots.get(&new_root).expect("Root not found");
+
+        let valid = proof.verify(
+            bincode::serialize(&AccountState { balance: 300, nonce: 3 }).unwrap(),
+            trie.get_hash_for(root_key.clone(), &mut DefaultHash::new()).unwrap(),
+            &mut DefaultHash::new(),
+        );
+        assert!(valid, "Proof verification failed for branch");
+
+        let valid = proof.verify(
+            bincode::serialize(&account1).unwrap(),
+            trie.get_hash_for(root_key.clone(), &mut DefaultHash::new()).unwrap(),
+            &mut DefaultHash::new(),
+        );
+        assert!(!valid, "Proof verification should fail for original account1 in the branch");
     }
 }

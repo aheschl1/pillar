@@ -3,7 +3,7 @@ use std::{collections::HashMap, hash::Hash};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{crypto::{hashing::{DefaultHash, HashFunction, Hashable}, merkle::MerkleTree}, nodes::node::StdByteArray};
+use crate::{crypto::{hashing::{DefaultHash, HashFunction, Hashable}, merkle::MerkleTree, merkle_trie::{to_nibbles, MerkleTrie}}, nodes::node::StdByteArray};
 
 
 
@@ -83,19 +83,23 @@ pub fn verify_proof_of_inclusion<T: Into<StdByteArray>>(data: T, proof: &MerkleP
     current_hash == root
 }
 
+// ============================================================================================
+// Trie proofs to follow
+// TODO generalize
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MerkleProofV2 {
+pub struct TrieMerkleProof {
     pub steps: Vec<ProofStep>,
 }
 
-impl MerkleProofV2 {
+impl TrieMerkleProof {
     pub fn new(steps: Vec<ProofStep>) -> Self {
-        MerkleProofV2 { steps }
+        TrieMerkleProof { steps }
     }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ProofStep {
+pub(crate) struct ProofStep {
     // native is the index of the value on which they are constructing the proof
     pub native: u8,
     // Give the indices and hashes of the siblings in the trie
@@ -157,7 +161,7 @@ impl ProofStep {
     }      
 }
 
-impl MerkleProofV2 {
+impl TrieMerkleProof {
     pub fn verify(&self, native_data: Vec<u8>, root_hash: StdByteArray, hash_function: &mut impl HashFunction) -> bool {
         let steps = self.steps.iter().rev().collect::<Vec<_>>();
         let mut current_hash = steps[0].compute_level_first(native_data, hash_function);
@@ -168,19 +172,55 @@ impl MerkleProofV2 {
     }
 }
 
-pub trait Provable<K> where K: Hashable {
-    /// Generate a Merkle proof for a specific value in the structure.
-    fn generate_proof_for_value(&self, target_value: K, root: Option<StdByteArray>, hash_function: &mut impl HashFunction) -> Option<MerkleProofV2>;
-    /// generate a proof for a specific key in the structure.
-    fn generate_proof_for_key(&self, target_key: K, root: Option<StdByteArray>, hash_function: &mut impl HashFunction) -> Option<MerkleProofV2>;
-}
-
-impl<K: Hashable> Provable<K> for MerkleTree {
-    fn generate_proof_for_value(&self, target_value: K, root: Option<StdByteArray>, hash_function: &mut impl HashFunction) -> Option<MerkleProofV2> {
-        todo!()
+/// Generate a Merkle proof for a specific value in the Merkle Trie.
+/// # Arguments
+/// * `target_key` - The key for which the proof is generated.
+pub fn generate_proof_of_state<K, V>(
+    merkle_trie: &MerkleTrie<K, V>, 
+    target_key: K, 
+    root: Option<StdByteArray>, 
+    hash_function: &mut impl HashFunction
+) -> Option<(TrieMerkleProof, V)> 
+where K: Hashable, V: Serialize + for<'a> Deserialize<'a>
+{
+    let value = merkle_trie.get(&target_key, root.expect("Root must be provided"));
+    if value.is_none() {
+        return None; // If the key does not exist, no proof can be generated.
     }
+    let path = to_nibbles(&target_key);
+    println!("{:?}", path);
+    let mut steps: Vec<ProofStep> = Vec::new();
     
-    fn generate_proof_for_key(&self, target_key: K, root: Option<StdByteArray>, hash_function: &mut impl HashFunction) -> Option<MerkleProofV2> {
-        unimplemented!("generate_proof_for_key is not implemented yet");
+    let mut current_node_key = Some(merkle_trie.roots.get(&root.expect("Root must be provided")).unwrap().clone());
+    // work the way down, computing the proof steps along the way.
+    let mut nibble = Some(path[0]);
+    let mut i = 0;
+    while let Some(key) = current_node_key {
+        let current_node = merkle_trie.nodes.get(key).expect("Node not found");
+        let mut siblings: Vec<(u8, StdByteArray)> = Vec::new();
+        for (j, child) in current_node.children.iter().enumerate() {
+            if (nibble.is_none() || j != nibble.unwrap() as usize) && child.is_some() {
+                let sibling_key = child.unwrap();
+                let sibling_hash = merkle_trie.get_hash_for(sibling_key, hash_function).expect("Sibling hash not found");
+                siblings.push((j as u8, sibling_hash));
+            }
+        }
+        steps.push(ProofStep {
+            native: nibble.unwrap_or(0), // where is the nibble in the path
+            siblings,
+            value: if let Some(value) = current_node.value.clone() {
+                Some((current_node.children.len() as u8, value))
+            } else {None}
+        });
+        current_node_key = match nibble {
+            Some(n) => {
+                i += 1;
+                nibble = if i < path.len() { Some(path[i]) } else { None };
+                current_node.children[n as usize]
+            },
+            None => None
+        };
     }
+        
+    return Some((TrieMerkleProof::new(steps), value.unwrap()));
 }
