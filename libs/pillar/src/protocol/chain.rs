@@ -5,7 +5,7 @@ use rand::{rng, seq::{IteratorRandom}};
 use tokio::time::timeout;
 use tracing::instrument;
 
-use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, nodes::{messages::Message, node::{Broadcaster, Node}, peer::Peer}, primitives::{block::{Block, BlockHeader, BlockTail}, transaction::Transaction}, protocol::reputation::settle_reputations, reputation::history::NodeHistory};
+use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, nodes::{messages::Message, node::{Broadcaster, Node}, peer::Peer}, primitives::{block::{Block, BlockTail}, transaction::Transaction}, protocol::reputation::settle_reputations};
 
 use super::peers::discover_peers;
 
@@ -220,7 +220,7 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
             }
         }
     }
-    tracing::debug!("Found {} extensions - the first is of length {}", extensions.len(), if extensions.is_empty() { 0 } else { extensions.values().nth(0).unwrap().0.blocks.len() });
+    tracing::debug!("Found {} extensions - the first is of length {}", extensions.len(), if extensions.is_empty() { 0 } else { extensions.values().next().unwrap().0.blocks.len() });
     // each response has been verified and we have the deepest for each leaf
     // now we need to merge the chains
     for (_, (chain_extension, _)) in extensions.iter(){

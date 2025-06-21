@@ -1,11 +1,11 @@
-use pillar_crypto::hashing::{DefaultHash, HashFunction, Hashable};
+use pillar_crypto::hashing::{DefaultHash, Hashable};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
 
 use tokio::time::{timeout, Duration};
-use tracing::{instrument, Instrument};
+use tracing::instrument;
 
 use crate::{
     nodes::{
@@ -374,7 +374,7 @@ mod tests {
         let now = std::time::Instant::now();
         sender.send(()).unwrap();
         // Wait for a short duration to ensure the server has time to process the stop signal
-        let _ = handle.await.unwrap();
+        handle.await.unwrap();
         let elapsed = now.elapsed();
         // Check that the server stopped within a reasonable time
         assert!(elapsed.as_secs() < 3, "Server did not stop in time");

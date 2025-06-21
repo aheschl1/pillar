@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, fmt::Debug, marker::PhantomData, sync::Arc};
+use std::{collections::{HashMap, HashSet}, fmt::Debug, marker::PhantomData};
 
 use serde::{Deserialize, Serialize};
 use slotmap::{new_key_type, SlotMap};
@@ -27,7 +27,7 @@ impl<T: for<'a> Deserialize<'a>> Clone for TrieNode<T> {
     fn clone(&self) -> Self {
         TrieNode {
             _phantum: PhantomData,
-            children: self.children.clone(),
+            children: self.children,
             value: self.value.clone(),
         }
     }
@@ -56,6 +56,12 @@ pub(crate) fn to_nibbles(key: &impl Hashable) -> Vec<u8> {
     key.iter().flat_map(|b| vec![b>>4, b&0x0F]).collect::<Vec<_>>()
 }
 
+impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> Default for MerkleTrie<K, V> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
     
     /// Creates a new empty Trie
@@ -79,7 +85,7 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
         self._insert(key, value, genesis_key).expect("Failed to insert genesis node");
 
         let inital_hash = self.get_hash_for(genesis_key, &mut DefaultHash::new()).unwrap();
-        self.roots.insert(inital_hash.clone(), genesis_key);
+        self.roots.insert(inital_hash, genesis_key);
         Ok(inital_hash)
     }
 
@@ -139,7 +145,7 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
     /// * `None` if the key does not exist or if there is no value at the node.
     pub fn get(&self, key: &K, root: StdByteArray) -> Option<V> {
         let nibbles = to_nibbles(key);
-        let mut current_node_key = self.roots.get(&root)?.clone();
+        let mut current_node_key = *self.roots.get(&root)?;
         for nibble in nibbles {
             let index = nibble as usize;
             if let Some(child_key) = self.nodes.get(current_node_key).unwrap().children[index] {
@@ -149,10 +155,7 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
             }
         }
         let serialized = self.nodes.get(current_node_key).unwrap().value.as_ref();
-        match serialized {
-            Some(data) => Some(bincode::deserialize(&mut data.clone()).unwrap()),
-            None => None, // No value at this node
-        }
+        serialized.map(|data| bincode::deserialize(&mut data.clone()).unwrap())
     }
 
     /// Creates a new branch of the trie.
@@ -202,8 +205,8 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
                         child_key
                     } else {   
                         let cloned_child = self.nodes.get(child_key).unwrap().clone();
-                        let cloned_key = self.nodes.insert(cloned_child);
-                        cloned_key
+                        
+                        self.nodes.insert(cloned_child)
                     }
                 } else {
                     self.nodes.insert(TrieNode::new())
@@ -238,15 +241,15 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
         let mut valid = false; 
         for (i, child) in node.children.iter().enumerate() {
             if let Some(child_key) = child {
-                hash_function.update(&[i as u8]);
-                hash_function.update(&self.get_hash_for(*child_key, &mut DefaultHash::new()).unwrap());
+                hash_function.update([i as u8]);
+                hash_function.update(self.get_hash_for(*child_key, &mut DefaultHash::new()).unwrap());
                 valid = true;
             }
         }
 
         if let Some(value) = &node.value {
-            hash_function.update(&[node.children.len() as u8]); // 16 is the marker for value because it is the 
-            hash_function.update(&value);
+            hash_function.update([node.children.len() as u8]); // 16 is the marker for value because it is the 
+            hash_function.update(value);
             valid = true;
         }
         
@@ -341,7 +344,7 @@ mod tests {
         let root_key = trie.roots.get(&initial_root).expect("Root not found");
         let valid = proof.verify(
             bincode::serialize(&initial_account_info).unwrap(), 
-            trie.get_hash_for(root_key.clone(), &mut DefaultHash::new()).unwrap(),
+            trie.get_hash_for(*root_key, &mut DefaultHash::new()).unwrap(),
             &mut DefaultHash::new()
         );
         assert!(valid, "Proof verification failed");
@@ -350,7 +353,7 @@ mod tests {
         println!("Account1 bin: {:?}", bin);
         let valid2 = proof.verify(
             bin, 
-            trie.get_hash_for(root_key.clone(), &mut DefaultHash::new()).unwrap(),
+            trie.get_hash_for(*root_key, &mut DefaultHash::new()).unwrap(),
             &mut DefaultHash::new()
         );
         assert!(!valid2, "Proof verification should fail for a different account");
@@ -367,7 +370,7 @@ mod tests {
         let root_key = trie.roots.get(&initial_root).expect("Root not found");
         let valid = proof.verify(
             bincode::serialize(&initial_account_info).unwrap(),
-            trie.get_hash_for(root_key.clone(), &mut DefaultHash::new()).unwrap(),
+            trie.get_hash_for(*root_key, &mut DefaultHash::new()).unwrap(),
             &mut DefaultHash::new(),
         );
         assert!(valid, "Proof verification failed for single key");
@@ -392,14 +395,14 @@ mod tests {
 
         let valid1 = proof1.verify(
             bincode::serialize(&account1).unwrap(),
-            trie.get_hash_for(root_key.clone(), &mut DefaultHash::new()).unwrap(),
+            trie.get_hash_for(*root_key, &mut DefaultHash::new()).unwrap(),
             &mut DefaultHash::new(),
         );
         assert!(valid1, "Proof verification failed for account1");
 
         let valid2 = proof2.verify(
             bincode::serialize(&account2).unwrap(),
-            trie.get_hash_for(root_key.clone(), &mut DefaultHash::new()).unwrap(),
+            trie.get_hash_for(*root_key, &mut DefaultHash::new()).unwrap(),
             &mut DefaultHash::new(),
         );
         assert!(valid2, "Proof verification failed for account2");
@@ -422,7 +425,7 @@ mod tests {
         let invalid_account = AccountState { balance: 500, nonce: 5 };
         let valid = proof.verify(
             bincode::serialize(&invalid_account).unwrap(),
-            trie.get_hash_for(root_key.clone(), &mut DefaultHash::new()).unwrap(),
+            trie.get_hash_for(*root_key, &mut DefaultHash::new()).unwrap(),
             &mut DefaultHash::new(),
         );
         assert!(!valid, "Proof verification should fail for invalid account");
@@ -447,14 +450,14 @@ mod tests {
 
         let valid = proof.verify(
             bincode::serialize(&AccountState { balance: 300, nonce: 3 }).unwrap(),
-            trie.get_hash_for(root_key.clone(), &mut DefaultHash::new()).unwrap(),
+            trie.get_hash_for(*root_key, &mut DefaultHash::new()).unwrap(),
             &mut DefaultHash::new(),
         );
         assert!(valid, "Proof verification failed for branch");
 
         let valid = proof.verify(
             bincode::serialize(&account1).unwrap(),
-            trie.get_hash_for(root_key.clone(), &mut DefaultHash::new()).unwrap(),
+            trie.get_hash_for(*root_key, &mut DefaultHash::new()).unwrap(),
             &mut DefaultHash::new(),
         );
         assert!(!valid, "Proof verification should fail for original account1 in the branch");

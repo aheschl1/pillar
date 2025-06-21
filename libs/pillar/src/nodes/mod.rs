@@ -915,7 +915,7 @@ mod tests {
     ) {
         inner_test_transaction_and_block_proposal(
             node_a,
-            &node_b,
+            node_b,
             signing_a,
             public_key_b,
             public_key_a,

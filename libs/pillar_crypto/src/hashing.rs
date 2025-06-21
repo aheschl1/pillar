@@ -44,6 +44,12 @@ pub struct DefaultHash {
     n_parameters: usize,
 }
 
+impl Default for DefaultHash {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DefaultHash{
     /// Creates a new instance of the SHA3-256 hash function.
     pub fn new() -> Self {

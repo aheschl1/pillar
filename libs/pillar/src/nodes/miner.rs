@@ -1,5 +1,4 @@
 use pillar_crypto::hashing::DefaultHash;
-use tracing::{span, Level};
 use tracing::instrument;
 
 use crate::{primitives::block::{Block, BlockTail}, protocol::pow::mine};

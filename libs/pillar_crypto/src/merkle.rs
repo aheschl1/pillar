@@ -1,5 +1,4 @@
 use std::hash::Hash;
-use serde::{Deserialize, Serialize};
 use slotmap::{SlotMap, new_key_type};
 
 use crate::types::StdByteArray;
@@ -137,6 +136,8 @@ pub fn generate_tree(data: Vec<&impl Hashable>, hash_function: &mut impl HashFun
 
 #[cfg(test)]
 mod tests {
+    use serde::{Deserialize, Serialize};
+
     use super::*;
     use crate::proofs::{generate_proof_of_inclusion, verify_proof_of_inclusion};
     use crate::hashing::DefaultHash;
@@ -184,10 +185,10 @@ mod tests {
         }
     }
 
-    impl Into<[u8; 32]> for TransactionHeader {
-        fn into(self) -> [u8; 32] {
+    impl From<TransactionHeader> for [u8; 32] {
+        fn from(val: TransactionHeader) -> Self {
             let mut bytes = [0u8; 32];
-            bytes[..].copy_from_slice(&self.hash(&mut DefaultHash::new()).unwrap());
+            bytes[..].copy_from_slice(&val.hash(&mut DefaultHash::new()).unwrap());
             bytes
         }
     }

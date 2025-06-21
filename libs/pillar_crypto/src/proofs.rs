@@ -1,9 +1,8 @@
-use core::hash;
-use std::{collections::HashMap, hash::Hash};
+use std::hash::Hash;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{hashing::{DefaultHash, HashFunction, Hashable}, merkle::MerkleTree, merkle_trie::{to_nibbles, MerkleTrie}, types::StdByteArray};
+use crate::{hashing::{HashFunction, Hashable}, merkle::MerkleTree, merkle_trie::{to_nibbles, MerkleTrie}, types::StdByteArray};
 
 
 
@@ -122,20 +121,20 @@ impl ProofStep {
             // actual work
             // check if we include the native data in this level
             if *index > self.native && (i == 0 || self.siblings[i-1].0 < self.native) {
-                hash_function.update(&[self.native]);
+                hash_function.update([self.native]);
                 hash_function.update(native_data);
             }
             // update the hash with the sibling hash
-            hash_function.update(&[*index]);
+            hash_function.update([*index]);
             hash_function.update(hash);
         }
         // maybe native comes last
         if last_index.is_none() || last_index.unwrap() < self.native {
-            hash_function.update(&[self.native]);
+            hash_function.update([self.native]);
             hash_function.update(native_data);
         }
         if let Some((i, value)) = &self.value {
-            hash_function.update(&[*i]);
+            hash_function.update([*i]);
             hash_function.update(value);
         }
         hash_function.digest().expect("Hashing failed")
@@ -152,10 +151,10 @@ impl ProofStep {
             last_index = Some(*index);
             // actual work
             // update the hash with the sibling hash
-            hash_function.update(&[*index]);
+            hash_function.update([*index]);
             hash_function.update(hash);
         }
-        hash_function.update(&[self.value.as_ref().unwrap().0]);
+        hash_function.update([self.value.as_ref().unwrap().0]);
         hash_function.update(native_data);
         hash_function.digest().expect("Hashing failed")
     }      
@@ -184,14 +183,12 @@ pub fn generate_proof_of_state<K, V>(
 where K: Hashable, V: Serialize + for<'a> Deserialize<'a>
 {
     let value = merkle_trie.get(&target_key, root.expect("Root must be provided"));
-    if value.is_none() {
-        return None; // If the key does not exist, no proof can be generated.
-    }
+    value.as_ref()?;
     let path = to_nibbles(&target_key);
     println!("{:?}", path);
     let mut steps: Vec<ProofStep> = Vec::new();
     
-    let mut current_node_key = Some(merkle_trie.roots.get(&root.expect("Root must be provided")).unwrap().clone());
+    let mut current_node_key = Some(*merkle_trie.roots.get(&root.expect("Root must be provided")).unwrap());
     // work the way down, computing the proof steps along the way.
     let mut nibble = Some(path[0]);
     let mut i = 0;
@@ -208,9 +205,7 @@ where K: Hashable, V: Serialize + for<'a> Deserialize<'a>
         steps.push(ProofStep {
             native: nibble.unwrap_or(0), // where is the nibble in the path
             siblings,
-            value: if let Some(value) = current_node.value.clone() {
-                Some((current_node.children.len() as u8, value))
-            } else {None}
+            value: current_node.value.clone().map(|value| (current_node.children.len() as u8, value))
         });
         current_node_key = match nibble {
             Some(n) => {
@@ -222,5 +217,5 @@ where K: Hashable, V: Serialize + for<'a> Deserialize<'a>
         };
     }
         
-    return Some((TrieMerkleProof::new(steps), value.unwrap()));
+    Some((TrieMerkleProof::new(steps), value.unwrap()))
 }

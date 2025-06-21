@@ -19,7 +19,7 @@ impl Clone for Peer {
     fn clone(&self) -> Self {
         Peer {
             public_key: self.public_key,
-            ip_address: self.ip_address.clone(),
+            ip_address: self.ip_address,
             port: self.port
         }
     }

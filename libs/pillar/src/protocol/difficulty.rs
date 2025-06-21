@@ -1,4 +1,4 @@
-use crate::{primitives::block::Block, protocol::reputation::N_TRANSMISSION_SIGNATURES};
+use crate::protocol::reputation::N_TRANSMISSION_SIGNATURES;
 
 const INITIAL_BLOCK_REWARD: u64 = 10_000;
 
