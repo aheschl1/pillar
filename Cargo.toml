@@ -1,5 +1,5 @@
 [workspace]
 members = [
     "libs/pillar_crypto",
-    "libs/pillar"
+    "libs/pillar_core"
 ]
