@@ -110,9 +110,16 @@ async fn monitor_block_pool(miner: Miner) {
             Some(mut block) => {
                 block.header.miner_address = Some(miner.node.inner.public_key);
                 block.header.tail.clean(&block.header.clone()); // removes broken signatures
+                let state_root = miner.node.inner.chain.lock().await
+                    .as_mut()
+                    .unwrap()
+                    .state_manager
+                    .branch_from_block(&block);
+
                 mine(
                     &mut block, 
                     miner.node.inner.public_key,
+                    state_root,
                     Some(miner.node.miner_pool.as_ref().unwrap().mine_abort_receiver.clone()),
                     DefaultHash::new()
                 ).await;

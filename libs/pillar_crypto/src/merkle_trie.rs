@@ -93,7 +93,6 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
     fn _insert(&mut self, key: K, value: V, root: NodeKey) -> Result<(), std::io::Error>{
         let nibbles = to_nibbles(&key);
         let value = bincode::serialize(&value).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-        println!("value: {:?}", value);
 
         let mut current_node_key = root;
         for nibble in nibbles {
@@ -172,11 +171,13 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
     /// # Returns
     /// * `Ok(StdByteArray)` containing the new root hash if the branch is created successfully.
     /// * `Err(std::io::Error)` if the origin root is not found or if the keys are empty.
-    pub fn branch(&mut self, origin: Option<StdByteArray>, mut updates: Vec<(K, V)>) -> Result<StdByteArray, std::io::Error> {
+    pub fn branch(&mut self, origin: Option<StdByteArray>, updates: HashMap<K, V>) -> Result<StdByteArray, std::io::Error> {
  
         if updates.is_empty() {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "updates cannot be empty"));
         }
+
+        let mut updates = updates.into_iter().collect::<Vec<_>>();
 
         if origin.is_none() {
             let first = updates.pop().unwrap();
@@ -293,7 +294,9 @@ mod tests {
 
         // Test branching
         let new_account = AccountState { balance: 300, nonce: 3 };
-        let branch_keys = vec![("account1", new_account.clone())]; // this means we want to be able to update account1 in a new state but account 2 will not change 
+        // let branch_keys = vec![("account1", new_account.clone())]; // this means we want to be able to update account1 in a new state but account 2 will not change 
+        let mut branch_keys = HashMap::new();
+        branch_keys.insert("account1", new_account.clone());
         let new_root = trie.branch(Some(initial_root), branch_keys).unwrap();
         assert_eq!(trie.get(&"account1", new_root), Some(new_account.clone()));
         assert_eq!(trie.get(&"account2", new_root), Some(account2.clone()));
@@ -308,7 +311,10 @@ mod tests {
         assert_eq!(trie.get(&"account3", initial_root), None);
 
         // now secondary branch off of new root
-        let branch_keys2 = vec![("account2", AccountState { balance: 500, nonce: 5 }), ("account3", AccountState { balance: 600, nonce: 6 })];
+        // let branch_keys2 = vec![("account2", AccountState { balance: 500, nonce: 5 }), ("account3", AccountState { balance: 600, nonce: 6 })];
+        let mut branch_keys2 = HashMap::new();
+        branch_keys2.insert("account2", AccountState { balance: 500, nonce: 5 });
+        branch_keys2.insert("account3", AccountState { balance: 600, nonce: 6 });
         let new_root2 = trie.branch(Some(new_root), branch_keys2).unwrap();
         assert_eq!(trie.get(&"account1", new_root2), Some(new_account.clone()));
         assert_eq!(trie.get(&"account2", new_root2), Some(AccountState { balance: 500, nonce: 5 }));
@@ -441,7 +447,9 @@ mod tests {
         let account1 = AccountState { balance: 200, nonce: 2 };
         trie.insert("account1", account1.clone(), initial_root).unwrap();
 
-        let branch_keys = vec![("account1", AccountState { balance: 300, nonce: 3 })];
+        // let branch_keys = vec![("account1", AccountState { balance: 300, nonce: 3 })];
+        let mut branch_keys = HashMap::new();
+        branch_keys.insert("account1", AccountState { balance: 300, nonce: 3 });
         let new_root = trie.branch(Some(initial_root), branch_keys).unwrap();
 
         let (proof, _) = generate_proof_of_state(&trie, "account1", Some(new_root), &mut DefaultHash::new()).expect("Proof generation failed for branch");
@@ -473,7 +481,9 @@ mod tests {
         let account1 = AccountState { balance: 200, nonce: 2 };
         trie.insert("account1", account1.clone(), initial_root).unwrap();
 
-        let branch_keys = vec![("account2", AccountState { balance: 300, nonce: 3 })];
+        // let branch_keys = vec![("account2", AccountState { balance: 300, nonce: 3 })];
+        let mut branch_keys = HashMap::new();
+        branch_keys.insert("account2", AccountState { balance: 300, nonce: 3 });
         let new_root = trie.branch(Some(initial_root), branch_keys).unwrap();
 
         assert_eq!(trie.get(&"account2", new_root), Some(AccountState { balance: 300, nonce: 3 }));

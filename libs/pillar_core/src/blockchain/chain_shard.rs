@@ -109,7 +109,7 @@ mod tests {
         // public
         let sender = signing_key.get_verifying_function().to_bytes();
 
-        chain.account_manager.add_account(Account::new(sender, 1000));
+        chain.state_manager.add_account(Account::new(sender, 1000));
 
         let mut parent_hash = chain.deepest_hash;
         let genesis_hash = parent_hash;
@@ -166,7 +166,7 @@ mod tests {
         // public
         let sender = signing_key.get_verifying_function().to_bytes();
 
-        chain.account_manager.add_account(Account::new(sender, 1000));
+        chain.state_manager.add_account(Account::new(sender, 1000));
 
         let mut parent_hash = chain.deepest_hash;
         let genesis_hash = parent_hash;
@@ -220,7 +220,7 @@ mod tests {
         let mut signing_key = DefaultSigner::generate_random();
         // public
         let sender = signing_key.get_verifying_function().to_bytes();
-        chain.account_manager.add_account(Account::new(sender, 2000));
+        chain.state_manager.add_account(Account::new(sender, 2000));
 
         let mut main_hash = chain.deepest_hash;
         let genesis_hash = main_hash;

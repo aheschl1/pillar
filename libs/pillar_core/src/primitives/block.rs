@@ -170,6 +170,8 @@ pub struct BlockHeader{
     pub previous_hash: StdByteArray,
     // merkle_root is the root hash of the transactions in this block
     pub merkle_root: StdByteArray,
+    // state_root is the root hash of the global state after this block
+    pub state_root: Option<StdByteArray>,
     // nonce is a random number used to find a valid hash
     pub nonce: u64,
     // timestamp is the time the block was created
@@ -186,6 +188,7 @@ impl BlockHeader {
     pub fn new(
         previous_hash: StdByteArray, 
         merkle_root: StdByteArray, 
+        state_root: Option<StdByteArray>,
         nonce: u64, timestamp: u64,
         miner_address: Option<StdByteArray>,
         tail: BlockTail,
@@ -194,6 +197,7 @@ impl BlockHeader {
         BlockHeader {
             previous_hash,
             merkle_root,
+            state_root,
             nonce,
             timestamp,
             miner_address,
@@ -313,6 +317,7 @@ impl Block {
         let header = BlockHeader::new(
             previous_hash, 
             merkle_tree.nodes.get(merkle_tree.root.unwrap()).unwrap().hash,
+            None, // State root is not set in this context
             nonce, 
             timestamp,
             miner_address,

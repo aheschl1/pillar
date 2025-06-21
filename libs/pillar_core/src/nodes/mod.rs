@@ -446,7 +446,7 @@ mod tests {
         let sender_account = chain
             .as_mut()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_or_create_account(&public_key_a);
         drop(chain);
 
@@ -500,13 +500,13 @@ mod tests {
         let account_a = chain_a
             .as_ref()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_account(&public_key_a)
             .unwrap();
         let account_b = chain_a
             .as_ref()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_account(&public_key_b);
         assert!(account_b.is_none());
         assert_eq!(account_a.lock().unwrap().balance, 0); // because we made it
@@ -515,12 +515,12 @@ mod tests {
         let account_b = chain_b
             .as_ref()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_account(&public_key_b);
         let account_a = chain_b
             .as_ref()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_account(&public_key_a);
         assert!(account_b.is_none());
         assert!(account_a.is_none()); // on node b, it has no record of either yet as the transactions are not in blocks
@@ -565,7 +565,7 @@ mod tests {
         let sender_account = chain
             .as_mut()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_or_create_account(&public_key_a);
         drop(chain);
 
@@ -625,13 +625,13 @@ mod tests {
         let account_a = chain_a
             .as_ref()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_account(&public_key_a)
             .unwrap();
         let account_b = chain_a
             .as_ref()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_account(&public_key_b);
         assert!(account_b.is_none());
         assert_eq!(account_a.lock().unwrap().balance, 0); // because we made it
@@ -640,12 +640,12 @@ mod tests {
         let account_b = chain_b
             .as_ref()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_account(&public_key_b);
         let account_a = chain_b
             .as_ref()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_account(&public_key_a);
         assert!(account_b.is_none());
         assert!(account_a.is_none()); // on node b, it has no record of either yet as the transactions are not in blocks
@@ -714,7 +714,7 @@ mod tests {
         let account_b = chain_b
             .as_ref()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_account(&public_key_b)
             .unwrap();
         assert!(account_b.lock().unwrap().balance > 0); // miner got paid
@@ -724,7 +724,7 @@ mod tests {
         let account_b = chain_a
             .as_ref()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_account(&public_key_b)
             .unwrap();
         assert!(account_b.lock().unwrap().balance > 0); // miner got paid
@@ -834,7 +834,7 @@ mod tests {
             .await
             .as_mut()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_account(&public_key_b)
             .unwrap();
         let result = submit_transaction(
@@ -1134,7 +1134,7 @@ mod tests {
             .await
             .as_mut()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_or_create_account(&public_key_c);
         let _ = submit_transaction(
             &mut node_c,
@@ -1278,7 +1278,7 @@ mod tests {
             .await
             .as_mut()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_or_create_account(&public_key_c);
         let _ = submit_transaction(
             &mut node_c,
@@ -1424,7 +1424,7 @@ mod tests {
             .await
             .as_mut()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_or_create_account(&public_key_a);
         println!("Submitting multiple transactions from A to B");
         submit_transaction(
@@ -1531,7 +1531,7 @@ mod tests {
             .await
             .as_mut()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_or_create_account(&public_key_a);
         for i in 0..10 {
             println!("Submitting transaction {} from A to B", i);
@@ -1581,7 +1581,7 @@ mod tests {
             .await
             .as_mut()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_account(&public_key_b)
             .unwrap();
         let b_balance = account_b.lock().unwrap().balance;
@@ -1595,7 +1595,7 @@ mod tests {
             .await
             .as_mut()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_account(&public_key_b)
             .unwrap();
         let balance_b = acc.lock().unwrap().balance;
@@ -1609,7 +1609,7 @@ mod tests {
             .await
             .as_mut()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_or_create_account(&public_key_b);
 
         for i in 0..10 {
@@ -1654,7 +1654,7 @@ mod tests {
             .await
             .as_mut()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_account(&public_key_a)
             .unwrap();
         let a_balance = account_a.lock().unwrap().balance;
@@ -1668,7 +1668,7 @@ mod tests {
             .await
             .as_mut()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_account(&public_key_a)
             .unwrap();
         let balance_a = acc.lock().unwrap().balance;
@@ -1682,7 +1682,7 @@ mod tests {
             .await
             .as_mut()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_account(&public_key_b)
             .unwrap();
         let b_balance = account_b.lock().unwrap().balance;
@@ -1696,7 +1696,7 @@ mod tests {
             .await
             .as_mut()
             .unwrap()
-            .account_manager
+            .state_manager
             .get_account(&public_key_b)
             .unwrap();
         let balance_b = acc.lock().unwrap().balance;

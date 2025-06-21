@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 use crate::{
-    accounting::account::AccountManager, primitives::{block::{Block, BlockHeader}, transaction::Transaction}, protocol::chain::get_genesis_block
+    accounting::state::StateManager, primitives::{block::{Block, BlockHeader}, transaction::Transaction}, protocol::chain::get_genesis_block
 };
 
 use super::TrimmableChain;
@@ -26,7 +26,7 @@ pub struct Chain {
     pub leaves: HashSet<StdByteArray>,
     /// The account manager for tracking account balances and nonces.
     #[serde(skip)]
-    pub account_manager: AccountManager,
+    pub state_manager: StateManager,
 }
 
 impl Chain {
@@ -47,7 +47,7 @@ impl Chain {
             deepest_hash: genisis_hash,
             leaves,
             headers,
-            account_manager: AccountManager::new(),
+            state_manager: StateManager::new(),
         }
     }
 
@@ -87,7 +87,7 @@ impl Chain {
             depth,
             deepest_hash,
             leaves,
-            account_manager: AccountManager::new(),
+            state_manager: StateManager::new(),
         }
     }
     
@@ -141,7 +141,7 @@ impl Chain {
         tracing::info!("Validating transaction set with {} users", per_user.len());
         for (user, transactions) in per_user.iter() {
 
-            let account = self.account_manager.get_or_create_account(user);
+            let account = self.state_manager.get_or_create_account(user);
             // if account.is_none() {
             //     return false;
             //     panic!();
@@ -230,7 +230,7 @@ impl Chain {
             return false;
         }
         // verify balance
-        let account = self.account_manager.get_account(&sender);
+        let account = self.state_manager.get_account(&sender);
         if account.is_none() {
             tracing::info!("Account for sender does not exist - Failing");
             return false;
@@ -253,7 +253,7 @@ impl Chain {
     /// Call this only after a block has been verified
     #[instrument(skip_all, fields(block = ?block.hash))]
     fn settle_new_block(&mut self, block: Block){
-        self.account_manager.update_from_block(&block);
+        self.state_manager.update_from_block(&block);
         tracing::debug!("Account settled");
         self.blocks.insert(block.hash.unwrap(), block.clone());
         self.leaves.remove(&block.header.previous_hash);
@@ -352,7 +352,7 @@ mod tests {
             1,
             &mut DefaultHash::new()
         );
-        chain.account_manager.add_account(Account::new(sender, 0));
+        chain.state_manager.add_account(Account::new(sender, 0));
         mine(&mut block, sender, None, DefaultHash::new()).await;
         let result = chain.add_new_block(block);
         assert!(result.is_ok());
@@ -380,7 +380,7 @@ mod tests {
             0,
             &mut DefaultHash::new()
         );
-        chain.account_manager.add_account(Account::new([0; 32], 0));
+        chain.state_manager.add_account(Account::new([0; 32], 0));
         let result = chain.add_new_block(block);
         assert!(result.is_err());
     }
@@ -393,7 +393,7 @@ mod tests {
         // public
         let sender = signing_key.get_verifying_function().to_bytes();
 
-        chain.account_manager.add_account(Account::new(sender, 1000));
+        chain.state_manager.add_account(Account::new(sender, 1000));
 
         let mut parent_hash = chain.deepest_hash;
         let genesis_hash = parent_hash;
@@ -449,7 +449,7 @@ mod tests {
         // public
         let sender = signing_key.get_verifying_function().to_bytes();
 
-        chain.account_manager.add_account(Account::new(sender, 1000));
+        chain.state_manager.add_account(Account::new(sender, 1000));
 
         let mut parent_hash = chain.deepest_hash;
         let genesis_hash = parent_hash;
@@ -502,7 +502,7 @@ mod tests {
         let mut signing_key = DefaultSigner::generate_random();
         // public
         let sender = signing_key.get_verifying_function().to_bytes();
-        chain.account_manager.add_account(Account::new(sender, 2000));
+        chain.state_manager.add_account(Account::new(sender, 2000));
 
         let mut main_hash = chain.deepest_hash;
         let genesis_hash = main_hash;
@@ -581,7 +581,7 @@ mod tests {
         let mut signing_key = DefaultSigner::generate_random();
         let sender = signing_key.get_verifying_function().to_bytes();
 
-        chain.account_manager.add_account(Account::new(sender, 20000));
+        chain.state_manager.add_account(Account::new(sender, 20000));
 
         let mut main_hash = chain.deepest_hash;
         let genesis_hash = main_hash;
@@ -659,7 +659,7 @@ mod tests {
         let mut signing_key = DefaultSigner::generate_random();
         let sender = signing_key.get_verifying_function().to_bytes();
 
-        chain.account_manager.add_account(Account::new(sender, 2000));
+        chain.state_manager.add_account(Account::new(sender, 2000));
 
         let mut main_hash = chain.deepest_hash;
         let genesis_hash = main_hash;
@@ -721,7 +721,7 @@ mod tests {
         let mut signing_key = DefaultSigner::generate_random();
         let sender = signing_key.get_verifying_function().to_bytes();
 
-        chain.account_manager.add_account(Account::new(sender, 2000));
+        chain.state_manager.add_account(Account::new(sender, 2000));
 
         let mut main_hash = chain.deepest_hash;
         let genesis_hash = main_hash;
