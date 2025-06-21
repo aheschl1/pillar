@@ -181,7 +181,7 @@ mod test{
             1, &mut hasher);
 
         // mine the block
-        mine(&mut block, miner.node.inner.public_key, None, hasher).await;
+        mine(&mut block, miner.node.inner.public_key, [8; 32], None, hasher).await;
         
         assert!(block.header.nonce > 0);
         assert!(block.header.miner_address.is_some());

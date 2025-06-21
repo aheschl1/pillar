@@ -109,7 +109,6 @@ mod tests {
         // public
         let sender = signing_key.get_verifying_function().to_bytes();
 
-        chain.state_manager.add_account(Account::new(sender, 1000));
 
         let mut parent_hash = chain.deepest_hash;
         let genesis_hash = parent_hash;
@@ -126,7 +125,8 @@ mod tests {
                 depth,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, None, DefaultHash::new()).await;
+            let state_root = chain.state_manager.branch_from_block(&block);
+            mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
             parent_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -146,7 +146,8 @@ mod tests {
             1,
             &mut DefaultHash::new(),
         );
-        mine(&mut fork_block, sender, None, DefaultHash::new()).await;
+        let state_root = chain.state_manager.branch_from_block(&fork_block);
+        mine(&mut fork_block, sender, state_root, None, DefaultHash::new()).await;
         chain.add_new_block(fork_block.clone()).unwrap();
 
         assert!(chain.blocks.contains_key(&fork_block.hash.unwrap()));
@@ -166,8 +167,6 @@ mod tests {
         // public
         let sender = signing_key.get_verifying_function().to_bytes();
 
-        chain.state_manager.add_account(Account::new(sender, 1000));
-
         let mut parent_hash = chain.deepest_hash;
         let genesis_hash = parent_hash;
 
@@ -186,7 +185,8 @@ mod tests {
                 depth,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, None, DefaultHash::new()).await;
+            let state_root = chain.state_manager.branch_from_block(&block);
+            mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
             parent_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -204,7 +204,8 @@ mod tests {
             1,
             &mut DefaultHash::new(),
         );
-        mine(&mut fork_block, sender, None, DefaultHash::new()).await;
+        let state_root = chain.state_manager.branch_from_block(&fork_block);
+        mine(&mut fork_block, sender, state_root, None, DefaultHash::new()).await;
         let fork_hash = fork_block.hash.unwrap();
         chain.add_new_block(fork_block).unwrap();
 
@@ -220,7 +221,6 @@ mod tests {
         let mut signing_key = DefaultSigner::generate_random();
         // public
         let sender = signing_key.get_verifying_function().to_bytes();
-        chain.state_manager.add_account(Account::new(sender, 2000));
 
         let mut main_hash = chain.deepest_hash;
         let genesis_hash = main_hash;
@@ -239,7 +239,8 @@ mod tests {
                 depth,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, None, DefaultHash::new()).await;
+            let state_root = chain.state_manager.branch_from_block(&block);
+            mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -259,7 +260,8 @@ mod tests {
                 1,
                 &mut DefaultHash::new(),
             );
-            mine(&mut fork_block, sender, None, DefaultHash::new()).await;
+            let state_root = chain.state_manager.branch_from_block(&fork_block);
+            mine(&mut fork_block, sender, state_root, None, DefaultHash::new()).await;
             let hash = fork_block.hash.unwrap();
             fork_hashes.push(hash);
             chain.add_new_block(fork_block).unwrap();

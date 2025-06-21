@@ -17,12 +17,9 @@ mod tests {
     };
 
     use crate::{
-        nodes::{
+        accounting::account::Account, nodes::{
             messages::Message, miner::{Miner, MAX_TRANSACTION_WAIT_TIME}, node::NodeState, peer::Peer
-        },
-        persistence::database::{Datastore, EmptyDatastore, GenesisDatastore},
-        primitives::{pool::MinerPool, transaction::Transaction},
-        protocol::{difficulty::get_reward_from_depth_and_stampers, peers::discover_peers, transactions::submit_transaction},
+        }, persistence::database::{Datastore, EmptyDatastore, GenesisDatastore}, primitives::{pool::MinerPool, transaction::Transaction}, protocol::{difficulty::get_reward_from_depth_and_stampers, peers::discover_peers, transactions::submit_transaction}
     };
 
     use super::node::Node;
@@ -443,11 +440,13 @@ mod tests {
         // now, A makes a transaction of 0 dollars to B
 
         let mut chain = node_a.inner.chain.lock().await;
-        let sender_account = chain
+        let state_root = chain.as_ref().unwrap().get_state_root().unwrap();
+        let mut sender_account = chain
             .as_mut()
             .unwrap()
             .state_manager
-            .get_or_create_account(&public_key_a);
+            .get_account(&public_key_a, state_root)
+            .unwrap_or(Account::new(public_key_a, 0));
         drop(chain);
 
         let timestamp = std::time::SystemTime::now()
@@ -456,7 +455,7 @@ mod tests {
             .as_secs();
         let result = submit_transaction(
             &mut node_a,
-            &mut sender_account.lock().unwrap(),
+            &mut sender_account,
             &mut signing_a,
             public_key_b,
             0,
@@ -473,7 +472,7 @@ mod tests {
         // node a already broadcasted
 
         let mut transaction = Transaction::new(
-            sender_account.lock().unwrap().address,
+            sender_account.address,
             public_key_b,
             0,
             timestamp,
@@ -497,31 +496,33 @@ mod tests {
 
         // make sure the accounts do NOT exist for the receiver - because it has never been settled.
         let chain_a = node_a.inner.chain.lock().await;
+        let state_root = chain_a.as_ref().unwrap().get_state_root().unwrap();
         let account_a = chain_a
             .as_ref()
             .unwrap()
             .state_manager
-            .get_account(&public_key_a)
+            .get_account(&public_key_a, state_root)
             .unwrap();
         let account_b = chain_a
             .as_ref()
             .unwrap()
             .state_manager
-            .get_account(&public_key_b);
+            .get_account(&public_key_b, state_root);
         assert!(account_b.is_none());
-        assert_eq!(account_a.lock().unwrap().balance, 0); // because we made it
+        assert_eq!(account_a.balance, 0); // because we made it
         drop(chain_a);
         let chain_b = node_b.inner.chain.lock().await;
+        let state_root = chain_b.as_ref().unwrap().get_state_root().unwrap();
         let account_b = chain_b
             .as_ref()
             .unwrap()
             .state_manager
-            .get_account(&public_key_b);
+            .get_account(&public_key_b, state_root);
         let account_a = chain_b
             .as_ref()
             .unwrap()
             .state_manager
-            .get_account(&public_key_a);
+            .get_account(&public_key_a, state_root);
         assert!(account_b.is_none());
         assert!(account_a.is_none()); // on node b, it has no record of either yet as the transactions are not in blocks
         drop(chain_b);
@@ -562,11 +563,13 @@ mod tests {
         // now, A makes a transaction of 0 dollars to B
 
         let mut chain = node_a.inner.chain.lock().await;
-        let sender_account = chain
+        let state_root = chain.as_ref().unwrap().get_state_root().unwrap();
+        let mut sender_account = chain
             .as_mut()
             .unwrap()
             .state_manager
-            .get_or_create_account(&public_key_a);
+            .get_account(&public_key_a, state_root)
+            .unwrap_or(Account::new(public_key_a, 0));
         drop(chain);
 
         let timestamp = std::time::SystemTime::now()
@@ -576,7 +579,7 @@ mod tests {
 
         let result = submit_transaction(
             node_a,
-            &mut sender_account.lock().unwrap(),
+            &mut sender_account,
             signing_a,
             public_key_b,
             0,
@@ -593,7 +596,7 @@ mod tests {
         // node a already broadcasted
 
         let mut transaction = Transaction::new(
-            sender_account.lock().unwrap().address,
+            sender_account.address,
             public_key_b,
             0,
             timestamp,
@@ -622,31 +625,33 @@ mod tests {
         // make sure the accounts do NOT exist for the receiver - because it has never been settled.
 
         let chain_a = node_a.inner.chain.lock().await;
+        let state_root = chain_a.as_ref().unwrap().get_state_root().unwrap();
         let account_a = chain_a
             .as_ref()
             .unwrap()
             .state_manager
-            .get_account(&public_key_a)
+            .get_account(&public_key_a, state_root)
             .unwrap();
         let account_b = chain_a
             .as_ref()
             .unwrap()
             .state_manager
-            .get_account(&public_key_b);
+            .get_account(&public_key_b, state_root);
         assert!(account_b.is_none());
-        assert_eq!(account_a.lock().unwrap().balance, 0); // because we made it
+        assert_eq!(account_a.balance, 0); // because we made it
         drop(chain_a);
         let chain_b = node_b.inner.chain.lock().await;
+        let state_root = chain_b.as_ref().unwrap().get_state_root().unwrap();
         let account_b = chain_b
             .as_ref()
             .unwrap()
             .state_manager
-            .get_account(&public_key_b);
+            .get_account(&public_key_b,state_root);
         let account_a = chain_b
             .as_ref()
             .unwrap()
             .state_manager
-            .get_account(&public_key_a);
+            .get_account(&public_key_a,state_root);
         assert!(account_b.is_none());
         assert!(account_a.is_none()); // on node b, it has no record of either yet as the transactions are not in blocks
         drop(chain_b);
@@ -711,24 +716,26 @@ mod tests {
 
         // check miner got paid
         let chain_b = node_b.inner.chain.lock().await;
+        let state_root = chain_b.as_ref().unwrap().get_state_root().unwrap();
         let account_b = chain_b
             .as_ref()
             .unwrap()
             .state_manager
-            .get_account(&public_key_b)
+            .get_account(&public_key_b, state_root)
             .unwrap();
-        assert!(account_b.lock().unwrap().balance > 0); // miner got paid
-        let balance_b = account_b.lock().unwrap().balance;
+        assert!(account_b.balance > 0); // miner got paid
+        let balance_b = account_b.balance;
         drop(chain_b);
         let chain_a = node_a.inner.chain.lock().await;
+        let state_root = chain_a.as_ref().unwrap().get_state_root().unwrap();
         let account_b = chain_a
             .as_ref()
             .unwrap()
             .state_manager
-            .get_account(&public_key_b)
+            .get_account(&public_key_b, state_root)
             .unwrap();
-        assert!(account_b.lock().unwrap().balance > 0); // miner got paid
-        assert_eq!(account_b.lock().unwrap().balance, balance_b); // balance is the same on both nodes
+        assert!(account_b.balance > 0); // miner got paid
+        assert_eq!(account_b.balance, balance_b); // balance is the same on both nodes
         drop(chain_a);
     }
 
@@ -826,8 +833,16 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("Time went backwards")
             .as_secs();
-
-        let account = node_b
+        let state_root = node_b
+            .inner
+            .chain
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .get_state_root()
+            .unwrap();
+        let mut account = node_b
             .inner
             .chain
             .lock()
@@ -835,11 +850,11 @@ mod tests {
             .as_mut()
             .unwrap()
             .state_manager
-            .get_account(&public_key_b)
+            .get_account(&public_key_b, state_root)
             .unwrap();
         let result = submit_transaction(
             &mut node_b,
-            &mut account.lock().unwrap(),
+            &mut account,
             &mut signing_b,
             public_key_a,
             0,
@@ -1127,7 +1142,17 @@ mod tests {
         // pause a sec - TODO remove this after fixing the join on stoping
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         // now, C will submit a transaction to B
-        let acc = node_c
+        let state_root = node_c
+            .inner
+            .chain
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .get_state_root()
+            .unwrap();
+        
+        let mut acc = node_c
             .inner
             .chain
             .lock()
@@ -1135,10 +1160,11 @@ mod tests {
             .as_mut()
             .unwrap()
             .state_manager
-            .get_or_create_account(&public_key_c);
+            .get_account(&public_key_c, state_root).unwrap_or(Account::new(public_key_c, 0));
+
         let _ = submit_transaction(
             &mut node_c,
-            &mut acc.lock().unwrap(),
+            &mut acc,
             &mut signing_c,
             public_key_b,
             0,
@@ -1271,7 +1297,16 @@ mod tests {
         // pause a sec - TODO remove this after fixing the join on stoping
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         // now, C will submit a transaction to B
-        let acc = node_c
+        let state_root = node_c
+            .inner
+            .chain
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .get_state_root()
+            .unwrap();
+        let mut acc = node_c
             .inner
             .chain
             .lock()
@@ -1279,10 +1314,11 @@ mod tests {
             .as_mut()
             .unwrap()
             .state_manager
-            .get_or_create_account(&public_key_c);
+            .get_account(&public_key_c, state_root)
+            .unwrap_or(Account::new(public_key_c, 0));
         let _ = submit_transaction(
             &mut node_c,
-            &mut acc.lock().unwrap(),
+            &mut acc,
             &mut signing_c,
             public_key_b,
             0,
@@ -1306,7 +1342,7 @@ mod tests {
         // DO A SECOND TRANSACTION TO GET 2 BLOCKS OUTDATED
         let _ = submit_transaction(
             &mut node_c,
-            &mut acc.lock().unwrap(),
+            &mut acc,
             &mut signing_c,
             public_key_b,
             0,
@@ -1417,7 +1453,16 @@ mod tests {
         // check states
         assert!(node_a.inner.state.lock().await.clone() == NodeState::Serving);
         assert!(node_b.inner.state.lock().await.clone() == NodeState::Serving);
-        let acc = node_a
+        let state_root = node_a
+            .inner
+            .chain
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .get_state_root()
+            .unwrap();
+        let mut acc = node_a
             .inner
             .chain
             .lock()
@@ -1425,11 +1470,12 @@ mod tests {
             .as_mut()
             .unwrap()
             .state_manager
-            .get_or_create_account(&public_key_a);
+            .get_account(&public_key_a, state_root)
+            .unwrap_or(Account::new(public_key_a, 0));
         println!("Submitting multiple transactions from A to B");
         submit_transaction(
             &mut node_a,
-            &mut acc.lock().unwrap(),
+            &mut acc,
             &mut signing_a,
             public_key_b,
             0,
@@ -1441,7 +1487,7 @@ mod tests {
         println!("Submitting multiple transactions from A to B");
         submit_transaction(
             &mut node_a,
-            &mut acc.lock().unwrap(),
+            &mut acc,
             &mut signing_a,
             public_key_b,
             0,
@@ -1524,7 +1570,16 @@ mod tests {
         assert!(node_a.inner.state.lock().await.clone() == NodeState::Serving);
         assert!(node_b.inner.state.lock().await.clone() == NodeState::Serving);
         // submit 50 transactions - first 10 from node a to node b
-        let acc = node_a
+        let state_root = node_a
+            .inner
+            .chain
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .get_state_root()
+            .unwrap();
+        let mut acc = node_a
             .inner
             .chain
             .lock()
@@ -1532,12 +1587,14 @@ mod tests {
             .as_mut()
             .unwrap()
             .state_manager
-            .get_or_create_account(&public_key_a);
+            .get_account(&public_key_a, state_root)
+            .unwrap_or(Account::new(public_key_a, 0));
+
         for i in 0..10 {
             println!("Submitting transaction {} from A to B", i);
             let _ = submit_transaction(
                 &mut node_a,
-                &mut acc.lock().unwrap(),
+                &mut acc,
                 &mut signing_a,
                 public_key_b,
                 0,
@@ -1574,7 +1631,16 @@ mod tests {
         assert_eq!(leaf.transactions.len(), 10); // 10 transactions
         drop(chain_a_lock);
         // now, check the balance of b 
-        let account_b = node_b
+        let state_root = node_b
+            .inner
+            .chain
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .get_state_root()
+            .unwrap();
+        let mut account_b = node_b
             .inner
             .chain
             .lock()
@@ -1582,12 +1648,21 @@ mod tests {
             .as_mut()
             .unwrap()
             .state_manager
-            .get_account(&public_key_b)
-            .unwrap();
-        let b_balance = account_b.lock().unwrap().balance;
+            .get_account(&public_key_b, state_root)
+            .unwrap_or(Account::new(public_key_b, 0));
+        let b_balance = account_b.balance;
         assert_eq!(b_balance, get_reward_from_depth_and_stampers(1, 2));
         drop(account_b);
         // do it on the other side 
+        let state_root = node_a
+            .inner
+            .chain
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .get_state_root()
+            .unwrap();
         let acc = node_a
             .inner
             .chain
@@ -1596,13 +1671,22 @@ mod tests {
             .as_mut()
             .unwrap()
             .state_manager
-            .get_account(&public_key_b)
+            .get_account(&public_key_b, state_root)
             .unwrap();
-        let balance_b = acc.lock().unwrap().balance;
+        let balance_b = acc.balance;
         assert_eq!(balance_b, get_reward_from_depth_and_stampers(1, 2));
         drop(acc);
         // now, b will send some of its money to a
-        let acc = node_b
+        let state_root = node_b
+            .inner
+            .chain
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .get_state_root()
+            .unwrap();
+        let mut acc = node_b
             .inner
             .chain
             .lock()
@@ -1610,13 +1694,14 @@ mod tests {
             .as_mut()
             .unwrap()
             .state_manager
-            .get_or_create_account(&public_key_b);
+            .get_account(&public_key_b, state_root)
+            .unwrap_or(Account::new(public_key_b, 0));
 
         for i in 0..10 {
             println!("Submitting transaction {} from B to A", i);
             let _ = submit_transaction(
                 &mut miner_b.node,
-                &mut acc.lock().unwrap(),
+                &mut acc,
                 &mut signing_b,
                 public_key_a,
                 10,
@@ -1647,6 +1732,15 @@ mod tests {
         assert_eq!(leaf.transactions.len(), 10); // 10 transactions
         drop(chain_a_lock);
         // now, check the balance of a
+        let state_root = node_a
+            .inner
+            .chain
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .get_state_root()
+            .unwrap();
         let account_a = node_a
             .inner
             .chain
@@ -1655,12 +1749,21 @@ mod tests {
             .as_mut()
             .unwrap()
             .state_manager
-            .get_account(&public_key_a)
+            .get_account(&public_key_a, state_root)
             .unwrap();
-        let a_balance = account_a.lock().unwrap().balance;
+        let a_balance = account_a.balance;
         assert_eq!(a_balance, 100); // 100 is the initial balance
         drop(account_a);
         // do it on the other side
+        let state_root = node_b
+            .inner
+            .chain
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .get_state_root()
+            .unwrap();
         let acc = node_b
             .inner
             .chain
@@ -1669,12 +1772,21 @@ mod tests {
             .as_mut()
             .unwrap()
             .state_manager
-            .get_account(&public_key_a)
+            .get_account(&public_key_a, state_root)
             .unwrap();
-        let balance_a = acc.lock().unwrap().balance;
+        let balance_a = acc.balance;
         assert_eq!(balance_a, 100); // 100 is the initial balance
         drop(acc);
         // check balance b 
+        let state_root = node_b
+            .inner
+            .chain
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .get_state_root()
+            .unwrap();
         let account_b = node_b
             .inner
             .chain
@@ -1683,12 +1795,21 @@ mod tests {
             .as_mut()
             .unwrap()
             .state_manager
-            .get_account(&public_key_b)
+            .get_account(&public_key_b, state_root)
             .unwrap();
-        let b_balance = account_b.lock().unwrap().balance;
+        let b_balance = account_b.balance;
         assert_eq!(b_balance, get_reward_from_depth_and_stampers(1, 2) + get_reward_from_depth_and_stampers(2, 2) - 100); // 0 is the balance after sending 10 * 10 = 100
         drop(account_b);
         // do it on the other side
+        let state_root = node_a
+            .inner
+            .chain
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .get_state_root()
+            .unwrap();
         let acc = node_a
             .inner
             .chain
@@ -1697,9 +1818,9 @@ mod tests {
             .as_mut()
             .unwrap()
             .state_manager
-            .get_account(&public_key_b)
+            .get_account(&public_key_b, state_root)
             .unwrap();
-        let balance_b = acc.lock().unwrap().balance;
+        let balance_b = acc.balance;
         assert_eq!(balance_b, get_reward_from_depth_and_stampers(1, 2) + get_reward_from_depth_and_stampers(2, 2) - 100); // 0 is the balance after sending 10 * 10 = 100
         drop(acc);
 

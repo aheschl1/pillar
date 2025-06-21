@@ -32,6 +32,11 @@ impl StateManager{
         }
     }
 
+    pub fn get_account(&self, address: &StdByteArray, state_root: StdByteArray) -> Option<Account> {
+        let state_trie = self.state_trie.lock().expect("Failed to lock state trie");
+        state_trie.get(address, state_root)
+    } 
+
     /// Updates the accounts from the block
     /// This is called when a new block is added to the chain
     /// This does NOT verify the block - VERIFY THE BLOCK FIRST

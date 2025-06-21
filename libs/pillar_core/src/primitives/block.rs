@@ -226,6 +226,10 @@ impl BlockHeader {
         if self.miner_address.is_none() {
             return false;
         }
+        if self.state_root.is_none() {
+            // The validity of the state root will be checke later
+            return false;
+        }
         if expected_hash != self.hash(hasher).unwrap() {
             return false;
         }

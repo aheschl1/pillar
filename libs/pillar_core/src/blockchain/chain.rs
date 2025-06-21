@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 use crate::{
-    accounting::state::StateManager, primitives::{block::{Block, BlockHeader}, transaction::Transaction}, protocol::chain::get_genesis_block
+    accounting::{account::Account, state::{self, StateManager}}, primitives::{block::{Block, BlockHeader}, transaction::Transaction}, protocol::chain::get_genesis_block
 };
 
 use super::TrimmableChain;
@@ -41,13 +41,18 @@ impl Chain {
         leaves.insert(genisis_hash);
 
         blocks.insert(genisis_hash, genesis_block);
+
+        let mut state_manager = StateManager::new();
+        let root = state_manager.branch_from_block(&blocks[&genisis_hash]);
+        blocks.get_mut(&genisis_hash).unwrap().header.state_root = Some(root);
+
         Chain {
             blocks,
             depth: 0,
             deepest_hash: genisis_hash,
             leaves,
             headers,
-            state_manager: StateManager::new(),
+            state_manager
         }
     }
 
@@ -125,8 +130,17 @@ impl Chain {
     }
 
     /// Ensures that all transactions in a block are valid and do not exceed available funds.
+    /// 
+    /// Validates:
+    /// 1. No duplicate nonces for the same user.
+    /// 2. Sufficient balance for all transactions.
+    /// 3. Nonces are contiguous and start from the account's current nonce.
+    /// 
+    /// # Arguments
+    /// * `transactions` - A vector of transactions to validate.
+    /// * `state_root` - The state root to use for account lookups. The state should be the previous block.
     #[instrument(skip_all, fields(transactions = ?transactions.iter().map(|t|t.hash).collect::<Vec<_>>()))]
-    fn validate_transaction_set(&mut self, transactions: &Vec<Transaction>) -> bool {
+    fn validate_transaction_set(&mut self, transactions: &Vec<Transaction>, state_root: StdByteArray) -> bool {
         // we need to make sure that there are no duplicated nonce values under the same user
         let per_user: HashMap<StdByteArray, Vec<&Transaction>> =
             transactions
@@ -141,16 +155,11 @@ impl Chain {
         tracing::info!("Validating transaction set with {} users", per_user.len());
         for (user, transactions) in per_user.iter() {
 
-            let account = self.state_manager.get_or_create_account(user);
-            // if account.is_none() {
-            //     return false;
-            //     panic!();
-            // }
-            // we create a 0 balance new account
+            let account = self.state_manager.get_account(user, state_root).unwrap_or(Account::new(*user, 0));
 
             // return true;
             let total_sum: u64 = transactions.iter().map(|t| t.header.amount).sum();
-            if account.as_ref().lock().unwrap().balance < total_sum {
+            if account.balance < total_sum {
                 tracing::info!("Account balance is insufficient for user {:?} - Failing", user);
                 return false;
             }
@@ -158,7 +167,7 @@ impl Chain {
             // now validate each individual transaction
             for transaction in transactions {
                 nonces.push(transaction.header.nonce);
-                let result = self.validate_transaction(transaction);
+                let result = self.validate_transaction(transaction, state_root);
                 if !result {
                     tracing::info!("Invalid transaction - Failing");
                     return false;
@@ -173,7 +182,7 @@ impl Chain {
                 }
             }
             // and the first one needs to be the accounts nonce
-            if nonces[0] != account.lock().unwrap().nonce {
+            if nonces[0] != account.nonce {
                 tracing::info!("First nonce does not match account nonce for user {:?} - Failing", user);
                 return false;
             }
@@ -186,6 +195,10 @@ impl Chain {
     pub fn get_top_block(&self) -> Option<&Block>{
         // we use the deepest hash as the top block
         self.blocks.get(&self.deepest_hash)
+    }
+
+    pub fn get_state_root(&self) -> Option<StdByteArray> {
+        self.get_top_block().and_then(|block| block.header.state_root)
     }
 
     pub fn get_block(&self, hash: &StdByteArray) -> Option<&Block> {
@@ -208,7 +221,7 @@ impl Chain {
     /// 3. The sender has sufficient balance.
     /// 4. The nonce matches the sender's expected value.
     #[instrument(skip_all, fields(transaction = ?transaction.hash))]
-    fn validate_transaction(&self, transaction: &Transaction) -> bool {
+    fn validate_transaction(&self, transaction: &Transaction, state_root: StdByteArray) -> bool {
         let sender = transaction.header.sender;
         let signature = transaction.signature;
         // check for signature
@@ -230,13 +243,8 @@ impl Chain {
             return false;
         }
         // verify balance
-        let account = self.state_manager.get_account(&sender);
-        if account.is_none() {
-            tracing::info!("Account for sender does not exist - Failing");
-            return false;
-        }
-        let account = account.clone().unwrap();
-        if account.lock().unwrap().balance < transaction.header.amount {
+        let account = self.state_manager.get_account(&sender, state_root).unwrap_or(Account::new(sender, 0));
+        if account.balance < transaction.header.amount {
             tracing::info!("Account balance is insufficient - Failing");
             return false;
         } 
@@ -246,14 +254,20 @@ impl Chain {
     /// Verifies the validity of a block, including its transactions and metadata.
     pub fn verify_block(&mut self, block: &Block) -> bool {
         let mut result = self.validate_block(block);
-        result = result && self.validate_transaction_set(&block.transactions);
+        result = result && self.validate_transaction_set(&block.transactions, block.header.previous_hash);
         result
     }
 
     /// Call this only after a block has been verified
     #[instrument(skip_all, fields(block = ?block.hash))]
-    fn settle_new_block(&mut self, block: Block){
-        self.state_manager.update_from_block(&block);
+    fn settle_new_block(&mut self, block: Block) -> bool{
+        let new_root = self.state_manager.branch_from_block(&block);
+        // last check - is the root the same as the one in the block?
+        if block.header.state_root.is_some() && block.header.state_root.unwrap() != new_root {
+            tracing::error!("Block state root does not match the computed state root - Failing");
+            // TODO trim out the root
+            return false;
+        }
         tracing::debug!("Account settled");
         self.blocks.insert(block.hash.unwrap(), block.clone());
         self.leaves.remove(&block.header.previous_hash);
@@ -267,6 +281,7 @@ impl Chain {
             self.deepest_hash = block.hash.unwrap();
             self.depth = block.header.depth;
         }
+        true
     }
 
     /// Adds a new block to the chain if it is valid.
@@ -283,8 +298,16 @@ impl Chain {
     pub fn add_new_block(&mut self, block: Block) -> Result<(), std::io::Error> {
         if self.verify_block(&block) {
             tracing::info!("Block is valid, settling...");
-            self.settle_new_block(block);
-            tracing::info!("Block settled in chain successfully");
+            let result = self.settle_new_block(block);
+            if result{
+                tracing::info!("Block settled in chain successfully");
+            }else{
+                tracing::error!("State does not match");
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "State does not match",
+                ));
+            }
             Ok(())
         } else {
             tracing::error!("Block is not valid, cannot add to chain");
@@ -352,8 +375,8 @@ mod tests {
             1,
             &mut DefaultHash::new()
         );
-        chain.state_manager.add_account(Account::new(sender, 0));
-        mine(&mut block, sender, None, DefaultHash::new()).await;
+        let state_root = chain.state_manager.branch_from_block(&block);
+        mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
         let result = chain.add_new_block(block);
         assert!(result.is_ok());
     }
@@ -380,7 +403,6 @@ mod tests {
             0,
             &mut DefaultHash::new()
         );
-        chain.state_manager.add_account(Account::new([0; 32], 0));
         let result = chain.add_new_block(block);
         assert!(result.is_err());
     }
@@ -392,8 +414,6 @@ mod tests {
         let mut signing_key = DefaultSigner::generate_random();
         // public
         let sender = signing_key.get_verifying_function().to_bytes();
-
-        chain.state_manager.add_account(Account::new(sender, 1000));
 
         let mut parent_hash = chain.deepest_hash;
         let genesis_hash = parent_hash;
@@ -410,7 +430,8 @@ mod tests {
                 depth,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, None, DefaultHash::new()).await;
+            let state_root = chain.state_manager.branch_from_block(&block);
+            mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
             parent_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -430,7 +451,8 @@ mod tests {
             1,
             &mut DefaultHash::new(),
         );
-        mine(&mut fork_block, sender, None, DefaultHash::new()).await;
+        let state_root = chain.state_manager.branch_from_block(&fork_block);
+        mine(&mut fork_block, sender, state_root, None, DefaultHash::new()).await;
         chain.add_new_block(fork_block.clone()).unwrap();
 
         assert!(chain.blocks.contains_key(&fork_block.hash.unwrap()));
@@ -448,8 +470,6 @@ mod tests {
         let mut signing_key = DefaultSigner::generate_random();
         // public
         let sender = signing_key.get_verifying_function().to_bytes();
-
-        chain.state_manager.add_account(Account::new(sender, 1000));
 
         let mut parent_hash = chain.deepest_hash;
         let genesis_hash = parent_hash;
@@ -469,7 +489,8 @@ mod tests {
                 depth,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, None, DefaultHash::new()).await;
+            let state_root = chain.state_manager.branch_from_block(&block);
+            mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
             parent_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -487,7 +508,8 @@ mod tests {
             1,
             &mut DefaultHash::new(),
         );
-        mine(&mut fork_block, sender, None, DefaultHash::new()).await;
+        let state_root = chain.state_manager.branch_from_block(&fork_block);
+        mine(&mut fork_block, sender, state_root, None, DefaultHash::new()).await;
         let fork_hash = fork_block.hash.unwrap();
         chain.add_new_block(fork_block).unwrap();
 
@@ -502,7 +524,6 @@ mod tests {
         let mut signing_key = DefaultSigner::generate_random();
         // public
         let sender = signing_key.get_verifying_function().to_bytes();
-        chain.state_manager.add_account(Account::new(sender, 2000));
 
         let mut main_hash = chain.deepest_hash;
         let genesis_hash = main_hash;
@@ -521,7 +542,8 @@ mod tests {
                 depth,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, None, DefaultHash::new()).await;
+            let state_root = chain.state_manager.branch_from_block(&block);
+            mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -541,7 +563,8 @@ mod tests {
                 1,
                 &mut DefaultHash::new(),
             );
-            mine(&mut fork_block, sender, None, DefaultHash::new()).await;
+            let state_root = chain.state_manager.branch_from_block(&fork_block);
+            mine(&mut fork_block, sender, state_root, None, DefaultHash::new()).await;
             let hash = fork_block.hash.unwrap();
             fork_hashes.push(hash);
             chain.add_new_block(fork_block).unwrap();
@@ -581,8 +604,6 @@ mod tests {
         let mut signing_key = DefaultSigner::generate_random();
         let sender = signing_key.get_verifying_function().to_bytes();
 
-        chain.state_manager.add_account(Account::new(sender, 20000));
-
         let mut main_hash = chain.deepest_hash;
         let genesis_hash = main_hash;
 
@@ -600,7 +621,8 @@ mod tests {
                 depth,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, None, DefaultHash::new()).await;
+            let state_root = chain.state_manager.branch_from_block(&block);
+            mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -624,7 +646,8 @@ mod tests {
                     depth,
                     &mut DefaultHash::new(),
                 );
-                mine(&mut fork_block, sender, None, DefaultHash::new()).await;
+                let state_root = chain.state_manager.branch_from_block(&fork_block);
+                mine(&mut fork_block, sender, state_root, None, DefaultHash::new()).await;
                 parent_hash = fork_block.hash.unwrap();
                 if depth == fork_length {
                     fork_hashes.push(parent_hash);
@@ -659,8 +682,6 @@ mod tests {
         let mut signing_key = DefaultSigner::generate_random();
         let sender = signing_key.get_verifying_function().to_bytes();
 
-        chain.state_manager.add_account(Account::new(sender, 2000));
-
         let mut main_hash = chain.deepest_hash;
         let genesis_hash = main_hash;
 
@@ -678,7 +699,8 @@ mod tests {
                 depth,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, None, DefaultHash::new()).await;
+            let state_root = chain.state_manager.branch_from_block(&block);
+            mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -698,7 +720,8 @@ mod tests {
                 depth,
                 &mut DefaultHash::new(),
             );
-            mine(&mut fork_block, sender, None, DefaultHash::new()).await;
+            let state_root = chain.state_manager.branch_from_block(&fork_block);
+            mine(&mut fork_block, sender, state_root, None, DefaultHash::new()).await;
             fork_hash = fork_block.hash.unwrap();
             chain.add_new_block(fork_block).unwrap();
         }
@@ -721,8 +744,6 @@ mod tests {
         let mut signing_key = DefaultSigner::generate_random();
         let sender = signing_key.get_verifying_function().to_bytes();
 
-        chain.state_manager.add_account(Account::new(sender, 2000));
-
         let mut main_hash = chain.deepest_hash;
         let genesis_hash = main_hash;
 
@@ -740,7 +761,8 @@ mod tests {
                 depth,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, None, DefaultHash::new()).await;
+            let state_root = chain.state_manager.branch_from_block(&block);
+            mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -760,7 +782,8 @@ mod tests {
                 depth,
                 &mut DefaultHash::new(),
             );
-            mine(&mut fork_block, sender, None, DefaultHash::new()).await;
+            let state_root = chain.state_manager.branch_from_block(&fork_block);
+            mine(&mut fork_block, sender, state_root, None, DefaultHash::new()).await;
             fork_hash = fork_block.hash.unwrap();
             chain.add_new_block(fork_block).unwrap();
         }
