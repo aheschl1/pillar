@@ -110,11 +110,21 @@ async fn monitor_block_pool(miner: Miner) {
             Some(mut block) => {
                 block.header.miner_address = Some(miner.node.inner.public_key);
                 block.header.tail.clean(&block.header.clone()); // removes broken signatures
+                let chain = miner.node.inner.chain.lock().await;
+                let prev_block = chain
+                    .as_ref()
+                    .unwrap()
+                    .get_block(&block.header.previous_hash)
+                    .expect("Previous block must exist")
+                    .header
+                    .clone();
+                drop(chain);
+
                 let state_root = miner.node.inner.chain.lock().await
                     .as_mut()
                     .unwrap()
                     .state_manager
-                    .branch_from_block(&block);
+                    .branch_from_block(&block, &prev_block);
 
                 mine(
                     &mut block, 

@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Debug, sync::{Arc, Mutex}};
 
 use pillar_crypto::{merkle_trie::MerkleTrie, types::StdByteArray};
 
-use crate::{accounting::{account::{Account, TransactionStub}, wallet::Wallet}, primitives::block::Block, protocol::difficulty::get_reward_from_depth_and_stampers};
+use crate::{accounting::{account::{Account, TransactionStub}, wallet::Wallet}, primitives::block::{Block, BlockHeader}, protocol::difficulty::get_reward_from_depth_and_stampers};
 
 #[derive(Clone, Default)]
 pub struct StateManager{
@@ -37,11 +37,10 @@ impl StateManager{
     /// This is called when a new block is added to the chain
     /// This does NOT verify the block - VERIFY THE BLOCK FIRST
     /// This is called when a new block is added to the chain
-    pub fn branch_from_block(&mut self, block: &Block) -> StdByteArray{
+    pub fn branch_from_block(&mut self, block: &Block, prev_header: &BlockHeader) -> StdByteArray{
         // Update the accounts from the block
-        assert!(block.header.state_root.is_none(), "Block state root must be None for branch_from_block");
         let mut state_updates: Vec<Account> = Vec::new();
-        let state_root = block.header.previous_hash;
+        let state_root = prev_header.state_root.expect("Previous block must have a state root");
         let mut state_trie = self.state_trie.lock().expect("Failed to lock state trie");
 
         for transaction in &block.transactions {

@@ -489,4 +489,26 @@ mod tests {
         assert_eq!(trie.get(&"account2", new_root), Some(AccountState { balance: 300, nonce: 3 }));
         assert_eq!(trie.get(&"account1", new_root), Some(account1));
     }
+
+    #[test]
+    fn test_branch_twice_same(){
+        let initial_account_info = AccountState { balance: 100, nonce: 1 };
+        // let (mut trie, initial_root) = MerkleTrie::<&str, AccountState>::new("account0", initial_account_info.clone());
+        let mut trie = MerkleTrie::<&str, AccountState>::new();
+        let initial_root = trie.create_genesis("account0", initial_account_info.clone()).expect("Failed to create genesis");
+
+        let account1 = AccountState { balance: 200, nonce: 2 };
+        trie.insert("account1", account1.clone(), initial_root).unwrap();
+
+        // let branch_keys = vec![("account1", AccountState { balance: 300, nonce: 3 })];
+        let mut branch_keys = HashMap::new();
+        branch_keys.insert("account2", AccountState { balance: 300, nonce: 3 });
+        let new_root = trie.branch(Some(initial_root), branch_keys.clone()).unwrap();
+
+        // now branch again with the same keys
+        let new_root2 = trie.branch(Some(initial_root), branch_keys).unwrap();
+
+        assert_eq!(new_root, new_root2);
+
+    }
 }
