@@ -2,13 +2,14 @@ use std::{collections::HashMap, fmt::Debug, sync::{Arc, Mutex}};
 
 use pillar_crypto::{merkle_trie::MerkleTrie, types::StdByteArray};
 
-use crate::{accounting::account::{Account, TransactionStub}, primitives::block::Block, protocol::difficulty::get_reward_from_depth_and_stampers};
+use crate::{accounting::{account::{Account, TransactionStub}, wallet::Wallet}, primitives::block::Block, protocol::difficulty::get_reward_from_depth_and_stampers};
 
-
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct StateManager{
     // The mapping from address to account
     pub state_trie: Arc<Mutex<MerkleTrie<StdByteArray, Account>>>,
+    // basic wallets for local node
+    pub wallets: Arc<Mutex<HashMap<StdByteArray, Wallet>>>,
 }
 
 impl Debug for StateManager {
@@ -18,17 +19,12 @@ impl Debug for StateManager {
     }
 }
 
-impl Default for StateManager {
-    fn default() -> Self {
-        StateManager::new()
-    }
-}
-
 impl StateManager{
     // Creates a new account manager
-    pub fn new() -> Self {
+    pub fn new(wallets: Option<HashMap<StdByteArray, Wallet>>) -> Self {
         StateManager {
             state_trie: Arc::new(Mutex::new(MerkleTrie::new())),
+            wallets: Arc::new(Mutex::new(wallets.unwrap_or_default())),
         }
     }
 
@@ -96,6 +92,7 @@ impl StateManager{
             block_hash: block.hash.unwrap(),
             transaction_hash: [0; 32], // This is a placeholder, as the miner reward does not have a transaction hash
         });
+        state_updates.push(miner_account);
 
         let updates = state_updates.into_iter()
             .map(|account| (account.address, account))

@@ -11,7 +11,7 @@ use crate::{
 use super::TrimmableChain;
 
 /// Represents the state of the blockchain, including blocks, accounts, and chain parameters.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Clone, Deserialize)]
 pub struct Chain {
     /// The blocks in the chain.
     pub blocks: HashMap<StdByteArray, Block>,
@@ -33,17 +33,25 @@ impl Chain {
     /// Creates a new blockchain with a genesis block.
     pub fn new_with_genesis() -> Self {
         let genesis_block = get_genesis_block();
-        let mut blocks = HashMap::new();
         let genisis_hash = genesis_block.hash.unwrap();
+        
         let mut headers = HashMap::new();
         headers.insert(genisis_hash, genesis_block.header);
+        
         let mut leaves = HashSet::new();
         leaves.insert(genisis_hash);
-
+        
+        let mut blocks = HashMap::new();
         blocks.insert(genisis_hash, genesis_block);
 
-        let mut state_manager = StateManager::new();
-        let root = state_manager.branch_from_block(&blocks[&genisis_hash]);
+        let state_manager = StateManager::new(None);
+        let root = state_manager
+            .state_trie
+            .lock()
+            .unwrap()
+            .create_genesis([0; 32], Account::default())
+            .expect("Failed to create genesis state root");
+
         blocks.get_mut(&genisis_hash).unwrap().header.state_root = Some(root);
 
         Chain {
@@ -92,7 +100,7 @@ impl Chain {
             depth,
             deepest_hash,
             leaves,
-            state_manager: StateManager::new(),
+            state_manager: StateManager::new(None),
         }
     }
     

@@ -172,7 +172,7 @@ mod tests {
         )];
         let datastore = GenesisDatastore::new();
         let transaction_pool = None;
-
+        
         let mut node1 = Node::new(
             public_key,
             private_key,
@@ -440,13 +440,7 @@ mod tests {
         // now, A makes a transaction of 0 dollars to B
 
         let mut chain = node_a.inner.chain.lock().await;
-        let state_root = chain.as_ref().unwrap().get_state_root().unwrap();
-        let mut sender_account = chain
-            .as_mut()
-            .unwrap()
-            .state_manager
-            .get_account(&public_key_a, state_root)
-            .unwrap_or(Account::new(public_key_a, 0));
+        let state_manager = chain.as_mut().unwrap().state_manager.clone();
         drop(chain);
 
         let timestamp = std::time::SystemTime::now()
@@ -455,8 +449,7 @@ mod tests {
             .as_secs();
         let result = submit_transaction(
             &mut node_a,
-            &mut sender_account,
-            &mut signing_a,
+            state_manager.wallets.lock().unwrap().get_mut(&public_key_a).unwrap(),
             public_key_b,
             0,
             false,
@@ -472,7 +465,7 @@ mod tests {
         // node a already broadcasted
 
         let mut transaction = Transaction::new(
-            sender_account.address,
+            public_key_a,
             public_key_b,
             0,
             timestamp,
@@ -563,24 +556,16 @@ mod tests {
         // now, A makes a transaction of 0 dollars to B
 
         let mut chain = node_a.inner.chain.lock().await;
-        let state_root = chain.as_ref().unwrap().get_state_root().unwrap();
-        let mut sender_account = chain
-            .as_mut()
-            .unwrap()
-            .state_manager
-            .get_account(&public_key_a, state_root)
-            .unwrap_or(Account::new(public_key_a, 0));
         drop(chain);
 
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("Time went backwards")
             .as_secs();
-
+        let state_manager = node_a.inner.chain.lock().await.as_mut().unwrap().state_manager.clone();
         let result = submit_transaction(
             node_a,
-            &mut sender_account,
-            signing_a,
+            state_manager.wallets.lock().unwrap().get_mut(&public_key_a).unwrap(),
             public_key_b,
             0,
             false,
@@ -596,7 +581,7 @@ mod tests {
         // node a already broadcasted
 
         let mut transaction = Transaction::new(
-            sender_account.address,
+            public_key_a,
             public_key_b,
             0,
             timestamp,
@@ -833,29 +818,12 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("Time went backwards")
             .as_secs();
-        let state_root = node_b
-            .inner
-            .chain
-            .lock()
-            .await
-            .as_ref()
-            .unwrap()
-            .get_state_root()
-            .unwrap();
-        let mut account = node_b
-            .inner
-            .chain
-            .lock()
-            .await
-            .as_mut()
-            .unwrap()
-            .state_manager
-            .get_account(&public_key_b, state_root)
-            .unwrap();
+        
+        let state_manager = node_b.inner.chain.lock().await.as_mut().unwrap().state_manager.clone();
+    
         let result = submit_transaction(
             &mut node_b,
-            &mut account,
-            &mut signing_b,
+            state_manager.wallets.lock().unwrap().get_mut(&public_key_b).unwrap(),
             public_key_a,
             0,
             false,
@@ -1142,30 +1110,10 @@ mod tests {
         // pause a sec - TODO remove this after fixing the join on stoping
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         // now, C will submit a transaction to B
-        let state_root = node_c
-            .inner
-            .chain
-            .lock()
-            .await
-            .as_ref()
-            .unwrap()
-            .get_state_root()
-            .unwrap();
-        
-        let mut acc = node_c
-            .inner
-            .chain
-            .lock()
-            .await
-            .as_mut()
-            .unwrap()
-            .state_manager
-            .get_account(&public_key_c, state_root).unwrap_or(Account::new(public_key_c, 0));
-
+        let state_manager = node_c.inner.chain.lock().await.as_mut().unwrap().state_manager.clone();
         let _ = submit_transaction(
             &mut node_c,
-            &mut acc,
-            &mut signing_c,
+            state_manager.wallets.lock().unwrap().get_mut(&public_key_c).unwrap(),
             public_key_b,
             0,
             false,
@@ -1297,29 +1245,10 @@ mod tests {
         // pause a sec - TODO remove this after fixing the join on stoping
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         // now, C will submit a transaction to B
-        let state_root = node_c
-            .inner
-            .chain
-            .lock()
-            .await
-            .as_ref()
-            .unwrap()
-            .get_state_root()
-            .unwrap();
-        let mut acc = node_c
-            .inner
-            .chain
-            .lock()
-            .await
-            .as_mut()
-            .unwrap()
-            .state_manager
-            .get_account(&public_key_c, state_root)
-            .unwrap_or(Account::new(public_key_c, 0));
+        let state_manager = node_c.inner.chain.lock().await.as_mut().unwrap().state_manager.clone();
         let _ = submit_transaction(
             &mut node_c,
-            &mut acc,
-            &mut signing_c,
+            state_manager.wallets.lock().unwrap().get_mut(&public_key_c).unwrap(),
             public_key_b,
             0,
             false,
@@ -1342,8 +1271,7 @@ mod tests {
         // DO A SECOND TRANSACTION TO GET 2 BLOCKS OUTDATED
         let _ = submit_transaction(
             &mut node_c,
-            &mut acc,
-            &mut signing_c,
+            state_manager.wallets.lock().unwrap().get_mut(&public_key_c).unwrap(),
             public_key_b,
             0,
             false,
@@ -1453,16 +1381,7 @@ mod tests {
         // check states
         assert!(node_a.inner.state.lock().await.clone() == NodeState::Serving);
         assert!(node_b.inner.state.lock().await.clone() == NodeState::Serving);
-        let state_root = node_a
-            .inner
-            .chain
-            .lock()
-            .await
-            .as_ref()
-            .unwrap()
-            .get_state_root()
-            .unwrap();
-        let mut acc = node_a
+        let state_manager = node_a
             .inner
             .chain
             .lock()
@@ -1470,13 +1389,11 @@ mod tests {
             .as_mut()
             .unwrap()
             .state_manager
-            .get_account(&public_key_a, state_root)
-            .unwrap_or(Account::new(public_key_a, 0));
+            .clone();
         println!("Submitting multiple transactions from A to B");
         submit_transaction(
             &mut node_a,
-            &mut acc,
-            &mut signing_a,
+            state_manager.wallets.lock().unwrap().get_mut(&public_key_a).unwrap(),
             public_key_b,
             0,
             false,
@@ -1487,8 +1404,7 @@ mod tests {
         println!("Submitting multiple transactions from A to B");
         submit_transaction(
             &mut node_a,
-            &mut acc,
-            &mut signing_a,
+            state_manager.wallets.lock().unwrap().get_mut(&public_key_a).unwrap(),
             public_key_b,
             0,
             false,
@@ -1496,7 +1412,6 @@ mod tests {
         )
         .await
         .unwrap();
-        drop(acc);
         println!("waiting on transactions to be processed");
         tokio::time::sleep(std::time::Duration::from_secs(
             2 * MAX_TRANSACTION_WAIT_TIME,
@@ -1570,16 +1485,7 @@ mod tests {
         assert!(node_a.inner.state.lock().await.clone() == NodeState::Serving);
         assert!(node_b.inner.state.lock().await.clone() == NodeState::Serving);
         // submit 50 transactions - first 10 from node a to node b
-        let state_root = node_a
-            .inner
-            .chain
-            .lock()
-            .await
-            .as_ref()
-            .unwrap()
-            .get_state_root()
-            .unwrap();
-        let mut acc = node_a
+        let state_manager = node_a
             .inner
             .chain
             .lock()
@@ -1587,15 +1493,13 @@ mod tests {
             .as_mut()
             .unwrap()
             .state_manager
-            .get_account(&public_key_a, state_root)
-            .unwrap_or(Account::new(public_key_a, 0));
+            .clone();
 
         for i in 0..10 {
             println!("Submitting transaction {} from A to B", i);
             let _ = submit_transaction(
                 &mut node_a,
-                &mut acc,
-                &mut signing_a,
+                state_manager.wallets.lock().unwrap().get_mut(&public_key_a).unwrap(),
                 public_key_b,
                 0,
                 false,
@@ -1677,16 +1581,7 @@ mod tests {
         assert_eq!(balance_b, get_reward_from_depth_and_stampers(1, 2));
         drop(acc);
         // now, b will send some of its money to a
-        let state_root = node_b
-            .inner
-            .chain
-            .lock()
-            .await
-            .as_ref()
-            .unwrap()
-            .get_state_root()
-            .unwrap();
-        let mut acc = node_b
+        let state_manager = node_b
             .inner
             .chain
             .lock()
@@ -1694,15 +1589,13 @@ mod tests {
             .as_mut()
             .unwrap()
             .state_manager
-            .get_account(&public_key_b, state_root)
-            .unwrap_or(Account::new(public_key_b, 0));
+            .clone();
 
         for i in 0..10 {
             println!("Submitting transaction {} from B to A", i);
             let _ = submit_transaction(
                 &mut miner_b.node,
-                &mut acc,
-                &mut signing_b,
+                state_manager.wallets.lock().unwrap().get_mut(&public_key_b).unwrap(),
                 public_key_a,
                 10,
                 false,

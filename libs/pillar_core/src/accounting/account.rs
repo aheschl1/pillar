@@ -12,7 +12,7 @@ pub struct TransactionStub{
     pub transaction_hash: StdByteArray,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Account{
     // The address of the account is the public key
     pub address: StdByteArray,
@@ -20,8 +20,6 @@ pub struct Account{
     pub balance: u64,
     // The nonce of the account, to prevent replay attacks
     pub nonce: u64,
-    // the local copy of the next nonce to send
-    pub local_nonce: u64,
     // a tracking of blocks/transactions that lead to this balance
     pub history: Vec<TransactionStub>, // (block hash, transaction hash)
 }
@@ -45,7 +43,6 @@ impl Account{
             address,
             balance,
             nonce: 0,
-            local_nonce: 0,
             history
         }
     }
