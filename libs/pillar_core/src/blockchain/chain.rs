@@ -165,9 +165,7 @@ impl Chain {
         tracing::debug!("Per user transactions: {:?}", per_user);
         tracing::info!("Validating transaction set with {} users", per_user.len());
         for (user, transactions) in per_user.iter() {
-
             let account = self.state_manager.get_account(user, state_root).unwrap_or(Account::new(*user, 0));
-
             // return true;
             let total_sum: u64 = transactions.iter().map(|t| t.header.amount).sum();
             if account.balance < total_sum {
@@ -192,11 +190,13 @@ impl Chain {
                     return false;
                 }
             }
+
             // and the first one needs to be the accounts nonce
             if nonces[0] != account.nonce {
                 tracing::info!("First nonce does not match account nonce for user {:?} - Failing", user);
                 return false;
             }
+
         }
 
         true
@@ -265,7 +265,7 @@ impl Chain {
     /// Verifies the validity of a block, including its transactions and metadata.
     pub fn verify_block(&mut self, block: &Block) -> bool {
         let mut result = self.validate_block(block);
-        result = result && self.validate_transaction_set(&block.transactions, block.header.previous_hash);
+        result = result && self.validate_transaction_set(&block.transactions, self.blocks.get(&block.header.previous_hash).unwrap().header.state_root.unwrap());
         result
     }
 
@@ -275,9 +275,7 @@ impl Chain {
         let prev_header = self.headers.get(&block.header.previous_hash).expect("Previous block header must exist");
         let new_root = self.state_manager.branch_from_block(&block, prev_header);
         // last check - is the root the same as the one in the block?
-        if block.header.state_root.is_some() && block.header.state_root.unwrap() != new_root {
-            println!("Block state root does not match the computed state root: {:?} != {:?}", 
-                block.header.state_root.unwrap(), new_root);
+        if block.header.state_root.unwrap() != new_root {
             tracing::error!("Block state root does not match the computed state root - Failing");
             // TODO trim out the root
             return false;
@@ -373,7 +371,7 @@ mod tests {
         // public
         let sender = signing_key.get_verifying_function().to_bytes();
 
-        let mut trans = Transaction::new(sender, [0;32], 0, 0, 0, &mut DefaultHash::new());
+        let mut trans = Transaction::new(sender, [1;32], 0, 0, 0, &mut DefaultHash::new());
         trans.sign(&mut signing_key);
         let mut block = Block::new(
             chain.deepest_hash, 
@@ -383,7 +381,7 @@ mod tests {
                 .unwrap()
                 .as_secs(),
             vec![trans],
-            Some([0; 32]),
+            Some(sender),
             BlockTail::default().stamps,
             1,
             &mut DefaultHash::new()
@@ -432,7 +430,7 @@ mod tests {
         let mut parent_hash = chain.deepest_hash;
         let genesis_hash = parent_hash;
         for depth in 1..=11 {
-            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth-1, &mut DefaultHash::new());
+            let mut transaction = Transaction::new(sender, [2; 32], 0, 0, depth-1, &mut DefaultHash::new());
             transaction.sign(&mut signing_key);
             let mut block = Block::new(
                 parent_hash,
@@ -455,7 +453,7 @@ mod tests {
         let long_chain_leaf = parent_hash;
 
         // Create shorter fork from genesis (only 1 block)
-        let mut trans = Transaction::new(sender, [2; 32], 10, 0, 11, &mut DefaultHash::new());
+        let mut trans = Transaction::new(sender, [2; 32], 0, 0, 0, &mut DefaultHash::new());
         trans.sign(&mut signing_key);
         let mut fork_block = Block::new(
             genesis_hash, // same genesis

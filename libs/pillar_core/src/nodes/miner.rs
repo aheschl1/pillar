@@ -1,7 +1,7 @@
 use pillar_crypto::hashing::DefaultHash;
 use tracing::instrument;
 
-use crate::{primitives::block::{Block, BlockTail}, protocol::pow::mine};
+use crate::{blockchain::TrimmableChain, primitives::block::{Block, BlockTail}, protocol::pow::mine};
 
 use super::{messages::Message, node::{Broadcaster, Node}};
 
@@ -114,11 +114,9 @@ async fn monitor_block_pool(miner: Miner) {
                 let prev_block = chain
                     .as_ref()
                     .unwrap()
-                    .get_block(&block.header.previous_hash)
-                    .expect("Previous block must exist")
-                    .header
-                    .clone();
-                drop(chain);
+                    .headers
+                    .get(&block.header.previous_hash)
+                    .expect("Previous header must exist");
 
                 let state_root = miner.node.inner.chain.lock().await
                     .as_mut()

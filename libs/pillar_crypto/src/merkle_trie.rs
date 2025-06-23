@@ -511,4 +511,55 @@ mod tests {
         assert_eq!(new_root, new_root2);
 
     }
+
+    #[test]
+    fn test_branch_multiple_times_with_complexity() {
+        let initial_account_info = AccountState { balance: 100, nonce: 1 };
+        let mut trie = MerkleTrie::<&str, AccountState>::new();
+        let initial_root = trie.create_genesis("account0", initial_account_info.clone()).expect("Failed to create genesis");
+
+        let account1 = AccountState { balance: 200, nonce: 2 };
+        trie.insert("account1", account1.clone(), initial_root).unwrap();
+
+        let account2 = AccountState { balance: 300, nonce: 3 };
+        trie.insert("account2", account2.clone(), initial_root).unwrap();
+
+        // First branch with updates
+        let mut branch_keys = HashMap::new();
+        branch_keys.insert("account1", AccountState { balance: 400, nonce: 4 });
+        branch_keys.insert("account3", AccountState { balance: 500, nonce: 5 });
+        let new_root = trie.branch(Some(initial_root), branch_keys.clone()).unwrap();
+
+        // Verify the first branch
+        assert_eq!(trie.get(&"account1", new_root), Some(AccountState { balance: 400, nonce: 4 }));
+        assert_eq!(trie.get(&"account3", new_root), Some(AccountState { balance: 500, nonce: 5 }));
+        assert_eq!(trie.get(&"account2", new_root), Some(account2.clone()));
+
+        // Create the same branch again
+        let new_root2 = trie.branch(Some(initial_root), branch_keys.clone()).unwrap();
+
+        // Verify the second branch is identical to the first
+        assert_eq!(new_root, new_root2);
+        assert_eq!(trie.get(&"account1", new_root2), Some(AccountState { balance: 400, nonce: 4 }));
+        assert_eq!(trie.get(&"account3", new_root2), Some(AccountState { balance: 500, nonce: 5 }));
+        assert_eq!(trie.get(&"account2", new_root2), Some(account2.clone()));
+
+        // Add more complexity: branch from the first branch
+        let mut branch_keys2 = HashMap::new();
+        branch_keys2.insert("account3", AccountState { balance: 600, nonce: 6 });
+        branch_keys2.insert("account4", AccountState { balance: 700, nonce: 7 });
+        let new_root3 = trie.branch(Some(new_root), branch_keys2).unwrap();
+
+        // Verify the new branch
+        assert_eq!(trie.get(&"account1", new_root3), Some(AccountState { balance: 400, nonce: 4 }));
+        assert_eq!(trie.get(&"account3", new_root3), Some(AccountState { balance: 600, nonce: 6 }));
+        assert_eq!(trie.get(&"account4", new_root3), Some(AccountState { balance: 700, nonce: 7 }));
+        assert_eq!(trie.get(&"account2", new_root3), Some(account2.clone()));
+
+        // Ensure the original and first branch remain unchanged
+        assert_eq!(trie.get(&"account3", new_root), Some(AccountState { balance: 500, nonce: 5 }));
+        assert_eq!(trie.get(&"account4", new_root), None);
+        assert_eq!(trie.get(&"account3", initial_root), None);
+        assert_eq!(trie.get(&"account4", initial_root), None);
+    }
 }

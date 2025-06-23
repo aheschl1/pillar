@@ -113,7 +113,7 @@ mod tests {
         let mut parent_hash = chain.deepest_hash;
         let genesis_hash = parent_hash;
         for depth in 1..=11 {
-            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth-1, &mut DefaultHash::new());
+            let mut transaction = Transaction::new(sender, [2; 32], 0, 0, depth-1, &mut DefaultHash::new());
             transaction.sign(&mut signing_key);
             let mut block = Block::new(
                 parent_hash,
@@ -135,7 +135,7 @@ mod tests {
         let long_chain_leaf = parent_hash;
 
         // Create shorter fork from genesis (only 1 block)
-        let mut trans = Transaction::new(sender, [2; 32], 10, 0, 11, &mut DefaultHash::new());
+        let mut trans = Transaction::new(sender, [2; 32], 0, 0, 0, &mut DefaultHash::new());
         trans.sign(&mut signing_key);
         let mut fork_block = Block::new(
             genesis_hash, // same genesis
