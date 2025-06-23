@@ -493,7 +493,7 @@ mod tests {
         // Build a main chain of depth 9
         for depth in 1..=9 {
             let time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth;
-            let mut transaction = Transaction::new(sender, [2; 32], 10, time, depth-1, &mut DefaultHash::new());
+            let mut transaction = Transaction::new(sender, [2; 32], 0, time, depth-1, &mut DefaultHash::new());
             transaction.sign(&mut signing_key);
             let mut block = Block::new(
                 parent_hash,
@@ -513,7 +513,7 @@ mod tests {
             chain.add_new_block(block).unwrap();
         }
 
-        let mut trans = Transaction::new(sender, [2; 32], 10, 0, 9, &mut DefaultHash::new());
+        let mut trans = Transaction::new(sender, [2; 32], 0, 0, 0, &mut DefaultHash::new());
         trans.sign(&mut signing_key);
         // Add a 1-block fork off the genesis (difference = 9)
         let mut fork_block = Block::new(
@@ -550,7 +550,7 @@ mod tests {
 
         // Extend the main chain to depth 12
         for depth in 1..=12 {
-            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth-1, &mut DefaultHash::new());
+            let mut transaction = Transaction::new(sender, [2; 32], 0, 0, depth-1, &mut DefaultHash::new());
             transaction.sign(&mut signing_key);
             let mut block = Block::new(
                 main_hash,
@@ -572,13 +572,13 @@ mod tests {
 
         // Create two short forks from genesis (depth 1)
         let mut fork_hashes = vec![];
-        for offset in 0..2 {
-            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, offset+12, &mut DefaultHash::new());
+        for _ in 1..3 {
+            let mut transaction = Transaction::new(sender, [2; 32], 0, 0, 0, &mut DefaultHash::new());
             transaction.sign(&mut signing_key);
             let mut fork_block = Block::new(
                 genesis_hash,
                 0,
-                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 20 + offset,
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 20,
                 vec![transaction],
                 Some(sender),
                 BlockTail::default().stamps,
@@ -633,7 +633,7 @@ mod tests {
 
         // Extend the main chain to depth 15
         for depth in 1..=15 {
-            let mut transaction = Transaction::new(sender, [2; 32], 1, 0, depth-1, &mut DefaultHash::new());
+            let mut transaction = Transaction::new(sender, [2; 32], 0, 0, depth-1, &mut DefaultHash::new());
             transaction.sign(&mut signing_key);
             let mut block = Block::new(
                 main_hash,
@@ -655,17 +655,15 @@ mod tests {
 
         // Create forks of different lengths
         let mut fork_hashes = vec![];
-        let mut offset = 0;
         for fork_length in 1..=3 {
             let mut parent_hash = genesis_hash;
             for depth in 1..=fork_length {
-                let mut transaction = Transaction::new(sender, [2; 32], 1, 0, 15 + offset, &mut DefaultHash::new());
-                offset += 1;
+                let mut transaction = Transaction::new(sender, [2; 32], 0, 0, depth-1, &mut DefaultHash::new());
                 transaction.sign(&mut signing_key);
                 let mut fork_block = Block::new(
                     parent_hash,
                     0,
-                    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth + 20,
+                    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth + fork_length,
                     vec![transaction],
                     Some(sender),
                     BlockTail::default().stamps,
@@ -715,7 +713,7 @@ mod tests {
 
         // Extend the main chain to depth 15
         for depth in 1..=15 {
-            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth - 1, &mut DefaultHash::new());
+            let mut transaction = Transaction::new(sender, [2; 32], 0, 0, depth - 1, &mut DefaultHash::new());
             transaction.sign(&mut signing_key);
             let mut block = Block::new(
                 main_hash,
@@ -738,7 +736,7 @@ mod tests {
         // Create a fork that is within the threshold (difference < 10)
         let mut fork_hash = genesis_hash;
         for depth in 1..=6 {
-            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth + 14, &mut DefaultHash::new());
+            let mut transaction = Transaction::new(sender, [2; 32], 0, 0, depth - 1, &mut DefaultHash::new());
             transaction.sign(&mut signing_key);
             let mut fork_block = Block::new(
                 fork_hash,
@@ -781,7 +779,7 @@ mod tests {
 
         // Extend the main chain to depth 10
         for depth in 1..=15 {
-            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth - 1, &mut DefaultHash::new());
+            let mut transaction = Transaction::new(sender, [2; 32], 0, 0, depth - 1, &mut DefaultHash::new());
             transaction.sign(&mut signing_key);
             let mut block = Block::new(
                 main_hash,
@@ -804,7 +802,7 @@ mod tests {
         // Create a fork that shares some nodes with the main chain
         let mut fork_hash = genesis_hash;
         for depth in 1..=3 {
-            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth + 14, &mut DefaultHash::new());
+            let mut transaction = Transaction::new(sender, [2; 32], 0, 0, depth - 1, &mut DefaultHash::new());
             transaction.sign(&mut signing_key);
             let mut fork_block = Block::new(
                 fork_hash,
