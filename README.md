@@ -1,6 +1,8 @@
 
-# Pillar
-
+<p style="display: flex; align-items: center; gap: 10px;">
+  <img src="./figures/logo.png" alt="Logo" height="40">
+  <strong style="font-size: 1.8em;">Pillar</strong>
+</p>
 Zero-trust decentralized ledger with trust layer.
 
 Vision:
