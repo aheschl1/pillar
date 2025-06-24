@@ -1,18 +1,18 @@
 
-# Project
+# Pillar
 
-Zero-trust decentralized ledger.
+Zero-trust decentralized ledger with trust layer.
 
 Vision:
 
 - A two tier network where:
-    - The main network handles transaction through proof of work consensus
-    - A second tier of the network is a rank system for external submition for arbitrary work to be done on a specific level of trust.
+  - The main network handles transaction through proof of work consensus
+  - A second tier of the network is a rank system for external submition for arbitrary work to be done on a specific level of trust.
 - Incentive does not come through transaction fees, but rather through ranking up trust in order to be employed by paying third parties for computations
 
 Currently in heavy development.
 
-# Testing
+## Testing
 
 Running `cargo test` will launch tests, saving logs to `./test_output/{timestamp}/output.log`.
 
