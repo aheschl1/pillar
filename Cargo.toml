@@ -3,3 +3,4 @@ members = [
     "libs/pillar_crypto",
     "libs/pillar_core"
 ]
+resolver="3"

@@ -21,10 +21,17 @@ pub fn is_valid_hash(difficulty: u64, hash: &StdByteArray) -> bool {
     leading_zeros >= difficulty
 }
 
-pub async fn mine(block: &mut Block, address: StdByteArray, abort_signal: Option<Receiver<u64>>, mut hash_function: impl HashFunction){
+pub async fn mine(
+    block: &mut Block, 
+    address: StdByteArray, 
+    state_root: StdByteArray,
+    abort_signal: Option<Receiver<u64>>, 
+    mut hash_function: impl HashFunction
+){
     // the block is already pupulated
     block.header.nonce = 0;
     block.header.miner_address = Some(address);
+    block.header.state_root = Some(state_root);
     loop {
         match block.header.hash(&mut hash_function){
             Ok(hash) => {

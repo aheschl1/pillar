@@ -329,7 +329,7 @@ impl Node {
             Message::BlockTransmission(block) => {
                 // add the block to the chain if we have downloaded it already - first it is verified TODO add to a queue to be added later
                 let mut block = block.clone();
-                if state.is_consume(){
+                if state.is_consume() && block.header.miner_address.is_none(){
                     tracing::info!("Going to deal with this unmined block.");
                     self.settle_unmined_block(&mut block).await?;
                 }

@@ -5,13 +5,13 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 use crate::{
-    accounting::account::AccountManager, primitives::{block::{Block, BlockHeader}, transaction::Transaction}, protocol::chain::get_genesis_block
+    accounting::{account::Account, state::{StateManager}}, primitives::{block::{Block, BlockHeader}, transaction::Transaction}, protocol::chain::get_genesis_block
 };
 
 use super::TrimmableChain;
 
 /// Represents the state of the blockchain, including blocks, accounts, and chain parameters.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Clone, Deserialize)]
 pub struct Chain {
     /// The blocks in the chain.
     pub blocks: HashMap<StdByteArray, Block>,
@@ -26,28 +26,41 @@ pub struct Chain {
     pub leaves: HashSet<StdByteArray>,
     /// The account manager for tracking account balances and nonces.
     #[serde(skip)]
-    pub account_manager: AccountManager,
+    pub state_manager: StateManager,
 }
 
 impl Chain {
     /// Creates a new blockchain with a genesis block.
     pub fn new_with_genesis() -> Self {
-        let genesis_block = get_genesis_block();
-        let mut blocks = HashMap::new();
+        let state_manager = StateManager::new();
+        let state_root = state_manager
+            .state_trie
+            .lock()
+            .as_mut()
+            .unwrap()
+            .create_genesis([0; 32], Account::default())
+            .expect("Failed to create genesis state root");
+
+        let genesis_block = get_genesis_block(Some(state_root));
         let genisis_hash = genesis_block.hash.unwrap();
+        
         let mut headers = HashMap::new();
         headers.insert(genisis_hash, genesis_block.header);
+        
         let mut leaves = HashSet::new();
         leaves.insert(genisis_hash);
-
+        
+        let mut blocks = HashMap::new();
         blocks.insert(genisis_hash, genesis_block);
+
+
         Chain {
             blocks,
             depth: 0,
             deepest_hash: genisis_hash,
             leaves,
             headers,
-            account_manager: AccountManager::new(),
+            state_manager
         }
     }
 
@@ -87,7 +100,7 @@ impl Chain {
             depth,
             deepest_hash,
             leaves,
-            account_manager: AccountManager::new(),
+            state_manager: StateManager::new(),
         }
     }
     
@@ -125,8 +138,17 @@ impl Chain {
     }
 
     /// Ensures that all transactions in a block are valid and do not exceed available funds.
+    /// 
+    /// Validates:
+    /// 1. No duplicate nonces for the same user.
+    /// 2. Sufficient balance for all transactions.
+    /// 3. Nonces are contiguous and start from the account's current nonce.
+    /// 
+    /// # Arguments
+    /// * `transactions` - A vector of transactions to validate.
+    /// * `state_root` - The state root to use for account lookups. The state should be the previous block.
     #[instrument(skip_all, fields(transactions = ?transactions.iter().map(|t|t.hash).collect::<Vec<_>>()))]
-    fn validate_transaction_set(&mut self, transactions: &Vec<Transaction>) -> bool {
+    fn validate_transaction_set(&mut self, transactions: &Vec<Transaction>, state_root: StdByteArray) -> bool {
         // we need to make sure that there are no duplicated nonce values under the same user
         let per_user: HashMap<StdByteArray, Vec<&Transaction>> =
             transactions
@@ -140,17 +162,10 @@ impl Chain {
         tracing::debug!("Per user transactions: {:?}", per_user);
         tracing::info!("Validating transaction set with {} users", per_user.len());
         for (user, transactions) in per_user.iter() {
-
-            let account = self.account_manager.get_or_create_account(user);
-            // if account.is_none() {
-            //     return false;
-            //     panic!();
-            // }
-            // we create a 0 balance new account
-
+            let account = self.state_manager.get_account(user, state_root).unwrap_or(Account::new(*user, 0));
             // return true;
             let total_sum: u64 = transactions.iter().map(|t| t.header.amount).sum();
-            if account.as_ref().lock().unwrap().balance < total_sum {
+            if account.balance < total_sum {
                 tracing::info!("Account balance is insufficient for user {:?} - Failing", user);
                 return false;
             }
@@ -158,7 +173,7 @@ impl Chain {
             // now validate each individual transaction
             for transaction in transactions {
                 nonces.push(transaction.header.nonce);
-                let result = self.validate_transaction(transaction);
+                let result = self.validate_transaction(transaction, state_root);
                 if !result {
                     tracing::info!("Invalid transaction - Failing");
                     return false;
@@ -172,11 +187,13 @@ impl Chain {
                     return false;
                 }
             }
+
             // and the first one needs to be the accounts nonce
-            if nonces[0] != account.lock().unwrap().nonce {
+            if nonces[0] != account.nonce {
                 tracing::info!("First nonce does not match account nonce for user {:?} - Failing", user);
                 return false;
             }
+
         }
 
         true
@@ -186,6 +203,10 @@ impl Chain {
     pub fn get_top_block(&self) -> Option<&Block>{
         // we use the deepest hash as the top block
         self.blocks.get(&self.deepest_hash)
+    }
+
+    pub fn get_state_root(&self) -> Option<StdByteArray> {
+        self.get_top_block().and_then(|block| block.header.state_root)
     }
 
     pub fn get_block(&self, hash: &StdByteArray) -> Option<&Block> {
@@ -208,7 +229,7 @@ impl Chain {
     /// 3. The sender has sufficient balance.
     /// 4. The nonce matches the sender's expected value.
     #[instrument(skip_all, fields(transaction = ?transaction.hash))]
-    fn validate_transaction(&self, transaction: &Transaction) -> bool {
+    fn validate_transaction(&self, transaction: &Transaction, state_root: StdByteArray) -> bool {
         let sender = transaction.header.sender;
         let signature = transaction.signature;
         // check for signature
@@ -230,13 +251,8 @@ impl Chain {
             return false;
         }
         // verify balance
-        let account = self.account_manager.get_account(&sender);
-        if account.is_none() {
-            tracing::info!("Account for sender does not exist - Failing");
-            return false;
-        }
-        let account = account.clone().unwrap();
-        if account.lock().unwrap().balance < transaction.header.amount {
+        let account = self.state_manager.get_account(&sender, state_root).unwrap_or(Account::new(sender, 0));
+        if account.balance < transaction.header.amount {
             tracing::info!("Account balance is insufficient - Failing");
             return false;
         } 
@@ -246,14 +262,25 @@ impl Chain {
     /// Verifies the validity of a block, including its transactions and metadata.
     pub fn verify_block(&mut self, block: &Block) -> bool {
         let mut result = self.validate_block(block);
-        result = result && self.validate_transaction_set(&block.transactions);
+        result = result && self.validate_transaction_set(&block.transactions, self.blocks.get(&block.header.previous_hash).unwrap().header.state_root.unwrap());
         result
     }
 
     /// Call this only after a block has been verified
     #[instrument(skip_all, fields(block = ?block.hash))]
-    fn settle_new_block(&mut self, block: Block){
-        self.account_manager.update_from_block(&block);
+    fn settle_new_block(&mut self, block: Block) -> bool{
+        if self.blocks.get(&block.hash.unwrap()).is_some() {
+            tracing::warn!("Block with hash {:?} already exists in the chain - skipping", block.hash);
+            return true;
+        }
+        let prev_header = self.headers.get(&block.header.previous_hash).expect("Previous block header must exist");
+        let new_root = self.state_manager.branch_from_block(&block, prev_header);
+        // last check - is the root the same as the one in the block?
+        if block.header.state_root.unwrap() != new_root {
+            tracing::error!("Block state root does not match the computed state root - Failing");
+            // TODO trim out the root
+            return false;
+        }
         tracing::debug!("Account settled");
         self.blocks.insert(block.hash.unwrap(), block.clone());
         self.leaves.remove(&block.header.previous_hash);
@@ -267,6 +294,7 @@ impl Chain {
             self.deepest_hash = block.hash.unwrap();
             self.depth = block.header.depth;
         }
+        true
     }
 
     /// Adds a new block to the chain if it is valid.
@@ -283,8 +311,16 @@ impl Chain {
     pub fn add_new_block(&mut self, block: Block) -> Result<(), std::io::Error> {
         if self.verify_block(&block) {
             tracing::info!("Block is valid, settling...");
-            self.settle_new_block(block);
-            tracing::info!("Block settled in chain successfully");
+            let result = self.settle_new_block(block);
+            if result{
+                tracing::info!("Block settled in chain successfully");
+            }else{
+                tracing::error!("State does not match");
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "State does not match",
+                ));
+            }
             Ok(())
         } else {
             tracing::error!("Block is not valid, cannot add to chain");
@@ -316,7 +352,7 @@ mod tests {
     use pillar_crypto::signing::{DefaultSigner, SigFunction, SigVerFunction, Signable};
 
     use super::*;
-    use crate::accounting::account::Account;
+    
     use crate::primitives::block::BlockTail;
     use crate::primitives::transaction::{Transaction};
     use crate::protocol::pow::mine;
@@ -332,12 +368,11 @@ mod tests {
     #[tokio::test]
     async fn test_chain_add_block() {
         let mut chain = Chain::new_with_genesis();
-
         let mut signing_key = DefaultSigner::generate_random();
         // public
         let sender = signing_key.get_verifying_function().to_bytes();
 
-        let mut trans = Transaction::new(sender, [0;32], 0, 0, 0, &mut DefaultHash::new());
+        let mut trans = Transaction::new(sender, [1;32], 0, 0, 0, &mut DefaultHash::new());
         trans.sign(&mut signing_key);
         let mut block = Block::new(
             chain.deepest_hash, 
@@ -347,13 +382,15 @@ mod tests {
                 .unwrap()
                 .as_secs(),
             vec![trans],
-            Some([0; 32]),
+            Some(sender),
             BlockTail::default().stamps,
             1,
+            None,
             &mut DefaultHash::new()
         );
-        chain.account_manager.add_account(Account::new(sender, 0));
-        mine(&mut block, sender, None, DefaultHash::new()).await;
+        let prev_header = chain.headers.get(&block.header.previous_hash).expect("Previous block header not found");
+        let state_root = chain.state_manager.branch_from_block(&block, prev_header);
+        mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
         let result = chain.add_new_block(block);
         assert!(result.is_ok());
     }
@@ -378,9 +415,9 @@ mod tests {
             Some([0; 32]),
             BlockTail::default().stamps,
             0,
+            None,
             &mut DefaultHash::new()
         );
-        chain.account_manager.add_account(Account::new([0; 32], 0));
         let result = chain.add_new_block(block);
         assert!(result.is_err());
     }
@@ -393,12 +430,10 @@ mod tests {
         // public
         let sender = signing_key.get_verifying_function().to_bytes();
 
-        chain.account_manager.add_account(Account::new(sender, 1000));
-
         let mut parent_hash = chain.deepest_hash;
         let genesis_hash = parent_hash;
         for depth in 1..=11 {
-            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth-1, &mut DefaultHash::new());
+            let mut transaction = Transaction::new(sender, [2; 32], 0, 0, depth-1, &mut DefaultHash::new());
             transaction.sign(&mut signing_key);
             let mut block = Block::new(
                 parent_hash,
@@ -408,9 +443,13 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 depth,
+                None,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, None, DefaultHash::new()).await;
+            let prev_header = chain.headers.get(&block.header.previous_hash)
+                .expect("Previous block header not found");
+            let state_root = chain.state_manager.branch_from_block(&block, prev_header);
+            mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
             parent_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -418,7 +457,7 @@ mod tests {
         let long_chain_leaf = parent_hash;
 
         // Create shorter fork from genesis (only 1 block)
-        let mut trans = Transaction::new(sender, [2; 32], 10, 0, 11, &mut DefaultHash::new());
+        let mut trans = Transaction::new(sender, [2; 32], 0, 0, 0, &mut DefaultHash::new());
         trans.sign(&mut signing_key);
         let mut fork_block = Block::new(
             genesis_hash, // same genesis
@@ -428,9 +467,13 @@ mod tests {
             Some(sender),
             BlockTail::default().stamps,
             1,
+            None,
             &mut DefaultHash::new(),
         );
-        mine(&mut fork_block, sender, None, DefaultHash::new()).await;
+        let prev_header = chain.headers.get(&fork_block.header.previous_hash)
+            .expect("Previous block header not found");
+        let state_root = chain.state_manager.branch_from_block(&fork_block, prev_header);
+        mine(&mut fork_block, sender, state_root, None, DefaultHash::new()).await;
         chain.add_new_block(fork_block.clone()).unwrap();
 
         assert!(chain.blocks.contains_key(&fork_block.hash.unwrap()));
@@ -449,15 +492,13 @@ mod tests {
         // public
         let sender = signing_key.get_verifying_function().to_bytes();
 
-        chain.account_manager.add_account(Account::new(sender, 1000));
-
         let mut parent_hash = chain.deepest_hash;
         let genesis_hash = parent_hash;
 
         // Build a main chain of depth 9
         for depth in 1..=9 {
             let time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth;
-            let mut transaction = Transaction::new(sender, [2; 32], 10, time, depth-1, &mut DefaultHash::new());
+            let mut transaction = Transaction::new(sender, [2; 32], 0, time, depth-1, &mut DefaultHash::new());
             transaction.sign(&mut signing_key);
             let mut block = Block::new(
                 parent_hash,
@@ -467,14 +508,18 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 depth,
+                None,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, None, DefaultHash::new()).await;
+            let prev_header = chain.headers.get(&block.header.previous_hash)
+                .expect("Previous block header not found");
+            let state_root = chain.state_manager.branch_from_block(&block, prev_header);
+            mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
             parent_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
 
-        let mut trans = Transaction::new(sender, [2; 32], 10, 0, 9, &mut DefaultHash::new());
+        let mut trans = Transaction::new(sender, [2; 32], 0, 0, 0, &mut DefaultHash::new());
         trans.sign(&mut signing_key);
         // Add a 1-block fork off the genesis (difference = 9)
         let mut fork_block = Block::new(
@@ -485,9 +530,13 @@ mod tests {
             Some(sender),
             BlockTail::default().stamps,
             1,
+            None,
             &mut DefaultHash::new(),
         );
-        mine(&mut fork_block, sender, None, DefaultHash::new()).await;
+        let prev_header = chain.headers.get(&fork_block.header.previous_hash)
+            .expect("Previous block header not found");
+        let state_root = chain.state_manager.branch_from_block(&fork_block, prev_header);
+        mine(&mut fork_block, sender, state_root, None, DefaultHash::new()).await;
         let fork_hash = fork_block.hash.unwrap();
         chain.add_new_block(fork_block).unwrap();
 
@@ -502,14 +551,13 @@ mod tests {
         let mut signing_key = DefaultSigner::generate_random();
         // public
         let sender = signing_key.get_verifying_function().to_bytes();
-        chain.account_manager.add_account(Account::new(sender, 2000));
 
         let mut main_hash = chain.deepest_hash;
         let genesis_hash = main_hash;
 
         // Extend the main chain to depth 12
         for depth in 1..=12 {
-            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth-1, &mut DefaultHash::new());
+            let mut transaction = Transaction::new(sender, [2; 32], 0, 0, depth-1, &mut DefaultHash::new());
             transaction.sign(&mut signing_key);
             let mut block = Block::new(
                 main_hash,
@@ -519,29 +567,37 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 depth,
+                None,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, None, DefaultHash::new()).await;
+            let prev_header = chain.headers.get(&block.header.previous_hash)
+                .expect("Previous block header not found");
+            let state_root = chain.state_manager.branch_from_block(&block, prev_header);
+            mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
 
         // Create two short forks from genesis (depth 1)
         let mut fork_hashes = vec![];
-        for offset in 0..2 {
-            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, offset+12, &mut DefaultHash::new());
+        for _ in 1..3 {
+            let mut transaction = Transaction::new(sender, [2; 32], 0, 0, 0, &mut DefaultHash::new());
             transaction.sign(&mut signing_key);
             let mut fork_block = Block::new(
                 genesis_hash,
                 0,
-                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 20 + offset,
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 20,
                 vec![transaction],
                 Some(sender),
                 BlockTail::default().stamps,
                 1,
+                None,
                 &mut DefaultHash::new(),
             );
-            mine(&mut fork_block, sender, None, DefaultHash::new()).await;
+            let prev_header = chain.headers.get(&fork_block.header.previous_hash)
+                .expect("Previous block header not found");
+            let state_root = chain.state_manager.branch_from_block(&fork_block, prev_header);   
+            mine(&mut fork_block, sender, state_root, None, DefaultHash::new()).await;
             let hash = fork_block.hash.unwrap();
             fork_hashes.push(hash);
             chain.add_new_block(fork_block).unwrap();
@@ -581,14 +637,12 @@ mod tests {
         let mut signing_key = DefaultSigner::generate_random();
         let sender = signing_key.get_verifying_function().to_bytes();
 
-        chain.account_manager.add_account(Account::new(sender, 20000));
-
         let mut main_hash = chain.deepest_hash;
         let genesis_hash = main_hash;
 
         // Extend the main chain to depth 15
         for depth in 1..=15 {
-            let mut transaction = Transaction::new(sender, [2; 32], 1, 0, depth-1, &mut DefaultHash::new());
+            let mut transaction = Transaction::new(sender, [2; 32], 0, 0, depth-1, &mut DefaultHash::new());
             transaction.sign(&mut signing_key);
             let mut block = Block::new(
                 main_hash,
@@ -598,33 +652,39 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 depth,
+                None,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, None, DefaultHash::new()).await;
+            let prev_header = chain.headers.get(&block.header.previous_hash)
+                .expect("Previous block header not found");
+            let state_root = chain.state_manager.branch_from_block(&block, prev_header);
+            mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
 
         // Create forks of different lengths
         let mut fork_hashes = vec![];
-        let mut offset = 0;
         for fork_length in 1..=3 {
             let mut parent_hash = genesis_hash;
             for depth in 1..=fork_length {
-                let mut transaction = Transaction::new(sender, [2; 32], 1, 0, 15 + offset, &mut DefaultHash::new());
-                offset += 1;
+                let mut transaction = Transaction::new(sender, [2; 32], 0, 0, depth-1, &mut DefaultHash::new());
                 transaction.sign(&mut signing_key);
                 let mut fork_block = Block::new(
                     parent_hash,
                     0,
-                    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth + 20,
+                    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth + fork_length,
                     vec![transaction],
                     Some(sender),
                     BlockTail::default().stamps,
                     depth,
+                    None,
                     &mut DefaultHash::new(),
                 );
-                mine(&mut fork_block, sender, None, DefaultHash::new()).await;
+                let prev_header = chain.headers.get(&fork_block.header.previous_hash)
+                    .expect("Previous block header not found");
+                let state_root = chain.state_manager.branch_from_block(&fork_block, prev_header);
+                mine(&mut fork_block, sender, state_root, None, DefaultHash::new()).await;
                 parent_hash = fork_block.hash.unwrap();
                 if depth == fork_length {
                     fork_hashes.push(parent_hash);
@@ -659,14 +719,12 @@ mod tests {
         let mut signing_key = DefaultSigner::generate_random();
         let sender = signing_key.get_verifying_function().to_bytes();
 
-        chain.account_manager.add_account(Account::new(sender, 2000));
-
         let mut main_hash = chain.deepest_hash;
         let genesis_hash = main_hash;
 
         // Extend the main chain to depth 15
         for depth in 1..=15 {
-            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth - 1, &mut DefaultHash::new());
+            let mut transaction = Transaction::new(sender, [2; 32], 0, 0, depth - 1, &mut DefaultHash::new());
             transaction.sign(&mut signing_key);
             let mut block = Block::new(
                 main_hash,
@@ -676,9 +734,13 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 depth,
+                None,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, None, DefaultHash::new()).await;
+            let prev_header = chain.headers.get(&block.header.previous_hash)
+                .expect("Previous block header not found");
+            let state_root = chain.state_manager.branch_from_block(&block, prev_header);
+            mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -686,7 +748,7 @@ mod tests {
         // Create a fork that is within the threshold (difference < 10)
         let mut fork_hash = genesis_hash;
         for depth in 1..=6 {
-            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth + 14, &mut DefaultHash::new());
+            let mut transaction = Transaction::new(sender, [2; 32], 0, 0, depth - 1, &mut DefaultHash::new());
             transaction.sign(&mut signing_key);
             let mut fork_block = Block::new(
                 fork_hash,
@@ -696,9 +758,13 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 depth,
+                None,
                 &mut DefaultHash::new(),
             );
-            mine(&mut fork_block, sender, None, DefaultHash::new()).await;
+            let prev_header = chain.headers.get(&fork_block.header.previous_hash)
+                .expect("Previous block header not found");
+            let state_root = chain.state_manager.branch_from_block(&fork_block, prev_header);
+            mine(&mut fork_block, sender, state_root, None, DefaultHash::new()).await;
             fork_hash = fork_block.hash.unwrap();
             chain.add_new_block(fork_block).unwrap();
         }
@@ -721,14 +787,12 @@ mod tests {
         let mut signing_key = DefaultSigner::generate_random();
         let sender = signing_key.get_verifying_function().to_bytes();
 
-        chain.account_manager.add_account(Account::new(sender, 2000));
-
         let mut main_hash = chain.deepest_hash;
         let genesis_hash = main_hash;
 
         // Extend the main chain to depth 10
         for depth in 1..=15 {
-            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth - 1, &mut DefaultHash::new());
+            let mut transaction = Transaction::new(sender, [2; 32], 0, 0, depth - 1, &mut DefaultHash::new());
             transaction.sign(&mut signing_key);
             let mut block = Block::new(
                 main_hash,
@@ -738,9 +802,13 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 depth,
+                None,
                 &mut DefaultHash::new(),
             );
-            mine(&mut block, sender, None, DefaultHash::new()).await;
+            let prev_header = chain.headers.get(&block.header.previous_hash)
+                .expect("Previous block header not found");
+            let state_root = chain.state_manager.branch_from_block(&block, prev_header);
+            mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -748,7 +816,7 @@ mod tests {
         // Create a fork that shares some nodes with the main chain
         let mut fork_hash = genesis_hash;
         for depth in 1..=3 {
-            let mut transaction = Transaction::new(sender, [2; 32], 10, 0, depth + 14, &mut DefaultHash::new());
+            let mut transaction = Transaction::new(sender, [2; 32], 0, 0, depth - 1, &mut DefaultHash::new());
             transaction.sign(&mut signing_key);
             let mut fork_block = Block::new(
                 fork_hash,
@@ -758,9 +826,13 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 depth,
+                None,
                 &mut DefaultHash::new(),
             );
-            mine(&mut fork_block, sender, None, DefaultHash::new()).await;
+            let prev_header = chain.headers.get(&fork_block.header.previous_hash)
+                .expect("Previous block header not found");
+            let state_root = chain.state_manager.branch_from_block(&fork_block, prev_header);
+            mine(&mut fork_block, sender, state_root, None, DefaultHash::new()).await;
             fork_hash = fork_block.hash.unwrap();
             chain.add_new_block(fork_block).unwrap();
         }

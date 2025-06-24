@@ -1,7 +1,7 @@
 use flume::Receiver;
 use pillar_crypto::{hashing::{DefaultHash, Hashable}, signing::{SigFunction, Signable}, types::StdByteArray};
 
-use crate::{accounting::account::Account, nodes::{messages::Message, node::{Broadcaster, Node}}, primitives::{block::BlockHeader, transaction::{Transaction}}};
+use crate::{accounting::wallet::Wallet, nodes::{messages::Message, node::{Broadcaster, Node}}, primitives::{block::BlockHeader, transaction::Transaction}};
 
 /// Submit a transaction to the network
 /// 
@@ -17,16 +17,16 @@ use crate::{accounting::account::Account, nodes::{messages::Message, node::{Broa
 /// * `Ok(Some(receiver))` - If the transaction was acknowledged and a callback was registered
 /// * `Ok(None)` - If the transaction was acknowledged but no callback was registered
 /// * `Err(e)` - If the transaction was not acknowledged or an error occurred
-pub async fn submit_transaction<const K: usize, const P: usize>(
+pub async fn submit_transaction(
     node: &mut Node, 
-    sender: &mut Account, 
-    signer: &mut impl SigFunction<K, P, 64>,
+    wallet: &mut Wallet,
     receiver: StdByteArray,
     amount: u64,
     register_completion_callback: bool,
     timestamp: Option<u64>
 ) -> Result<Option<Receiver<BlockHeader>>, std::io::Error> {
-    let nonce = sender.local_nonce; sender.local_nonce += 1;
+    let nonce = wallet.nonce; wallet.nonce += 1;
+
     let timestamp = match timestamp{
         Some(t) => t,
         None => {
@@ -37,7 +37,7 @@ pub async fn submit_transaction<const K: usize, const P: usize>(
         }
     };
     let mut transaction = Transaction::new(
-        sender.address, 
+        wallet.address, 
         receiver, 
         amount, 
         timestamp, 
@@ -46,7 +46,7 @@ pub async fn submit_transaction<const K: usize, const P: usize>(
     );
     // sign with the signer
 
-    transaction.sign(signer);
+    transaction.sign(wallet);
 
     // broadcast and wait for peer responses
     let message = Message::TransactionBroadcast(transaction);

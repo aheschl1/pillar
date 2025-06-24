@@ -85,6 +85,7 @@ async fn monitor_transaction_pool(miner: Miner) {
                 None, // because this is a proposition on an unmined node
                 BlockTail::default().stamps,
                 chain.depth + 1,
+                None,
                 &mut DefaultHash::new()
             );
             // spawn off the mining process
@@ -110,9 +111,21 @@ async fn monitor_block_pool(miner: Miner) {
             Some(mut block) => {
                 block.header.miner_address = Some(miner.node.inner.public_key);
                 block.header.tail.clean(&block.header.clone()); // removes broken signatures
+                let mut chain_lock = miner.node.inner.chain.lock().await;
+                let chain = chain_lock.as_mut().unwrap();
+                let prev_block = chain
+                    .headers
+                    .get(&block.header.previous_hash)
+                    .expect("Previous header must exist");
+                
+                let state_root = chain
+                    .state_manager
+                    .branch_from_block(&block, prev_block);
+
                 mine(
                     &mut block, 
                     miner.node.inner.public_key,
+                    state_root,
                     Some(miner.node.miner_pool.as_ref().unwrap().mine_abort_receiver.clone()),
                     DefaultHash::new()
                 ).await;
@@ -171,10 +184,10 @@ mod test{
             previous_hash, nonce, 
             timestamp, transactions, 
             miner_address, BlockTail::default().stamps,
-            1, &mut hasher);
+            1, None, &mut hasher);
 
         // mine the block
-        mine(&mut block, miner.node.inner.public_key, None, hasher).await;
+        mine(&mut block, miner.node.inner.public_key, [8; 32], None, hasher).await;
         
         assert!(block.header.nonce > 0);
         assert!(block.header.miner_address.is_some());
