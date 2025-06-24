@@ -185,7 +185,6 @@ where K: Hashable, V: Serialize + for<'a> Deserialize<'a>
     let value = merkle_trie.get(&target_key, root.expect("Root must be provided"));
     value.as_ref()?;
     let path = to_nibbles(&target_key);
-    println!("{:?}", path);
     let mut steps: Vec<ProofStep> = Vec::new();
     
     let mut current_node_key = Some(*merkle_trie.roots.get(&root.expect("Root must be provided")).unwrap());

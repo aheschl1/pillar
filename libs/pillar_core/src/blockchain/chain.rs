@@ -32,7 +32,16 @@ pub struct Chain {
 impl Chain {
     /// Creates a new blockchain with a genesis block.
     pub fn new_with_genesis() -> Self {
-        let genesis_block = get_genesis_block();
+        let state_manager = StateManager::new();
+        let state_root = state_manager
+            .state_trie
+            .lock()
+            .as_mut()
+            .unwrap()
+            .create_genesis([0; 32], Account::default())
+            .expect("Failed to create genesis state root");
+
+        let genesis_block = get_genesis_block(Some(state_root));
         let genisis_hash = genesis_block.hash.unwrap();
         
         let mut headers = HashMap::new();
@@ -43,18 +52,6 @@ impl Chain {
         
         let mut blocks = HashMap::new();
         blocks.insert(genisis_hash, genesis_block);
-
-        let state_manager = StateManager::new();
-        let root = state_manager
-            .state_trie
-            .lock()
-            .as_mut()
-            .unwrap()
-            .create_genesis([0; 32], Account::default())
-            .expect("Failed to create genesis state root");
-
-        blocks.get_mut(&genisis_hash).unwrap().header.state_root = Some(root);
-        headers.get_mut(&genisis_hash).unwrap().state_root = Some(root);
 
 
         Chain {
@@ -272,6 +269,10 @@ impl Chain {
     /// Call this only after a block has been verified
     #[instrument(skip_all, fields(block = ?block.hash))]
     fn settle_new_block(&mut self, block: Block) -> bool{
+        if self.blocks.get(&block.hash.unwrap()).is_some() {
+            tracing::warn!("Block with hash {:?} already exists in the chain - skipping", block.hash);
+            return true;
+        }
         let prev_header = self.headers.get(&block.header.previous_hash).expect("Previous block header must exist");
         let new_root = self.state_manager.branch_from_block(&block, prev_header);
         // last check - is the root the same as the one in the block?
@@ -384,6 +385,7 @@ mod tests {
             Some(sender),
             BlockTail::default().stamps,
             1,
+            None,
             &mut DefaultHash::new()
         );
         let prev_header = chain.headers.get(&block.header.previous_hash).expect("Previous block header not found");
@@ -413,6 +415,7 @@ mod tests {
             Some([0; 32]),
             BlockTail::default().stamps,
             0,
+            None,
             &mut DefaultHash::new()
         );
         let result = chain.add_new_block(block);
@@ -440,6 +443,7 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 depth,
+                None,
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&block.header.previous_hash)
@@ -463,6 +467,7 @@ mod tests {
             Some(sender),
             BlockTail::default().stamps,
             1,
+            None,
             &mut DefaultHash::new(),
         );
         let prev_header = chain.headers.get(&fork_block.header.previous_hash)
@@ -503,6 +508,7 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 depth,
+                None,
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&block.header.previous_hash)
@@ -524,6 +530,7 @@ mod tests {
             Some(sender),
             BlockTail::default().stamps,
             1,
+            None,
             &mut DefaultHash::new(),
         );
         let prev_header = chain.headers.get(&fork_block.header.previous_hash)
@@ -560,6 +567,7 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 depth,
+                None,
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&block.header.previous_hash)
@@ -583,6 +591,7 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 1,
+                None,
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&fork_block.header.previous_hash)
@@ -643,6 +652,7 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 depth,
+                None,
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&block.header.previous_hash)
@@ -668,6 +678,7 @@ mod tests {
                     Some(sender),
                     BlockTail::default().stamps,
                     depth,
+                    None,
                     &mut DefaultHash::new(),
                 );
                 let prev_header = chain.headers.get(&fork_block.header.previous_hash)
@@ -723,6 +734,7 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 depth,
+                None,
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&block.header.previous_hash)
@@ -746,6 +758,7 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 depth,
+                None,
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&fork_block.header.previous_hash)
@@ -789,6 +802,7 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 depth,
+                None,
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&block.header.previous_hash)
@@ -812,6 +826,7 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 depth,
+                None,
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&fork_block.header.previous_hash)

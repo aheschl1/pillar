@@ -5,6 +5,7 @@ pub mod pool;
 #[cfg(test)]
 mod tests{
     use pillar_crypto::{hashing::{DefaultHash, Hashable}, signing::{DefaultSigner, SigFunction, SigVerFunction, Signable}};
+    use serde_with::rust::sets_duplicate_value_is_error;
 
     use crate::{primitives::{block::{BlockHeader, BlockTail}, transaction::{Transaction, TransactionHeader}}};
     
@@ -17,8 +18,9 @@ mod tests{
         let miner_address = [2u8; 32];
         let nonce = 12345;
         let timestamp = 1622547800;
+        let state_root = [3u8; 32];
 
-        let block_header = BlockHeader::new(previous_hash, merkle_root, None, nonce, timestamp, Some(miner_address), BlockTail::default(), 0);
+        let block_header = BlockHeader::new(previous_hash, merkle_root, Some(state_root), nonce, timestamp, Some(miner_address), BlockTail::default(), 0);
         let hash = block_header.hash(&mut DefaultHash::new());
 
         assert_eq!(hash.unwrap().len(), 32);

@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use pillar_crypto::{hashing::DefaultHash, types::StdByteArray};
 use serde::{Deserialize, Serialize};
 
-use crate::{primitives::block::BlockHeader, protocol::chain::get_genesis_block};
+use crate::{accounting::{account::Account, state::StateManager}, primitives::block::BlockHeader, protocol::chain::get_genesis_block};
 
 use super::{chain::Chain, TrimmableChain};
 
@@ -20,6 +20,12 @@ impl ChainShard{
     /// ensures the hashs are good, and the depths work
     pub fn validate(&self) -> bool{
         let mut genesis_found = false;
+        let state_manager = StateManager::new();
+        let state_root = state_manager.state_trie
+            .lock()
+            .as_mut()
+            .unwrap()
+            .create_genesis([0; 32], Account::default()).unwrap();
 
         for (declared_hash, header) in &self.headers {
             if header.depth == 0{
@@ -27,7 +33,7 @@ impl ChainShard{
                     return false;
                 }
                 // make sure valid genesis
-                let correct_gensis = get_genesis_block();
+                let correct_gensis = get_genesis_block(Some(state_root));
                 if *header != correct_gensis.header{
                     return false;
                 }
@@ -123,6 +129,7 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 depth,
+                None,
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&parent_hash).expect("Parent hash must exist");
@@ -145,6 +152,7 @@ mod tests {
             Some(sender),
             BlockTail::default().stamps,
             1,
+            None,
             &mut DefaultHash::new(),
         );
         let prev_header = chain.headers.get(&genesis_hash).expect("Genesis hash must exist");
@@ -185,6 +193,7 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 depth,
+                None,
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&parent_hash).expect("Parent hash must exist");
@@ -205,6 +214,7 @@ mod tests {
             Some(sender),
             BlockTail::default().stamps,
             1,
+            None,
             &mut DefaultHash::new(),
         );
         let prev_header = chain.headers.get(&genesis_hash).expect("Genesis hash must exist");
@@ -241,6 +251,7 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 depth,
+                None,
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&main_hash).expect("Parent hash must exist");
@@ -263,6 +274,7 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 1,
+                None,
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&genesis_hash).expect("Genesis hash must exist");

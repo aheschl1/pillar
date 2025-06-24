@@ -44,10 +44,16 @@ impl StateManager{
                 Some(account) => account.clone(),
                 None => {
                     // if the sender does not exist, we create a new account with 0 balance
-                    if transaction.header.amount > 0 {
-                        panic!("Sender account does not exist, but transaction amount is greater than 0");
+                    let account = state_trie
+                        .get(&transaction.header.sender, state_root)
+                        .unwrap_or(Account::new(transaction.header.sender, 0));
+
+                    if account.balance < transaction.header.amount {
+                        panic!("Insufficient balance for transaction");
                     }
-                    state_trie.get(&transaction.header.sender, state_root).unwrap_or(Account::new(transaction.header.sender, 0))
+
+                    account
+                    
                 }
             };
             // may need to make a new public account for the receiver under the established public key

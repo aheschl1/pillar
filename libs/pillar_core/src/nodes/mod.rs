@@ -435,8 +435,7 @@ mod tests {
         drop(peers_a);
         // now, A makes a transaction of 0 dollars to B
 
-        let mut chain = node_a.inner.chain.lock().await;
-        let state_manager = chain.as_mut().unwrap().state_manager.clone();
+        let chain = node_a.inner.chain.lock().await;
         drop(chain);
 
         let timestamp = std::time::SystemTime::now()
@@ -456,7 +455,7 @@ mod tests {
 
         assert!(result.is_none());
 
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(MAX_TRANSACTION_WAIT_TIME)).await;
 
         // node a already broadcasted
 
@@ -485,20 +484,21 @@ mod tests {
 
         // make sure the accounts do NOT exist for the receiver - because it has never been settled.
         let chain_a = node_a.inner.chain.lock().await;
+        assert_eq!(chain_a.as_ref().unwrap().depth, 0); // NO MINER 
         let state_root = chain_a.as_ref().unwrap().get_state_root().unwrap();
         let account_a = chain_a
             .as_ref()
             .unwrap()
             .state_manager
-            .get_account(&wallet_a.address, state_root)
-            .unwrap();
+            .get_account(&wallet_a.address, state_root);
+
         let account_b = chain_a
             .as_ref()
             .unwrap()
             .state_manager
             .get_account(&wallet_b.address, state_root);
         assert!(account_b.is_none());
-        assert_eq!(account_a.balance, 0); // because we made it
+        assert!(account_a.is_none());
         drop(chain_a);
         let chain_b = node_b.inner.chain.lock().await;
         let state_root = chain_b.as_ref().unwrap().get_state_root().unwrap();
@@ -1176,7 +1176,7 @@ mod tests {
             wallet_a.get_private_key(),
             ip_address_a,
             port_a,
-            vec![Peer::new(wallet_b.get_private_key(), ip_address_b, port_b)],
+            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
             Some(Arc::new(datastore.clone())),
             None,
         );
@@ -1218,7 +1218,6 @@ mod tests {
         // pause a sec - TODO remove this after fixing the join on stoping
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         // now, C will submit a transaction to B
-        let state_manager = node_c.inner.chain.lock().await.as_mut().unwrap().state_manager.clone();
         let _ = submit_transaction(
             &mut node_c,
             &mut wallet_c,
@@ -1453,15 +1452,6 @@ mod tests {
         assert!(node_a.inner.state.lock().await.clone() == NodeState::Serving);
         assert!(node_b.inner.state.lock().await.clone() == NodeState::Serving);
         // submit 50 transactions - first 10 from node a to node b
-        let state_manager = node_a
-            .inner
-            .chain
-            .lock()
-            .await
-            .as_mut()
-            .unwrap()
-            .state_manager
-            .clone();
 
         for i in 0..10 {
             println!("Submitting transaction {} from A to B", i);
@@ -1512,7 +1502,7 @@ mod tests {
             .unwrap()
             .get_state_root()
             .unwrap();
-        let mut account_b = node_b
+        let account_b = node_b
             .inner
             .chain
             .lock()
@@ -1521,7 +1511,7 @@ mod tests {
             .unwrap()
             .state_manager
             .get_account(&wallet_b.address, state_root)
-            .unwrap_or(Account::new(wallet_b.address, 0));
+            .unwrap();
         let b_balance = account_b.balance;
         assert_eq!(b_balance, get_reward_from_depth_and_stampers(1, 2));
         drop(account_b);
@@ -1549,15 +1539,6 @@ mod tests {
         assert_eq!(balance_b, get_reward_from_depth_and_stampers(1, 2));
         drop(acc);
         // now, b will send some of its money to a
-        let state_manager = node_b
-            .inner
-            .chain
-            .lock()
-            .await
-            .as_mut()
-            .unwrap()
-            .state_manager
-            .clone();
 
         for i in 0..10 {
             println!("Submitting transaction {} from B to A", i);

@@ -3,7 +3,7 @@ use std::{collections::{HashMap, HashSet}};
 use pillar_crypto::{hashing::{DefaultHash, Hashable}, merkle::generate_tree, types::StdByteArray};
 use rand::{rng, seq::{IteratorRandom}};
 use tokio::time::timeout;
-use tracing::instrument;
+use tracing::{instrument, warn};
 
 use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, nodes::{messages::Message, node::{Broadcaster, Node}, peer::Peer}, primitives::{block::{Block, BlockTail}, transaction::Transaction}, protocol::reputation::settle_reputations};
 
@@ -139,7 +139,7 @@ pub fn deepest_shard(shards: &[ChainShard]) -> Result<ChainShard, std::io::Error
 }
 
 /// The definition of the genisis block
-pub fn get_genesis_block() -> Block{
+pub fn get_genesis_block(state_root: Option<StdByteArray>) -> Block{
     Block::new(
         [0; 32], 
         0, 
@@ -150,6 +150,7 @@ pub fn get_genesis_block() -> Block{
         Some([0; 32]),
         BlockTail::default().stamps,
         0,
+        state_root,
         &mut DefaultHash::new()
     )
 }
@@ -295,6 +296,10 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
             tracing::debug!("Settling block...");
             let mut chain_lock = node.inner.chain.lock().await;
             let chain = chain_lock.as_mut().unwrap();
+            if chain.get_block(&block.hash.unwrap()).is_some(){
+                warn!("Block already exists in chain, skipping settlement: {:?}", block.hash.unwrap());
+                continue; // block already exists, skip
+            }
             // then we settle the block
             tracing::info!("Settling mined block with miner address: {:?}", block.header.miner_address);
             if chain.add_new_block(block.clone()).is_err() {continue;} // failed to add the block

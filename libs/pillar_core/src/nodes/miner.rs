@@ -85,6 +85,7 @@ async fn monitor_transaction_pool(miner: Miner) {
                 None, // because this is a proposition on an unmined node
                 BlockTail::default().stamps,
                 chain.depth + 1,
+                None,
                 &mut DefaultHash::new()
             );
             // spawn off the mining process
@@ -130,7 +131,6 @@ async fn monitor_block_pool(miner: Miner) {
                 ).await;
                 // after mining the block, just transmit
                 // TODO this doesnt fully belong here - also handle broadcast error
-                println!("Broadcasting mined block: {:?}", block.header);
                 let _ = miner.node.broadcast(&Message::BlockTransmission(block)).await;
             },
             None => {
@@ -184,7 +184,7 @@ mod test{
             previous_hash, nonce, 
             timestamp, transactions, 
             miner_address, BlockTail::default().stamps,
-            1, &mut hasher);
+            1, None, &mut hasher);
 
         // mine the block
         mine(&mut block, miner.node.inner.public_key, [8; 32], None, hasher).await;

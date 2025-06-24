@@ -49,6 +49,7 @@ impl<'de> Deserialize<'de> for Block {
             helper.header.miner_address,
             helper.header.tail.stamps,
             helper.header.depth,
+            helper.header.state_root,
             &mut DefaultHash::new()
         ))
     }
@@ -287,9 +288,16 @@ impl Hashable for BlockHeader {
                 "Miner address is not set"
             ));
         }
+        if self.state_root.is_none() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "State root is not set"
+            ));
+        }
         hash_function.update(self.previous_hash);
         hash_function.update(self.merkle_root);
         hash_function.update(self.miner_address.unwrap());
+        hash_function.update(self.state_root.expect("Must have a state root to hash"));
         hash_function.update(self.nonce.to_le_bytes());
         hash_function.update(self.timestamp.to_le_bytes());
         hash_function.update(self.depth.to_le_bytes());
@@ -312,6 +320,7 @@ impl Block {
         miner_address: Option<StdByteArray>,
         stamps: [Stamp; N_TRANSMISSION_SIGNATURES],
         depth: u64,
+        state_root: Option<StdByteArray>,
         hasher: &mut impl HashFunction,
     ) -> Self {
         let merkle_tree = generate_tree(transactions.iter().collect(), hasher).unwrap();
@@ -321,7 +330,7 @@ impl Block {
         let header = BlockHeader::new(
             previous_hash, 
             merkle_tree.nodes.get(merkle_tree.root.unwrap()).unwrap().hash,
-            None, // State root is not set in this context
+            state_root, // State root is not set in this context
             nonce, 
             timestamp,
             miner_address,
