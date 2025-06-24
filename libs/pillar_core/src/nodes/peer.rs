@@ -99,7 +99,7 @@ mod tests{
     #[tokio::test]
     async fn test_send_initial(){
         // setup a dummy socket, use it for the initializing_peer. read reponses
-        let initializing_peer = Peer::new([1u8; 32], IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let initializing_peer = Peer::new([1u8; 32], IpAddr::V4(Ipv4Addr::new(127, 0, 0, 9)), 8080);
         let mut peer = Peer::new([2u8; 32], IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), 8081);
         // bind to peer socket - we will receive the message here
         let initializing_clone = initializing_peer.clone();

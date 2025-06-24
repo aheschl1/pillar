@@ -9,7 +9,6 @@ mod tests{
 
     use crate::{primitives::{block::{BlockHeader, BlockTail}, transaction::{Transaction, TransactionHeader}}};
     
-    // use rand::rngs::OsRng;
 
     #[test]
     fn test_block_header_hash() {
