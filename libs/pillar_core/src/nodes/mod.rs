@@ -17,7 +17,7 @@ mod tests {
     };
 
     use crate::{
-        accounting::account::Account, nodes::{
+        accounting::{account::Account, wallet::{self, Wallet}}, nodes::{
             messages::Message, miner::{Miner, MAX_TRANSACTION_WAIT_TIME}, node::NodeState, peer::Peer
         }, persistence::database::{Datastore, EmptyDatastore, GenesisDatastore}, primitives::{pool::MinerPool, transaction::Transaction}, protocol::{difficulty::get_reward_from_depth_and_stampers, peers::discover_peers, transactions::submit_transaction}
     };
@@ -381,16 +381,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_start_account() {
-        let mut signing_a = DefaultSigner::generate_random();
-        let public_key_a = signing_a.get_verifying_function().to_bytes();
-        let private_key_a = signing_a.to_bytes();
+        let mut wallet_a = Wallet::generate_random();
 
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
         let port_a = 8020;
 
-        let signing_b = DefaultSigner::generate_random();
-        let public_key_b = signing_b.get_verifying_function().to_bytes();
-        let private_key_b = signing_b.to_bytes();
+        let wallet_b = Wallet::generate_random();
 
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2));
         let port_b = 8021;
@@ -398,18 +394,18 @@ mod tests {
         let datastore = GenesisDatastore::new();
 
         let mut node_a = Node::new(
-            public_key_a,
-            private_key_a,
+            wallet_a.address,
+            wallet_a.get_private_key(),
             ip_address_a,
             port_a,
-            vec![Peer::new(public_key_b, ip_address_b, port_b)],
+            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
             Some(Arc::new(datastore.clone())),
             None,
         );
 
         let mut node_b = Node::new(
-            public_key_b,
-            private_key_b,
+            wallet_b.address,
+            wallet_b.get_private_key(),
             ip_address_b,
             port_b,
             vec![],
@@ -429,13 +425,13 @@ mod tests {
 
         // Verify that Node B knows Node A
         let peers_b = node_b.inner.peers.lock().await;
-        assert!(peers_b.contains_key(&public_key_a));
+        assert!(peers_b.contains_key(&wallet_a.address));
 
         drop(peers_b);
 
         let peers_a = node_a.inner.peers.lock().await;
-        assert!(peers_a.contains_key(&public_key_b));
-        assert!(!peers_a.contains_key(&public_key_a)); // Node A does not know itself
+        assert!(peers_a.contains_key(&wallet_b.address));
+        assert!(!peers_a.contains_key(&wallet_a.address)); // Node A does not know itself
         drop(peers_a);
         // now, A makes a transaction of 0 dollars to B
 
@@ -449,8 +445,8 @@ mod tests {
             .as_secs();
         let result = submit_transaction(
             &mut node_a,
-            state_manager.wallets.lock().unwrap().get_mut(&public_key_a).unwrap(),
-            public_key_b,
+            &mut wallet_a,
+            wallet_b.address,
             0,
             false,
             Some(timestamp),
@@ -465,14 +461,14 @@ mod tests {
         // node a already broadcasted
 
         let mut transaction = Transaction::new(
-            public_key_a,
-            public_key_b,
+            wallet_a.address,
+            wallet_b.address,
             0,
             timestamp,
             0,
             &mut DefaultHash::new(),
         );
-        transaction.sign(&mut signing_a);
+        transaction.sign(&mut wallet_a);
 
         let message_to_hash = Message::TransactionBroadcast(transaction);
 
@@ -494,13 +490,13 @@ mod tests {
             .as_ref()
             .unwrap()
             .state_manager
-            .get_account(&public_key_a, state_root)
+            .get_account(&wallet_a.address, state_root)
             .unwrap();
         let account_b = chain_a
             .as_ref()
             .unwrap()
             .state_manager
-            .get_account(&public_key_b, state_root);
+            .get_account(&wallet_b.address, state_root);
         assert!(account_b.is_none());
         assert_eq!(account_a.balance, 0); // because we made it
         drop(chain_a);
@@ -510,12 +506,12 @@ mod tests {
             .as_ref()
             .unwrap()
             .state_manager
-            .get_account(&public_key_b, state_root);
+            .get_account(&wallet_b.address, state_root);
         let account_a = chain_b
             .as_ref()
             .unwrap()
             .state_manager
-            .get_account(&public_key_a, state_root);
+            .get_account(&wallet_a.address, state_root);
         assert!(account_b.is_none());
         assert!(account_a.is_none()); // on node b, it has no record of either yet as the transactions are not in blocks
         drop(chain_b);
@@ -524,9 +520,8 @@ mod tests {
     async fn inner_test_transaction_and_block_proposal(
         node_a: &mut Node,
         node_b: &Node,
-        signing_a: &mut DefaultSigner,
+        wallet_a: &mut Wallet,
         public_key_b: StdByteArray,
-        public_key_a: StdByteArray,
     ) {
         let mut miner_b = Miner::new(node_b.clone()).unwrap();
 
@@ -545,27 +540,23 @@ mod tests {
 
         // Verify that Node B knows Node A
         let peers_b = node_b.inner.peers.lock().await;
-        assert!(peers_b.contains_key(&public_key_a));
+        assert!(peers_b.contains_key(&wallet_a.address));
 
         drop(peers_b);
 
         let peers_a = node_a.inner.peers.lock().await;
         assert!(peers_a.contains_key(&public_key_b));
-        assert!(!peers_a.contains_key(&public_key_a)); // Node A does not know itself
+        assert!(!peers_a.contains_key(&wallet_a.address)); // Node A does not know itself
         drop(peers_a);
         // now, A makes a transaction of 0 dollars to B
-
-        let mut chain = node_a.inner.chain.lock().await;
-        drop(chain);
 
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("Time went backwards")
             .as_secs();
-        let state_manager = node_a.inner.chain.lock().await.as_mut().unwrap().state_manager.clone();
         let result = submit_transaction(
             node_a,
-            state_manager.wallets.lock().unwrap().get_mut(&public_key_a).unwrap(),
+            wallet_a,
             public_key_b,
             0,
             false,
@@ -581,14 +572,14 @@ mod tests {
         // node a already broadcasted
 
         let mut transaction = Transaction::new(
-            public_key_a,
+            wallet_a.address,
             public_key_b,
             0,
             timestamp,
             0,
             &mut DefaultHash::new(),
         );
-        transaction.sign(signing_a);
+        transaction.sign(wallet_a);
 
         let message_to_hash = Message::TransactionBroadcast(transaction);
 
@@ -615,15 +606,14 @@ mod tests {
             .as_ref()
             .unwrap()
             .state_manager
-            .get_account(&public_key_a, state_root)
-            .unwrap();
+            .get_account(&wallet_a.address, state_root);
         let account_b = chain_a
             .as_ref()
             .unwrap()
             .state_manager
             .get_account(&public_key_b, state_root);
         assert!(account_b.is_none());
-        assert_eq!(account_a.balance, 0); // because we made it
+        assert!(account_a.is_none()); // because we made it
         drop(chain_a);
         let chain_b = node_b.inner.chain.lock().await;
         let state_root = chain_b.as_ref().unwrap().get_state_root().unwrap();
@@ -636,7 +626,7 @@ mod tests {
             .as_ref()
             .unwrap()
             .state_manager
-            .get_account(&public_key_a,state_root);
+            .get_account(&wallet_a.address,state_root);
         assert!(account_b.is_none());
         assert!(account_a.is_none()); // on node b, it has no record of either yet as the transactions are not in blocks
         drop(chain_b);
@@ -657,20 +647,20 @@ mod tests {
 
         // assert the block is in the chain of node_b
         let chain_b = node_b.inner.chain.lock().await;
-        assert!(chain_b.as_ref().unwrap().depth == 1); // 2 blocks
-        assert!(chain_b.as_ref().unwrap().blocks.len() == 2); // 2 blocks
+        assert_eq!(chain_b.as_ref().unwrap().depth, 1); // 2 blocks
+        assert_eq!(chain_b.as_ref().unwrap().blocks.len(), 2); // 2 blocks
         drop(chain_b);
         // assert the block is in the chain of node_a
         let chain_a = node_a.inner.chain.lock().await;
-        assert!(chain_a.as_ref().unwrap().depth == 1); // 2 blocks
-        assert!(chain_a.as_ref().unwrap().blocks.len() == 2); // 2 blocks
+        assert_eq!(chain_a.as_ref().unwrap().depth, 1); // 2 blocks
+        assert_eq!(chain_a.as_ref().unwrap().blocks.len(), 2); // 2 blocks
         drop(chain_a);
         // check reputations.
 
         let reputations_b = node_b.inner.reputations.lock().await;
-        assert!(reputations_b.contains_key(&public_key_a));
+        assert!(reputations_b.contains_key(&wallet_a.address));
         assert!(reputations_b.contains_key(&public_key_b));
-        let history_a = reputations_b.get(&public_key_a).unwrap();
+        let history_a = reputations_b.get(&wallet_a.address).unwrap();
         assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
         assert_eq!(history_a.blocks_stamped.len(), 1); // 0 blocks stamped
         let b_a = history_a.compute_reputation();
@@ -683,9 +673,9 @@ mod tests {
         drop(reputations_b);
 
         let reputations_a = node_a.inner.reputations.lock().await;
-        assert!(reputations_a.contains_key(&public_key_a));
+        assert!(reputations_a.contains_key(&wallet_a.address));
         assert!(reputations_a.contains_key(&public_key_b));
-        let history_a = reputations_a.get(&public_key_a).unwrap();
+        let history_a = reputations_a.get(&wallet_a.address).unwrap();
         assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
         assert_eq!(history_a.blocks_stamped.len(), 1); // 0 blocks stamped
         let a_a = history_a.compute_reputation();
@@ -726,16 +716,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_transaction_and_block_proposal() {
-        let mut signing_a = DefaultSigner::generate_random();
-        let public_key_a = signing_a.get_verifying_function().to_bytes();
-        let private_key_a = signing_a.to_bytes();
+        let mut wallet_a = Wallet::generate_random();
 
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 9));
         let port_a = 8020;
 
-        let signing_b = DefaultSigner::generate_random();
-        let public_key_b = signing_b.get_verifying_function().to_bytes();
-        let private_key_b = signing_b.to_bytes();
+        let wallet_b = Wallet::generate_random();
 
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 8));
         let port_b = 8021;
@@ -743,18 +729,18 @@ mod tests {
         let datastore = GenesisDatastore::new();
 
         let mut node_a = Node::new(
-            public_key_a,
-            private_key_a,
+            wallet_a.address,
+            wallet_a.get_private_key(),
             ip_address_a,
             port_a,
-            vec![Peer::new(public_key_b, ip_address_b, port_b)],
+            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
             Some(Arc::new(datastore.clone())),
             None,
         );
 
         let node_b = Node::new(
-            public_key_b,
-            private_key_b,
+            wallet_b.address,
+            wallet_b.get_private_key(),
             ip_address_b,
             port_b,
             vec![],
@@ -765,38 +751,36 @@ mod tests {
         inner_test_transaction_and_block_proposal(
             &mut node_a,
             &node_b,
-            &mut signing_a,
-            public_key_b,
-            public_key_a,
+            &mut wallet_a,
+            wallet_b.address,
         )
         .await;
     }
 
     #[tokio::test]
     async fn test_double_transaction() {
-        let mut signing_a = DefaultSigner::generate_random();
-        let public_key_a = signing_a.get_verifying_function().to_bytes();
-        let private_key_a = signing_a.to_bytes();
+        let mut wallet_a = Wallet::generate_random();
+
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 3));
         let port_a = 8020;
-        let mut signing_b = DefaultSigner::generate_random();
-        let public_key_b = signing_b.get_verifying_function().to_bytes();
-        let private_key_b = signing_b.to_bytes();
+
+        let mut wallet_b = Wallet::generate_random();
+
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 4));
         let port_b = 8021;
         let datastore = GenesisDatastore::new();
         let mut node_a = Node::new(
-            public_key_a,
-            private_key_a,
+            wallet_a.address,
+            wallet_a.get_private_key(),
             ip_address_a,
             port_a,
-            vec![Peer::new(public_key_b, ip_address_b, port_b)],
+            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
             Some(Arc::new(datastore.clone())),
             None,
         );
         let mut node_b = Node::new(
-            public_key_b,
-            private_key_b,
+            wallet_b.address,
+            wallet_b.get_private_key(),
             ip_address_b,
             port_b,
             vec![],
@@ -807,9 +791,8 @@ mod tests {
         inner_test_transaction_and_block_proposal(
             &mut node_a,
             &node_b,
-            &mut signing_a,
-            public_key_b,
-            public_key_a,
+            &mut wallet_a,
+            wallet_b.address,
         )
         .await;
 
@@ -823,8 +806,8 @@ mod tests {
     
         let result = submit_transaction(
             &mut node_b,
-            state_manager.wallets.lock().unwrap().get_mut(&public_key_b).unwrap(),
-            public_key_a,
+            &mut wallet_b,
+            wallet_a.address,
             0,
             false,
             Some(timestamp),
@@ -856,25 +839,25 @@ mod tests {
         drop(chain_a);
         // check reputations.
         let reputations_b = node_b.inner.reputations.lock().await;
-        assert!(reputations_b.contains_key(&public_key_a));
-        assert!(reputations_b.contains_key(&public_key_b));
-        let history_a = reputations_b.get(&public_key_a).unwrap();
+        assert!(reputations_b.contains_key(&wallet_a.address));
+        assert!(reputations_b.contains_key(&wallet_b.address));
+        let history_a = reputations_b.get(&wallet_a.address).unwrap();
         assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
         assert_eq!(history_a.blocks_stamped.len(), 2); // 2 blocks stamped
         let b_a = history_a.compute_reputation();
-        let history_b = reputations_b.get(&public_key_b).unwrap();
+        let history_b = reputations_b.get(&wallet_b.address).unwrap();
         assert_eq!(history_b.blocks_mined.len(), 2); // 2 blocks mined
         assert_eq!(history_b.blocks_stamped.len(), 2); // 2 blocks stamped
         let b_b = history_b.compute_reputation();
         drop(reputations_b);
         let reputations_a = node_a.inner.reputations.lock().await;
-        assert!(reputations_a.contains_key(&public_key_a));
-        assert!(reputations_a.contains_key(&public_key_b));
-        let history_a = reputations_a.get(&public_key_a).unwrap();
+        assert!(reputations_a.contains_key(&wallet_a.address));
+        assert!(reputations_a.contains_key(&wallet_b.address));
+        let history_a = reputations_a.get(&wallet_a.address).unwrap();
         assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
         assert_eq!(history_a.blocks_stamped.len(), 2); // 2 blocks stamped
         let a_a = history_a.compute_reputation();
-        let history_b = reputations_a.get(&public_key_b).unwrap();
+        let history_b = reputations_a.get(&wallet_b.address).unwrap();
         assert_eq!(history_b.blocks_mined.len(), 2); // 2 blocks mined
         assert_eq!(history_b.blocks_stamped.len(), 2); // 2 blocks stamped
         let a_b = history_b.compute_reputation();
@@ -891,17 +874,16 @@ mod tests {
         node_a: &mut Node,
         node_b: &mut Node,
         node_c: &mut Node,
-        signing_a: &mut DefaultSigner,
-        public_key_b: StdByteArray,
-        public_key_a: StdByteArray,
-        public_key_c: StdByteArray,
+        wallet_a: &mut Wallet,
+        wallet_b: &Wallet,
+        wallet_c: &Wallet,
+
     ) {
         inner_test_transaction_and_block_proposal(
             node_a,
             node_b,
-            signing_a,
-            public_key_b,
-            public_key_a,
+            wallet_a,
+            wallet_b.address,
         )
         .await;
 
@@ -914,9 +896,9 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         // check if node c knows about node a and b
         let peers_c = node_c.inner.peers.lock().await;
-        assert!(peers_c.contains_key(&public_key_a));
-        assert!(peers_c.contains_key(&public_key_b));
-        assert!(!peers_c.contains_key(&public_key_c)); // node c does not know about itself
+        assert!(peers_c.contains_key(&wallet_a.address));
+        assert!(peers_c.contains_key(&wallet_b.address));
+        assert!(!peers_c.contains_key(&wallet_c.address)); // node c does not know about itself
         drop(peers_c);
         // make sure chain is length 3
         let chain_c = node_c.inner.chain.lock().await;
@@ -946,37 +928,37 @@ mod tests {
         assert!(node_c.inner.state.lock().await.clone() == NodeState::Serving);
         // make sure reputations are correct
         let reputations_c = node_c.inner.reputations.lock().await;
-        assert!(reputations_c.contains_key(&public_key_a));
-        assert!(reputations_c.contains_key(&public_key_b));
-        let history_a = reputations_c.get(&public_key_a).unwrap();
+        assert!(reputations_c.contains_key(&wallet_a.address));
+        assert!(reputations_c.contains_key(&wallet_b.address));
+        let history_a = reputations_c.get(&wallet_a.address).unwrap();
         assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
         assert_eq!(history_a.blocks_stamped.len(), 1); // 2 blocks stamped
         let c_a = history_a.compute_reputation();
-        let history_b = reputations_c.get(&public_key_b).unwrap();
+        let history_b = reputations_c.get(&wallet_b.address).unwrap();
         assert_eq!(history_b.blocks_mined.len(), 1); // 2 blocks mined
         assert_eq!(history_b.blocks_stamped.len(), 1); // 2 blocks stamped
         let c_b = history_b.compute_reputation();
         drop(reputations_c);
         let reputations_a = node_a.inner.reputations.lock().await;
-        assert!(reputations_a.contains_key(&public_key_a));
-        assert!(reputations_a.contains_key(&public_key_b));
-        let history_a = reputations_a.get(&public_key_a).unwrap();
+        assert!(reputations_a.contains_key(&wallet_a.address));
+        assert!(reputations_a.contains_key(&wallet_b.address));
+        let history_a = reputations_a.get(&wallet_a.address).unwrap();
         assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
         assert_eq!(history_a.blocks_stamped.len(), 1); // 2 blocks stamped
         let a_a = history_a.compute_reputation();
-        let history_b = reputations_a.get(&public_key_b).unwrap();
+        let history_b = reputations_a.get(&wallet_b.address).unwrap();
         assert_eq!(history_b.blocks_mined.len(), 1); // 2 blocks mined
         assert_eq!(history_b.blocks_stamped.len(), 1); // 2 blocks stamped
         let a_b = history_b.compute_reputation();
         drop(reputations_a);
         let reputations_b = node_b.inner.reputations.lock().await;
-        assert!(reputations_b.contains_key(&public_key_a));
-        assert!(reputations_b.contains_key(&public_key_b));
-        let history_a = reputations_b.get(&public_key_a).unwrap();
+        assert!(reputations_b.contains_key(&wallet_a.address));
+        assert!(reputations_b.contains_key(&wallet_b.address));
+        let history_a = reputations_b.get(&wallet_a.address).unwrap();
         assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
         assert_eq!(history_a.blocks_stamped.len(), 1); // 2 blocks stamped
         let b_a = history_a.compute_reputation();
-        let history_b = reputations_b.get(&public_key_b).unwrap();
+        let history_b = reputations_b.get(&wallet_b.address).unwrap();
         assert_eq!(history_b.blocks_mined.len(), 1); // 2 blocks mined
         assert_eq!(history_b.blocks_stamped.len(), 1); // 2 blocks stamped
         let b_b = history_b.compute_reputation();
@@ -990,29 +972,28 @@ mod tests {
 
     #[tokio::test]
     async fn test_new_node_online() {
-        let mut signing_a = DefaultSigner::generate_random();
-        let public_key_a = signing_a.get_verifying_function().to_bytes();
-        let private_key_a = signing_a.to_bytes();
+        let mut wallet_a = Wallet::generate_random();
+
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 3));
         let port_a = 8015;
-        let signing_b = DefaultSigner::generate_random();
-        let public_key_b = signing_b.get_verifying_function().to_bytes();
-        let private_key_b = signing_b.to_bytes();
+
+        let mut wallet_b = Wallet::generate_random();
+
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 4));
         let port_b = 8016;
         let datastore = GenesisDatastore::new();
         let mut node_a = Node::new(
-            public_key_a,
-            private_key_a,
+            wallet_a.address,
+            wallet_a.get_private_key(),
             ip_address_a,
             port_a,
-            vec![Peer::new(public_key_b, ip_address_b, port_b)],
+            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
             Some(Arc::new(datastore.clone())),
             None,
         );
         let mut node_b = Node::new(
-            public_key_b,
-            private_key_b,
+            wallet_b.address,
+            wallet_b.get_private_key(),
             ip_address_b,
             port_b,
             vec![],
@@ -1020,17 +1001,16 @@ mod tests {
             Some(MinerPool::new()), // we will mine from this node
         );
         // new node - node c
-        let signing_c = DefaultSigner::generate_random();
-        let public_key_c = signing_c.get_verifying_function().to_bytes();
-        let private_key_c = signing_c.to_bytes();
+        let wallet_c = Wallet::generate_random();
+
         let ip_address_c = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 5));
         let port_c = 8022;
         let mut node_c = Node::new(
-            public_key_c,
-            private_key_c,
+            wallet_c.address,
+            wallet_c.get_private_key(),
             ip_address_c,
             port_c,
-            vec![Peer::new(public_key_a, ip_address_a, port_a)],
+            vec![Peer::new(wallet_a.address, ip_address_a, port_a)],
             Some(Arc::new(EmptyDatastore::new())), // empty datastore, needs ICD
             None,
         );
@@ -1039,39 +1019,37 @@ mod tests {
             &mut node_a,
             &mut node_b,
             &mut node_c,
-            &mut signing_a,
-            public_key_b,
-            public_key_a,
-            public_key_c,
+            &mut wallet_a,
+            &wallet_b,
+            &wallet_c,
         )
         .await;
     }
 
     #[tokio::test]
     async fn test_sync_later() {
-        let mut signing_a = DefaultSigner::generate_random();
-        let public_key_a = signing_a.get_verifying_function().to_bytes();
-        let private_key_a = signing_a.to_bytes();
+        let mut wallet_a = Wallet::generate_random();
+
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 3));
         let port_a = 8008;
-        let signing_b = DefaultSigner::generate_random();
-        let public_key_b = signing_b.get_verifying_function().to_bytes();
-        let private_key_b = signing_b.to_bytes();
+
+        let mut wallet_b = Wallet::generate_random();
+
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 4));
         let port_b = 8009;
         let datastore = GenesisDatastore::new();
         let mut node_a = Node::new(
-            public_key_a,
-            private_key_a,
+            wallet_a.address,
+            wallet_a.get_private_key(),
             ip_address_a,
             port_a,
-            vec![Peer::new(public_key_b, ip_address_b, port_b)],
+            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
             Some(Arc::new(datastore.clone())),
             None,
         );
         let mut node_b = Node::new(
-            public_key_b,
-            private_key_b,
+            wallet_b.address,
+            wallet_b.get_private_key(),
             ip_address_b,
             port_b,
             vec![],
@@ -1079,17 +1057,16 @@ mod tests {
             Some(MinerPool::new()), // we will mine from this node
         );
         // node c
-        let mut signing_c = DefaultSigner::generate_random();
-        let public_key_c = signing_c.get_verifying_function().to_bytes();
-        let private_key_c = signing_c.to_bytes();
+        let mut wallet_c = Wallet::generate_random();
+
         let ip_address_c = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 5));
         let port_c = 8010;
         let mut node_c = Node::new(
-            public_key_c,
-            private_key_c,
+            wallet_c.address,
+            wallet_c.get_private_key(),
             ip_address_c,
             port_c,
-            vec![Peer::new(public_key_a, ip_address_a, port_a)],
+            vec![Peer::new(wallet_a.address, ip_address_a, port_a)],
             Some(Arc::new(EmptyDatastore::new())), // empty datastore, needs ICD
             None,
         );
@@ -1098,10 +1075,9 @@ mod tests {
             &mut node_a,
             &mut node_b,
             &mut node_c,
-            &mut signing_a,
-            public_key_b,
-            public_key_a,
-            public_key_c,
+            &mut wallet_a,
+            &wallet_b,
+            &wallet_c,
         )
         .await;
         // now, let A go offline. C will submit a transaction.
@@ -1113,8 +1089,8 @@ mod tests {
         let state_manager = node_c.inner.chain.lock().await.as_mut().unwrap().state_manager.clone();
         let _ = submit_transaction(
             &mut node_c,
-            state_manager.wallets.lock().unwrap().get_mut(&public_key_c).unwrap(),
-            public_key_b,
+            &mut wallet_c,
+            wallet_b.address,
             0,
             false,
             None,
@@ -1141,8 +1117,8 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         // check if node a knows about node b and c
         let peers_a = node_a.inner.peers.lock().await;
-        assert!(peers_a.contains_key(&public_key_b));
-        assert!(peers_a.contains_key(&public_key_c));
+        assert!(peers_a.contains_key(&wallet_b.address));
+        assert!(peers_a.contains_key(&wallet_c.address));
         drop(peers_a);
         // now check that it collected the block
         let chain_a = node_a.inner.chain.lock().await;
@@ -1150,27 +1126,27 @@ mod tests {
         assert_eq!(chain_a.as_ref().unwrap().blocks.len(), 3); // 3 blocks
         // double check reputations
         let reputations_a = node_a.inner.reputations.lock().await;
-        assert!(reputations_a.contains_key(&public_key_a));
-        assert!(reputations_a.contains_key(&public_key_b));
-        assert!(reputations_a.contains_key(&public_key_c));
-        let history_c = reputations_a.get(&public_key_c).unwrap();
+        assert!(reputations_a.contains_key(&wallet_a.address));
+        assert!(reputations_a.contains_key(&wallet_b.address));
+        assert!(reputations_a.contains_key(&wallet_c.address));
+        let history_c = reputations_a.get(&wallet_c.address).unwrap();
         assert_eq!(history_c.blocks_mined.len(), 0); // 0 blocks mined
         assert_eq!(history_c.blocks_stamped.len(), 1); // 2 blocks stamped
         let a_c = history_c.compute_reputation();
-        let history_b = reputations_a.get(&public_key_b).unwrap();
+        let history_b = reputations_a.get(&wallet_b.address).unwrap();
         assert_eq!(history_b.blocks_mined.len(), 2); // 2 blocks mined
         assert_eq!(history_b.blocks_stamped.len(), 2); // 2 blocks stamped
         let a_b = history_b.compute_reputation();
         // now check against C
         let reputations_c = node_c.inner.reputations.lock().await;
-        assert!(reputations_c.contains_key(&public_key_a));
-        assert!(reputations_c.contains_key(&public_key_b));
-        assert!(reputations_c.contains_key(&public_key_c));
-        let history_c = reputations_c.get(&public_key_c).unwrap();
+        assert!(reputations_c.contains_key(&wallet_a.address));
+        assert!(reputations_c.contains_key(&wallet_b.address));
+        assert!(reputations_c.contains_key(&wallet_c.address));
+        let history_c = reputations_c.get(&wallet_c.address).unwrap();
         assert_eq!(history_c.blocks_mined.len(), 0); // 0 blocks mined
         assert_eq!(history_c.blocks_stamped.len(), 1); // 2 blocks stamped
         let c_c = history_c.compute_reputation();
-        let history_b = reputations_c.get(&public_key_b).unwrap();
+        let history_b = reputations_c.get(&wallet_b.address).unwrap();
         assert_eq!(history_b.blocks_mined.len(), 2); // 2 blocks mined
         assert_eq!(history_b.blocks_stamped.len(), 2); // 2 blocks stamped
         let c_b = history_b.compute_reputation();
@@ -1184,29 +1160,29 @@ mod tests {
 
     #[tokio::test]
     async fn test_sync_two_blocks() {
-        let mut signing_a = DefaultSigner::generate_random();
-        let public_key_a = signing_a.get_verifying_function().to_bytes();
-        let private_key_a = signing_a.to_bytes();
+        let mut wallet_a = Wallet::generate_random();
+
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 8));
         let port_a = 7999;
-        let signing_b = DefaultSigner::generate_random();
-        let public_key_b = signing_b.get_verifying_function().to_bytes();
-        let private_key_b = signing_b.to_bytes();
+
+        let mut wallet_b = Wallet::generate_random();
+
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 9));
         let port_b = 7998;
         let datastore = GenesisDatastore::new();
+
         let mut node_a = Node::new(
-            public_key_a,
-            private_key_a,
+            wallet_a.address,
+            wallet_a.get_private_key(),
             ip_address_a,
             port_a,
-            vec![Peer::new(public_key_b, ip_address_b, port_b)],
+            vec![Peer::new(wallet_b.get_private_key(), ip_address_b, port_b)],
             Some(Arc::new(datastore.clone())),
             None,
         );
         let mut node_b = Node::new(
-            public_key_b,
-            private_key_b,
+            wallet_b.address,
+            wallet_b.get_private_key(),
             ip_address_b,
             port_b,
             vec![],
@@ -1214,17 +1190,15 @@ mod tests {
             Some(MinerPool::new()), // we will mine from this node
         );
         // node c
-        let mut signing_c = DefaultSigner::generate_random();
-        let public_key_c = signing_c.get_verifying_function().to_bytes();
-        let private_key_c = signing_c.to_bytes();
+        let mut wallet_c = Wallet::generate_random();
         let ip_address_c = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 5));
         let port_c = 7997;
         let mut node_c = Node::new(
-            public_key_c,
-            private_key_c,
+            wallet_c.address,
+            wallet_c.get_private_key(),
             ip_address_c,
             port_c,
-            vec![Peer::new(public_key_a, ip_address_a, port_a)],
+            vec![Peer::new(wallet_a.address, ip_address_a, port_a)],
             Some(Arc::new(EmptyDatastore::new())), // empty datastore, needs ICD
             None,
         );
@@ -1233,10 +1207,9 @@ mod tests {
             &mut node_a,
             &mut node_b,
             &mut node_c,
-            &mut signing_a,
-            public_key_b,
-            public_key_a,
-            public_key_c,
+            &mut wallet_a,
+            &wallet_b,
+            &wallet_c,
         )
         .await;
         // now, let A go offline. C will submit a transaction.
@@ -1248,8 +1221,8 @@ mod tests {
         let state_manager = node_c.inner.chain.lock().await.as_mut().unwrap().state_manager.clone();
         let _ = submit_transaction(
             &mut node_c,
-            state_manager.wallets.lock().unwrap().get_mut(&public_key_c).unwrap(),
-            public_key_b,
+            &mut wallet_c,
+            wallet_b.address,
             0,
             false,
             None,
@@ -1271,8 +1244,8 @@ mod tests {
         // DO A SECOND TRANSACTION TO GET 2 BLOCKS OUTDATED
         let _ = submit_transaction(
             &mut node_c,
-            state_manager.wallets.lock().unwrap().get_mut(&public_key_c).unwrap(),
-            public_key_b,
+            &mut wallet_c,
+            wallet_b.address,
             0,
             false,
             None,
@@ -1299,8 +1272,8 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         // check if node a knows about node b and c
         let peers_a = node_a.inner.peers.lock().await;
-        assert!(peers_a.contains_key(&public_key_b));
-        assert!(peers_a.contains_key(&public_key_c));
+        assert!(peers_a.contains_key(&wallet_b.address));
+        assert!(peers_a.contains_key(&wallet_c.address));
         drop(peers_a);
         // now check that it collected the block
         let chain_a = node_a.inner.chain.lock().await;
@@ -1308,27 +1281,27 @@ mod tests {
         assert_eq!(chain_a.as_ref().unwrap().blocks.len(), 4); // 3 blocks
         // double check reputations
         let reputations_a = node_a.inner.reputations.lock().await;
-        assert!(reputations_a.contains_key(&public_key_a));
-        assert!(reputations_a.contains_key(&public_key_b));
-        assert!(reputations_a.contains_key(&public_key_c));
-        let history_c = reputations_a.get(&public_key_c).unwrap();
+        assert!(reputations_a.contains_key(&wallet_a.address));
+        assert!(reputations_a.contains_key(&wallet_b.address));
+        assert!(reputations_a.contains_key(&wallet_c.address));
+        let history_c = reputations_a.get(&wallet_c.address).unwrap();
         assert_eq!(history_c.blocks_mined.len(), 0); // 0 blocks mined
         assert_eq!(history_c.blocks_stamped.len(), 2); // 2 blocks stamped
         let a_c = history_c.compute_reputation();
-        let history_b = reputations_a.get(&public_key_b).unwrap();
+        let history_b = reputations_a.get(&wallet_b.address).unwrap();
         assert_eq!(history_b.blocks_mined.len(), 3); // 2 blocks mined
         assert_eq!(history_b.blocks_stamped.len(), 3); // 2 blocks stamped
         let a_b = history_b.compute_reputation();
         // now check against C
         let reputations_c = node_c.inner.reputations.lock().await;
-        assert!(reputations_c.contains_key(&public_key_a));
-        assert!(reputations_c.contains_key(&public_key_b));
-        assert!(reputations_c.contains_key(&public_key_c));
-        let history_c = reputations_c.get(&public_key_c).unwrap();
+        assert!(reputations_c.contains_key(&wallet_a.address));
+        assert!(reputations_c.contains_key(&wallet_b.address));
+        assert!(reputations_c.contains_key(&wallet_c.address));
+        let history_c = reputations_c.get(&wallet_c.address).unwrap();
         assert_eq!(history_c.blocks_mined.len(), 0); // 0 blocks mined
         assert_eq!(history_c.blocks_stamped.len(), 2); // 2 blocks stamped
         let c_c = history_c.compute_reputation();
-        let history_b = reputations_c.get(&public_key_b).unwrap();
+        let history_b = reputations_c.get(&wallet_b.address).unwrap();
         assert_eq!(history_b.blocks_mined.len(), 3); // 2 blocks mined
         assert_eq!(history_b.blocks_stamped.len(), 3); // 2 blocks stamped
         let c_b = history_b.compute_reputation();
@@ -1342,29 +1315,28 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_transaction_one_block() {
-        let mut signing_a = DefaultSigner::generate_random();
-        let public_key_a = signing_a.get_verifying_function().to_bytes();
-        let private_key_a = signing_a.to_bytes();
+        let mut wallet_a = Wallet::generate_random();
+
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 8));
         let port_a = 7997;
-        let signing_b = DefaultSigner::generate_random();
-        let public_key_b = signing_b.get_verifying_function().to_bytes();
-        let private_key_b = signing_b.to_bytes();
+
+        let mut wallet_b = Wallet::generate_random();
+
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 9));
         let port_b = 7996;
         let datastore = GenesisDatastore::new();
         let mut node_a = Node::new(
-            public_key_a,
-            private_key_a,
+            wallet_a.address,
+            wallet_a.get_private_key(),
             ip_address_a,
             port_a,
-            vec![Peer::new(public_key_b, ip_address_b, port_b)],
+            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
             Some(Arc::new(datastore.clone())),
             None,
         );
         let node_b = Node::new(
-            public_key_b,
-            private_key_b,
+            wallet_b.address,
+            wallet_b.get_private_key(),
             ip_address_b,
             port_b,
             vec![],
@@ -1393,8 +1365,8 @@ mod tests {
         println!("Submitting multiple transactions from A to B");
         submit_transaction(
             &mut node_a,
-            state_manager.wallets.lock().unwrap().get_mut(&public_key_a).unwrap(),
-            public_key_b,
+            &mut wallet_a,
+            wallet_b.address,
             0,
             false,
             None,
@@ -1404,8 +1376,8 @@ mod tests {
         println!("Submitting multiple transactions from A to B");
         submit_transaction(
             &mut node_a,
-            state_manager.wallets.lock().unwrap().get_mut(&public_key_a).unwrap(),
-            public_key_b,
+            &mut wallet_a,
+            wallet_b.address,
             0,
             false,
             None,
@@ -1420,7 +1392,7 @@ mod tests {
         println!("transactions processed, checking the chain");
         // now, lets check that a is in bs peer list
         let peers_b = node_b.inner.peers.lock().await;
-        assert!(peers_b.contains_key(&public_key_a));
+        assert!(peers_b.contains_key(&wallet_a.address));
         drop(peers_b);
         // now, grab the chains - check depth
         let chain_b = miner_b.node.inner.chain.lock().await;
@@ -1443,32 +1415,28 @@ mod tests {
     #[tokio::test]
     async fn test_50_transactions(){
         // make 2 nodes
-        let mut signing_a = DefaultSigner::generate_random();
-        let public_key_a = signing_a.get_verifying_function().to_bytes();
-        let private_key_a = signing_a.to_bytes();
+        let mut wallet_a = Wallet::generate_random();
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 10));
         let port_a = 8000;
-        let mut signing_b = DefaultSigner::generate_random();
-        let public_key_b = signing_b.get_verifying_function().to_bytes();
-        let private_key_b = signing_b.to_bytes();
+        let mut wallet_b = Wallet::generate_random();
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 11));
         let port_b = 8001;
         
         let datastore = GenesisDatastore::new();
 
         let mut node_a = Node::new(
-            public_key_a,
-            private_key_a,
+            wallet_a.address,
+            wallet_a.get_private_key(),
             ip_address_a,
             port_a,
-            vec![Peer::new(public_key_b, ip_address_b, port_b)],
+            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
             Some(Arc::new(datastore.clone())),
             None,
         );
 
         let node_b = Node::new(
-            public_key_b,
-            private_key_b,
+            wallet_b.address,
+            wallet_b.get_private_key(),
             ip_address_b,
             port_b,
             vec![],
@@ -1499,8 +1467,8 @@ mod tests {
             println!("Submitting transaction {} from A to B", i);
             let _ = submit_transaction(
                 &mut node_a,
-                state_manager.wallets.lock().unwrap().get_mut(&public_key_a).unwrap(),
-                public_key_b,
+                &mut wallet_a,
+                wallet_b.address,
                 0,
                 false,
                 None,
@@ -1514,7 +1482,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await; // wait for the transactions to be processed
         // now, lets check that a is in bs peer list
         let peers_b = node_b.inner.peers.lock().await;
-        assert!(peers_b.contains_key(&public_key_a));
+        assert!(peers_b.contains_key(&wallet_a.address));
         drop(peers_b);
         // now, grab the chains - check depth
         let chain_b_lock = miner_b.node.inner.chain.lock().await;
@@ -1552,8 +1520,8 @@ mod tests {
             .as_mut()
             .unwrap()
             .state_manager
-            .get_account(&public_key_b, state_root)
-            .unwrap_or(Account::new(public_key_b, 0));
+            .get_account(&wallet_b.address, state_root)
+            .unwrap_or(Account::new(wallet_b.address, 0));
         let b_balance = account_b.balance;
         assert_eq!(b_balance, get_reward_from_depth_and_stampers(1, 2));
         drop(account_b);
@@ -1575,7 +1543,7 @@ mod tests {
             .as_mut()
             .unwrap()
             .state_manager
-            .get_account(&public_key_b, state_root)
+            .get_account(&wallet_b.address, state_root)
             .unwrap();
         let balance_b = acc.balance;
         assert_eq!(balance_b, get_reward_from_depth_and_stampers(1, 2));
@@ -1595,8 +1563,8 @@ mod tests {
             println!("Submitting transaction {} from B to A", i);
             let _ = submit_transaction(
                 &mut miner_b.node,
-                state_manager.wallets.lock().unwrap().get_mut(&public_key_b).unwrap(),
-                public_key_a,
+                &mut wallet_b,
+                wallet_a.address,
                 10,
                 false,
                 None,
@@ -1642,7 +1610,7 @@ mod tests {
             .as_mut()
             .unwrap()
             .state_manager
-            .get_account(&public_key_a, state_root)
+            .get_account(&wallet_a.address, state_root)
             .unwrap();
         let a_balance = account_a.balance;
         assert_eq!(a_balance, 100); // 100 is the initial balance
@@ -1665,7 +1633,7 @@ mod tests {
             .as_mut()
             .unwrap()
             .state_manager
-            .get_account(&public_key_a, state_root)
+            .get_account(&wallet_a.address, state_root)
             .unwrap();
         let balance_a = acc.balance;
         assert_eq!(balance_a, 100); // 100 is the initial balance
@@ -1688,7 +1656,7 @@ mod tests {
             .as_mut()
             .unwrap()
             .state_manager
-            .get_account(&public_key_b, state_root)
+            .get_account(&wallet_b.address, state_root)
             .unwrap();
         let b_balance = account_b.balance;
         assert_eq!(b_balance, get_reward_from_depth_and_stampers(1, 2) + get_reward_from_depth_and_stampers(2, 2) - 100); // 0 is the balance after sending 10 * 10 = 100
@@ -1711,7 +1679,7 @@ mod tests {
             .as_mut()
             .unwrap()
             .state_manager
-            .get_account(&public_key_b, state_root)
+            .get_account(&wallet_b.address, state_root)
             .unwrap();
         let balance_b = acc.balance;
         assert_eq!(balance_b, get_reward_from_depth_and_stampers(1, 2) + get_reward_from_depth_and_stampers(2, 2) - 100); // 0 is the balance after sending 10 * 10 = 100

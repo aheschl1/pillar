@@ -110,17 +110,14 @@ async fn monitor_block_pool(miner: Miner) {
             Some(mut block) => {
                 block.header.miner_address = Some(miner.node.inner.public_key);
                 block.header.tail.clean(&block.header.clone()); // removes broken signatures
-                let chain = miner.node.inner.chain.lock().await;
+                let mut chain_lock = miner.node.inner.chain.lock().await;
+                let chain = chain_lock.as_mut().unwrap();
                 let prev_block = chain
-                    .as_ref()
-                    .unwrap()
                     .headers
                     .get(&block.header.previous_hash)
                     .expect("Previous header must exist");
-
-                let state_root = miner.node.inner.chain.lock().await
-                    .as_mut()
-                    .unwrap()
+                
+                let state_root = chain
                     .state_manager
                     .branch_from_block(&block, &prev_block);
 
@@ -133,6 +130,7 @@ async fn monitor_block_pool(miner: Miner) {
                 ).await;
                 // after mining the block, just transmit
                 // TODO this doesnt fully belong here - also handle broadcast error
+                println!("Broadcasting mined block: {:?}", block.header);
                 let _ = miner.node.broadcast(&Message::BlockTransmission(block)).await;
             },
             None => {

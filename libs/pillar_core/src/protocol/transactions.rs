@@ -46,7 +46,7 @@ pub async fn submit_transaction(
     );
     // sign with the signer
 
-    transaction.sign(&mut wallet.signing_key);
+    transaction.sign(wallet);
 
     // broadcast and wait for peer responses
     let message = Message::TransactionBroadcast(transaction);

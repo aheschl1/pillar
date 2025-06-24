@@ -8,8 +8,6 @@ use crate::{accounting::{account::Account, wallet::Wallet}, primitives::block::{
 pub struct StateManager{
     // The mapping from address to account
     pub state_trie: Arc<Mutex<MerkleTrie<StdByteArray, Account>>>,
-    // basic wallets for local node
-    pub wallets: Arc<Mutex<HashMap<StdByteArray, Wallet>>>,
 }
 
 impl Debug for StateManager {
@@ -21,10 +19,9 @@ impl Debug for StateManager {
 
 impl StateManager{
     // Creates a new account manager
-    pub fn new(wallets: Option<HashMap<StdByteArray, Wallet>>) -> Self {
+    pub fn new() -> Self {
         StateManager {
-            state_trie: Arc::new(Mutex::new(MerkleTrie::new())),
-            wallets: Arc::new(Mutex::new(wallets.unwrap_or_default())),
+            state_trie: Arc::new(Mutex::new(MerkleTrie::new()))
         }
     }
 
@@ -42,7 +39,6 @@ impl StateManager{
         let mut state_updates: HashMap<StdByteArray, Account> = HashMap::new();
         let state_root = prev_header.state_root.expect("Previous block must have a state root");
         let mut state_trie = self.state_trie.lock().expect("Failed to lock state trie");
-
         for transaction in &block.transactions {
             let mut sender = match state_updates.get(&transaction.header.sender){
                 Some(account) => account.clone(),

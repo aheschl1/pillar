@@ -32,7 +32,6 @@ pub async fn mine(
     block.header.nonce = 0;
     block.header.miner_address = Some(address);
     block.header.state_root = Some(state_root);
-
     loop {
         match block.header.hash(&mut hash_function){
             Ok(hash) => {

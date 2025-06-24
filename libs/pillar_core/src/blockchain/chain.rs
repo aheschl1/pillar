@@ -44,7 +44,7 @@ impl Chain {
         let mut blocks = HashMap::new();
         blocks.insert(genisis_hash, genesis_block);
 
-        let state_manager = StateManager::new(None);
+        let state_manager = StateManager::new();
         let root = state_manager
             .state_trie
             .lock()
@@ -103,7 +103,7 @@ impl Chain {
             depth,
             deepest_hash,
             leaves,
-            state_manager: StateManager::new(None),
+            state_manager: StateManager::new(),
         }
     }
     
