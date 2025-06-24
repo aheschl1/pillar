@@ -1,8 +1,8 @@
-use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::{Arc, Mutex}};
+use std::{collections::HashMap, fmt::Debug, sync::{Arc, Mutex}};
 
 use pillar_crypto::{merkle_trie::MerkleTrie, types::StdByteArray};
 
-use crate::{accounting::{account::Account, wallet::Wallet}, primitives::block::{Block, BlockHeader}, protocol::difficulty::get_reward_from_depth_and_stampers};
+use crate::{accounting::account::Account, primitives::block::{Block, BlockHeader}, protocol::difficulty::get_reward_from_depth_and_stampers};
 
 #[derive(Clone, Default)]
 pub struct StateManager{

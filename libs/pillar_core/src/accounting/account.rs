@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 
 use pillar_crypto::types::StdByteArray;
 use serde::{Deserialize, Serialize};

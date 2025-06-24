@@ -1,7 +1,7 @@
 use flume::Receiver;
 use pillar_crypto::{hashing::{DefaultHash, Hashable}, signing::{SigFunction, Signable}, types::StdByteArray};
 
-use crate::{accounting::{account::Account, state::StateManager, wallet::Wallet}, nodes::{messages::Message, node::{Broadcaster, Node}}, primitives::{block::BlockHeader, transaction::Transaction}};
+use crate::{accounting::wallet::Wallet, nodes::{messages::Message, node::{Broadcaster, Node}}, primitives::{block::BlockHeader, transaction::Transaction}};
 
 /// Submit a transaction to the network
 /// 

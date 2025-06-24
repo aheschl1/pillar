@@ -1,7 +1,7 @@
 use pillar_crypto::hashing::DefaultHash;
 use tracing::instrument;
 
-use crate::{blockchain::TrimmableChain, primitives::block::{Block, BlockTail}, protocol::pow::mine};
+use crate::{primitives::block::{Block, BlockTail}, protocol::pow::mine};
 
 use super::{messages::Message, node::{Broadcaster, Node}};
 
@@ -120,7 +120,7 @@ async fn monitor_block_pool(miner: Miner) {
                 
                 let state_root = chain
                     .state_manager
-                    .branch_from_block(&block, &prev_block);
+                    .branch_from_block(&block, prev_block);
 
                 mine(
                     &mut block, 

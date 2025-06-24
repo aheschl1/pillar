@@ -7,7 +7,7 @@ pub mod peer;
 mod tests {
 
     use chrono::Local;
-    use pillar_crypto::{hashing::{DefaultHash, Hashable}, signing::{DefaultSigner, SigFunction, SigVerFunction, Signable}, types::StdByteArray};
+    use pillar_crypto::{hashing::{DefaultHash, Hashable}, signing::{SigFunction, Signable}, types::StdByteArray};
     use tracing::level_filters::LevelFilter;
     use tracing_subscriber::{
         Layer, Registry,
@@ -17,7 +17,7 @@ mod tests {
     };
 
     use crate::{
-        accounting::{account::Account, wallet::{self, Wallet}}, nodes::{
+        accounting::wallet::{Wallet}, nodes::{
             messages::Message, miner::{Miner, MAX_TRANSACTION_WAIT_TIME}, node::NodeState, peer::Peer
         }, persistence::database::{Datastore, EmptyDatastore, GenesisDatastore}, primitives::{pool::MinerPool, transaction::Transaction}, protocol::{difficulty::get_reward_from_depth_and_stampers, peers::discover_peers, transactions::submit_transaction}
     };
@@ -977,7 +977,7 @@ mod tests {
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 3));
         let port_a = 8015;
 
-        let mut wallet_b = Wallet::generate_random();
+        let wallet_b = Wallet::generate_random();
 
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 4));
         let port_b = 8016;
@@ -1033,7 +1033,7 @@ mod tests {
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 3));
         let port_a = 8008;
 
-        let mut wallet_b = Wallet::generate_random();
+        let wallet_b = Wallet::generate_random();
 
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 4));
         let port_b = 8009;
@@ -1165,7 +1165,7 @@ mod tests {
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 8));
         let port_a = 7999;
 
-        let mut wallet_b = Wallet::generate_random();
+        let wallet_b = Wallet::generate_random();
 
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 9));
         let port_b = 7998;
@@ -1319,7 +1319,7 @@ mod tests {
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 8));
         let port_a = 7997;
 
-        let mut wallet_b = Wallet::generate_random();
+        let wallet_b = Wallet::generate_random();
 
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 9));
         let port_b = 7996;

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 use crate::{
-    accounting::{account::Account, state::{self, StateManager}}, primitives::{block::{Block, BlockHeader}, transaction::Transaction}, protocol::chain::get_genesis_block
+    accounting::{account::Account, state::{StateManager}}, primitives::{block::{Block, BlockHeader}, transaction::Transaction}, protocol::chain::get_genesis_block
 };
 
 use super::TrimmableChain;
@@ -352,7 +352,7 @@ mod tests {
     use pillar_crypto::signing::{DefaultSigner, SigFunction, SigVerFunction, Signable};
 
     use super::*;
-    use crate::accounting::account::Account;
+    
     use crate::primitives::block::BlockTail;
     use crate::primitives::transaction::{Transaction};
     use crate::protocol::pow::mine;

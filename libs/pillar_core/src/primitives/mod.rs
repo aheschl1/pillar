@@ -5,7 +5,7 @@ pub mod pool;
 #[cfg(test)]
 mod tests{
     use pillar_crypto::{hashing::{DefaultHash, Hashable}, signing::{DefaultSigner, SigFunction, SigVerFunction, Signable}};
-    use serde_with::rust::sets_duplicate_value_is_error;
+    
 
     use crate::{primitives::{block::{BlockHeader, BlockTail}, transaction::{Transaction, TransactionHeader}}};
     
