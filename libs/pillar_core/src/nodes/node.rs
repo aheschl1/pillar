@@ -408,18 +408,19 @@ impl Node {
                 Ok(Message::TransactionFilterAck)
             },
             Message::PercentileFilteredPeerRequest(lower_n, upper_n) => {
-                todo!();
-                // if state.is_consume(){
-                //     let peers = nth_percentile_peer(*lower_n, *upper_n, &reputations);
-                //     let peers_map = self.inner.peers.lock().await.clone();
-                //     // find the peer objects in the address list 
-                //     let filtered_peers = peers.iter().filter_map(|peer| {
-                //         peers_map.get(peer).cloned()
-                //     }).collect::<Vec<_>>();
-                //     Ok(Message::PercentileFilteredPeerResponse(filtered_peers))
-                // }else{
-                //     Ok(Message::PercentileFilteredPeerResponse(vec![])) // just say nothing - info not up to date
-                // }
+                if state.is_consume(){
+                    let _chain = self.inner.chain.lock().await;
+                    let chain = _chain.as_ref().unwrap();
+                    let peers = nth_percentile_peer(*lower_n, *upper_n, chain);
+                    let peers_map = self.inner.peers.lock().await.clone();
+                    // find the peer objects in the address list 
+                    let filtered_peers = peers.iter().filter_map(|peer| {
+                        peers_map.get(peer).cloned()
+                    }).collect::<Vec<_>>();
+                    Ok(Message::PercentileFilteredPeerResponse(filtered_peers))
+                }else{
+                    Ok(Message::PercentileFilteredPeerResponse(vec![])) // just say nothing - info not up to date
+                }
             },
             Message::ChainSyncRequest(leaves) => {
                 if state.is_consume() {

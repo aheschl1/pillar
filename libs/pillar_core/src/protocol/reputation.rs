@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use pillar_crypto::types::StdByteArray;
 
-use crate::{accounting::state::ReputationMap, nodes::{messages::Message, node::{Broadcaster, Node}, peer::Peer}, primitives::block::BlockHeader, reputation::history::NodeHistory};
+use crate::{accounting::state::ReputationMap, blockchain::chain::Chain, nodes::{messages::Message, node::{Broadcaster, Node}, peer::Peer}, primitives::block::BlockHeader, reputation::history::NodeHistory};
 
 const MINING_WORTH_HALF_LIFE: f64 = 8f64;
 const MINING_WORTH_MAX: f64 = 1f64;
@@ -44,17 +44,26 @@ pub fn block_worth_scaling_fn(block_time: u64) -> f64 {
 /// 
 /// # Returns
 /// * A vector of peers that are in the n-th percentile
-pub fn nth_percentile_peer(lower_n: f32, upper_n: f32, reputations: &ReputationMap) -> Vec<StdByteArray>{
+pub fn nth_percentile_peer(lower_n: f32, upper_n: f32, chain: &Chain) -> Vec<StdByteArray>{
     if !(0.0..=1.0).contains(&lower_n)  || !(0.0..=1.0).contains(&upper_n) {
         panic!("n must be between 0 and 1");
     }
-    let mut reputations = reputations.iter().map(|(a, h)|{(a, h.compute_reputation())}).collect::<Vec<_>>();
+
+    let accounts = chain.state_manager.get_all_accounts(chain.get_state_root().unwrap());
+    let mut reputations: Vec<(StdByteArray, f64)> = accounts.iter().map(|a|{
+        let rep = &a.history;
+        if rep.is_none(){
+            return (a.address, 0.0);
+        }
+        let rep = rep.clone().unwrap();
+        (a.address, rep.compute_reputation())
+    }).collect::<Vec<_>>();
     reputations.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap()); // this is ordering in ascending order
     let lower_n = (lower_n * reputations.len() as f32).round() as usize;
     let upper_n = (upper_n * reputations.len() as f32).round() as usize;
     let mut peers = Vec::new();
-    for i in reputations.iter().take(upper_n).skip(lower_n) {
-        peers.push(*i.0);
+    for i in reputations.iter().skip(lower_n).take(upper_n) {
+        peers.push(i.0);
     }
     peers
 }

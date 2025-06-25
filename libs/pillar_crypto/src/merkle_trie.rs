@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, fmt::Debug, marker::PhantomData};
+use std::{collections::{HashMap, HashSet, VecDeque}, fmt::Debug, marker::PhantomData};
 
 use serde::{Deserialize, Serialize};
 use slotmap::{new_key_type, SlotMap};
@@ -156,6 +156,37 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
         let serialized = self.nodes.get(current_node_key).unwrap().value.as_ref();
         serialized.map(|data| bincode::deserialize(&mut data.clone()).unwrap())
     }
+
+    /// Retreives all values stored in the trie starting from the given root.
+    /// 
+    /// # Arguments
+    /// * `root` - The hash of the root node to start traversal from.
+    /// 
+    /// # Returns
+    /// * `Vec<&[u8]>` containing references to all serialized values in the trie.
+    pub fn get_all(&self, root: StdByteArray) -> Vec<V> {
+        let mut values = Vec::new();
+        if self.roots.get(&root).is_none() {
+            return values;
+        };
+
+        let mut visit_queue = VecDeque::new();
+        visit_queue.push_back(self.roots.get(&root).unwrap());
+        while let Some(current_key) = visit_queue.pop_front(){
+            let node = self.nodes.get(*current_key).unwrap();
+            if let Some(value) = &node.value{
+                values.push(bincode::deserialize(&value).unwrap());
+            }
+            for child in node.children.iter(){
+                if let Some(child_key) = child{
+                    visit_queue.push_back(child_key);
+                }
+            }
+        }
+
+        values
+    }
+    
 
     /// Creates a new branch of the trie.
     /// This branch will yield a new root.
@@ -561,5 +592,37 @@ mod tests {
         assert_eq!(trie.get(&"account4", new_root), None);
         assert_eq!(trie.get(&"account3", initial_root), None);
         assert_eq!(trie.get(&"account4", initial_root), None);
+    }
+
+    #[test]
+    fn test_get_all() {
+        let initial_account_info = AccountState { balance: 100, nonce: 1 };
+        let mut trie = MerkleTrie::<&str, AccountState>::new();
+        let initial_root = trie.create_genesis("account0", initial_account_info.clone()).expect("Failed to create genesis");
+
+        let account1 = AccountState { balance: 200, nonce: 2 };
+        trie.insert("account1", account1.clone(), initial_root).unwrap();
+
+        let account2 = AccountState { balance: 300, nonce: 3 };
+        trie.insert("account2", account2.clone(), initial_root).unwrap();
+
+        let account3 = AccountState { balance: 400, nonce: 4 };
+        trie.insert("account3", account3.clone(), initial_root).unwrap();
+
+        // branch 
+
+        let account4 = AccountState { balance: 4000, nonce: 0};
+        let mut updates = HashMap::new();
+        updates.insert("account4", account4.clone());
+        let _ = trie.branch(Some(initial_root), updates).unwrap();
+
+        let all_values = trie.get_all(initial_root);
+
+        assert_eq!(all_values.len(), 4); // account0, account1, account2, account3
+        assert!(all_values.contains(&initial_account_info));
+        assert!(all_values.contains(&account1));
+        assert!(all_values.contains(&account2));
+        assert!(all_values.contains(&account3));
+        assert!(!all_values.contains(&account4));
     }
 }

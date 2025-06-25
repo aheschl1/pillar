@@ -40,6 +40,10 @@ impl StateManager{
         state_trie.get(address, state_root).unwrap_or(Account::new(*address, 0))
     }
 
+    pub fn get_all_accounts(&self, root: StdByteArray) -> Vec<Account>{
+        self.state_trie.lock().unwrap().get_all(root)
+    }
+
     /// Updates the accounts from the block
     /// This is called when a new block is added to the chain
     /// This does NOT verify the block - VERIFY THE BLOCK FIRST
