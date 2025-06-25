@@ -2,6 +2,8 @@
 use pillar_crypto::types::StdByteArray;
 use serde::{Deserialize, Serialize};
 
+use crate::reputation::history::NodeHistory;
+
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransactionStub{
@@ -11,7 +13,7 @@ pub struct TransactionStub{
     pub transaction_hash: StdByteArray,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Default, Clone)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone, Default)]
 pub struct Account{
     // The address of the account is the public key
     pub address: StdByteArray,
@@ -20,6 +22,7 @@ pub struct Account{
     // The nonce of the account, to prevent replay attacks
     pub nonce: u64,
     // a tracking of blocks/transactions that lead to this balance
+    pub history: Option<NodeHistory>
 }
 
 impl Account{
@@ -31,6 +34,7 @@ impl Account{
             address,
             balance,
             nonce: 0,
+            history: None,
         }
     }
 }

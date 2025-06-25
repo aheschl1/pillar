@@ -83,9 +83,6 @@ fn get_initial_state(datastore: &dyn Datastore) -> (NodeState, Option<Chain>) {
     }
 }
 
-
-pub type ReputationMap = HashMap<StdByteArray, NodeHistory>;
-
 pub struct NodeInner {
     pub public_key: StdByteArray,
     /// The private key of the node
@@ -102,8 +99,6 @@ pub struct NodeInner {
     pub broadcasted_already: Mutex<HashSet<StdByteArray>>,
     // transaction filter queue
     pub transaction_filters: Mutex<Vec<(TransactionFilter, Peer)>>,
-    /// mapping of reputations for peers
-    pub reputations: Mutex<ReputationMap>,
     /// the datastore
     pub datastore: Option<Arc<dyn Datastore>>,
     /// A queue of blocks which are to be settled to the chain
@@ -177,7 +172,6 @@ impl Node {
             broadcast_receiver,
             broadcast_sender,
             transaction_filters,
-            reputations: Mutex::new(HashMap::new()),
             filter_callbacks: Mutex::new(HashMap::new()), // initially no callbacks
             state: Mutex::new(state), // initially in discovery mode
             settle_receiver,
@@ -414,18 +408,18 @@ impl Node {
                 Ok(Message::TransactionFilterAck)
             },
             Message::PercentileFilteredPeerRequest(lower_n, upper_n) => {
-                if state.is_consume(){
-                    let reputations = self.inner.reputations.lock().await;
-                    let peers = nth_percentile_peer(*lower_n, *upper_n, &reputations);
-                    let peers_map = self.inner.peers.lock().await.clone();
-                    // find the peer objects in the address list 
-                    let filtered_peers = peers.iter().filter_map(|peer| {
-                        peers_map.get(peer).cloned()
-                    }).collect::<Vec<_>>();
-                    Ok(Message::PercentileFilteredPeerResponse(filtered_peers))
-                }else{
-                    Ok(Message::PercentileFilteredPeerResponse(vec![])) // just say nothing - info not up to date
-                }
+                todo!();
+                // if state.is_consume(){
+                //     let peers = nth_percentile_peer(*lower_n, *upper_n, &reputations);
+                //     let peers_map = self.inner.peers.lock().await.clone();
+                //     // find the peer objects in the address list 
+                //     let filtered_peers = peers.iter().filter_map(|peer| {
+                //         peers_map.get(peer).cloned()
+                //     }).collect::<Vec<_>>();
+                //     Ok(Message::PercentileFilteredPeerResponse(filtered_peers))
+                // }else{
+                //     Ok(Message::PercentileFilteredPeerResponse(vec![])) // just say nothing - info not up to date
+                // }
             },
             Message::ChainSyncRequest(leaves) => {
                 if state.is_consume() {
@@ -542,15 +536,6 @@ impl Node {
         }
     }
 
-    /// create a new history for the node if it does not exist
-    async fn maybe_create_history(&self, public_key: StdByteArray) {
-        // get the history of the node
-        let mut reputations = self.inner.reputations.lock().await;
-        if reputations.get(&public_key).is_none() {
-            // create a new history
-            reputations.insert(public_key, NodeHistory::new(public_key, vec![], vec![], 0)); // create new
-        }
-    }
 }
 
 impl From<&Node> for Peer {

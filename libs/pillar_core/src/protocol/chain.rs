@@ -5,7 +5,7 @@ use rand::{rng, seq::{IteratorRandom}};
 use tokio::time::timeout;
 use tracing::{instrument, warn};
 
-use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, nodes::{messages::Message, node::{Broadcaster, Node}, peer::Peer}, primitives::{block::{Block, BlockTail}, transaction::Transaction}, protocol::reputation::settle_reputations};
+use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, nodes::{messages::Message, node::{Broadcaster, Node}, peer::Peer}, primitives::{block::{Block, BlockTail}, transaction::Transaction}};
 
 use super::peers::discover_peers;
 
@@ -73,11 +73,8 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std
     blocks.sort_by_key(|x| x.header.depth);
     // note: we know that there is exactly one genesis from shard validation
     let mut chain = Chain::new_with_genesis();
-    let mut reputations = node.inner.reputations.lock().await;
     for block in &blocks[1..]{ // skip the first - genesis
         let mut block = block.to_owned();
-        let miner = block.header.miner_address.unwrap();
-        let head = block.header;
         let hash = block.hash.unwrap();
         loop{ // we need to keep going until it passes full validation
             match chain.add_new_block(block){
@@ -86,8 +83,6 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std
                     block = query_block_from_peer(&mut peer, &node.clone().into(), hash).await?; // one more attempt, then fail.
                 }
                 _ => {
-                    // we need to update the reputations
-                    settle_reputations(&mut reputations, head);
                     break;
                 }
             }
@@ -240,10 +235,6 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
             for block in to_add.iter().rev(){
                 // verifies again
                 chain.add_new_block(block.clone())?;
-                // and record the reputations
-                let head = block.header;
-                let mut reputations = node.inner.reputations.lock().await;
-                settle_reputations(&mut reputations, head);
             }
         }
     }
@@ -310,9 +301,6 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
                 let _ = pool.mine_abort_sender.send(block.header.depth);
             }
             // the stamping process is done. do, if there is a miner address, then stamping is done on this block.
-            // update the reputation tracker with the block to rwared the miner
-            let mut reputations = node.inner.reputations.lock().await;
-            settle_reputations(&mut reputations, block.header);
             tracing::info!("Reputations recorded for new block.");
         }
     }

@@ -2,12 +2,16 @@ use std::{collections::HashMap, fmt::Debug, sync::{Arc, Mutex}};
 
 use pillar_crypto::{merkle_trie::MerkleTrie, types::StdByteArray};
 
-use crate::{accounting::account::Account, primitives::block::{Block, BlockHeader}, protocol::difficulty::get_reward_from_depth_and_stampers};
+use crate::{accounting::account::Account, primitives::block::{Block, BlockHeader}, protocol::difficulty::get_reward_from_depth_and_stampers, reputation::history::{self, NodeHistory}};
+
+pub type ReputationMap = HashMap<StdByteArray, NodeHistory>;
 
 #[derive(Clone, Default)]
 pub struct StateManager{
     // The mapping from address to account
     pub state_trie: Arc<Mutex<MerkleTrie<StdByteArray, Account>>>,
+    /// mapping of reputations for peers
+    pub reputations: Arc<Mutex<ReputationMap>>,
 }
 
 impl Debug for StateManager {
@@ -21,14 +25,20 @@ impl StateManager{
     // Creates a new account manager
     pub fn new() -> Self {
         StateManager {
-            state_trie: Arc::new(Mutex::new(MerkleTrie::new()))
+            state_trie: Arc::new(Mutex::new(MerkleTrie::new())),
+            reputations: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     pub fn get_account(&self, address: &StdByteArray, state_root: StdByteArray) -> Option<Account> {
         let state_trie = self.state_trie.lock().expect("Failed to lock state trie");
         state_trie.get(address, state_root)
-    } 
+    }
+
+    pub fn get_account_or_default(&self, address: &StdByteArray, state_root: StdByteArray) -> Account {
+        let state_trie = self.state_trie.lock().expect("Failed to lock state trie");
+        state_trie.get(address, state_root).unwrap_or(Account::new(*address, 0))
+    }
 
     /// Updates the accounts from the block
     /// This is called when a new block is added to the chain
@@ -82,7 +92,29 @@ impl StateManager{
             }
         };
         miner_account.balance += reward;
+        if miner_account.history.is_none(){
+            miner_account.history = Some(NodeHistory::new(miner_address));
+        }
+        // settle reputation
+        let history = miner_account.history.as_mut().unwrap();
+        history.settle_head(block.header);
+
         state_updates.insert(miner_address, miner_account);
+        // now do reputations
+        for stamper in block.header.tail.get_stampers().iter(){
+            let mut stamper = match state_updates.get(stamper){
+                Some(account) => account.clone(),
+                None => {
+                    state_trie.get(stamper, state_root).unwrap_or(Account::new(stamper.clone(), 0))
+                }
+            };
+            if stamper.history.is_none(){
+                stamper.history = Some(NodeHistory::new(stamper.address));
+            }
+            let history = stamper.history.as_mut().unwrap();
+            history.settle_tail(block.header);
+            state_updates.insert(stamper.address, stamper);
+        }
         // branch the state trie with the updates
         state_trie.branch(Some(state_root), state_updates).expect("Issue with branching state trie")
     }

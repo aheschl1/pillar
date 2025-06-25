@@ -79,13 +79,13 @@ async fn monitor_transaction_pool(miner: Miner) {
             let chain = chain_lock.as_ref().unwrap();
             let block = Block::new(
                 chain.get_top_block().unwrap().hash.unwrap(), // if it crahses, there is bug
-                0,
+                0, // undefined nonce
                 now,
                 transactions,
                 None, // because this is a proposition on an unmined node
                 BlockTail::default().stamps,
                 chain.depth + 1,
-                None,
+                None, // undefined state
                 &mut DefaultHash::new()
             );
             // spawn off the mining process

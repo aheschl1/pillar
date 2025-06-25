@@ -17,9 +17,9 @@ mod tests {
     };
 
     use crate::{
-        accounting::wallet::{Wallet}, nodes::{
+        accounting::wallet::Wallet, nodes::{
             messages::Message, miner::{Miner, MAX_TRANSACTION_WAIT_TIME}, node::NodeState, peer::Peer
-        }, persistence::database::{Datastore, EmptyDatastore, GenesisDatastore}, primitives::{pool::MinerPool, transaction::Transaction}, protocol::{difficulty::get_reward_from_depth_and_stampers, peers::discover_peers, transactions::submit_transaction}
+        }, persistence::database::{Datastore, EmptyDatastore, GenesisDatastore}, primitives::{pool::MinerPool, transaction::Transaction}, protocol::{difficulty::get_reward_from_depth_and_stampers, peers::discover_peers, transactions::submit_transaction}, reputation::history
     };
 
     use super::node::Node;
@@ -88,7 +88,6 @@ mod tests {
         assert!(node.inner.chain.lock().await.is_none());
         assert!(node.miner_pool.is_none());
         assert!(node.inner.transaction_filters.lock().await.is_empty());
-        assert!(node.inner.reputations.lock().await.is_empty());
         assert!(node.inner.filter_callbacks.lock().await.is_empty());
         assert!(node.inner.state.lock().await.clone() == NodeState::ICD);
     }
@@ -121,7 +120,6 @@ mod tests {
         assert!(node.inner.chain.lock().await.is_some());
         assert!(node.miner_pool.is_none());
         assert!(node.inner.transaction_filters.lock().await.is_empty());
-        assert!(node.inner.reputations.lock().await.is_empty());
         assert!(node.inner.filter_callbacks.lock().await.is_empty());
         assert!(node.inner.state.lock().await.clone() == NodeState::ChainOutdated);
     }
@@ -647,43 +645,46 @@ mod tests {
 
         // assert the block is in the chain of node_b
         let chain_b = node_b.inner.chain.lock().await;
+        let state_root = chain_b.as_ref().unwrap().get_state_root().unwrap();
         assert_eq!(chain_b.as_ref().unwrap().depth, 1); // 2 blocks
         assert_eq!(chain_b.as_ref().unwrap().blocks.len(), 2); // 2 blocks
+        let history_ba = chain_b.as_ref().unwrap().state_manager.get_account_or_default(&wallet_a.address, state_root).history;
+        let history_bb = chain_b.as_ref().unwrap().state_manager.get_account_or_default(&public_key_b, state_root).history;
+
+        assert!(history_ba.is_some());
+        assert!(history_bb.is_some());
+
+        let history_ba = history_ba.unwrap();
+        let history_bb = history_bb.unwrap();
+
         drop(chain_b);
         // assert the block is in the chain of node_a
-        let chain_a = node_a.inner.chain.lock().await;
+        let mut chain_a = node_a.inner.chain.lock().await;
         assert_eq!(chain_a.as_ref().unwrap().depth, 1); // 2 blocks
         assert_eq!(chain_a.as_ref().unwrap().blocks.len(), 2); // 2 blocks
+        let history_aa = chain_a.as_mut().unwrap().state_manager.get_account_or_default(&wallet_a.address, state_root).history;
+        let history_ab = chain_a.as_mut().unwrap().state_manager.get_account_or_default(&public_key_b, state_root).history;
+
+        let history_aa = history_aa.unwrap();
+        let history_ab = history_ab.unwrap();
+
         drop(chain_a);
         // check reputations.
 
-        let reputations_b = node_b.inner.reputations.lock().await;
-        assert!(reputations_b.contains_key(&wallet_a.address));
-        assert!(reputations_b.contains_key(&public_key_b));
-        let history_a = reputations_b.get(&wallet_a.address).unwrap();
-        assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
-        assert_eq!(history_a.blocks_stamped.len(), 1); // 0 blocks stamped
-        let b_a = history_a.compute_reputation();
+        assert_eq!(history_ba.n_blocks_mined(), 0); // 0 blocks mined
+        assert_eq!(history_ba.n_blocks_stamped(), 1); // 0 blocks stamped
+        let b_a = history_ba.compute_reputation();
 
-        let history_b = reputations_b.get(&public_key_b).unwrap();
-        assert_eq!(history_b.blocks_mined.len(), 1); // 1 block mined
-        assert_eq!(history_b.blocks_stamped.len(), 1); // 0 blocks stamped
-        let b_b = history_b.compute_reputation();
+        assert_eq!(history_bb.n_blocks_mined(), 1); // 1 block mined
+        assert_eq!(history_bb.n_blocks_stamped(), 1); // 0 blocks stamped
+        let b_b = history_bb.compute_reputation();
 
-        drop(reputations_b);
-
-        let reputations_a = node_a.inner.reputations.lock().await;
-        assert!(reputations_a.contains_key(&wallet_a.address));
-        assert!(reputations_a.contains_key(&public_key_b));
-        let history_a = reputations_a.get(&wallet_a.address).unwrap();
-        assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
-        assert_eq!(history_a.blocks_stamped.len(), 1); // 0 blocks stamped
-        let a_a = history_a.compute_reputation();
-        let history_b = reputations_a.get(&public_key_b).unwrap();
-        assert_eq!(history_b.blocks_mined.len(), 1); // 1 block mined
-        assert_eq!(history_b.blocks_stamped.len(), 1); // 0 blocks stamped
-        let a_b = history_b.compute_reputation();
-        drop(reputations_a);
+        assert_eq!(history_aa.n_blocks_mined(), 0); // 0 blocks mined
+        assert_eq!(history_aa.n_blocks_stamped(), 1); // 0 blocks stamped
+        let a_a = history_aa.compute_reputation();
+        assert_eq!(history_ab.n_blocks_mined(), 1); // 1 block mined
+        assert_eq!(history_ab.n_blocks_stamped(), 1); // 0 blocks stamped
+        let a_b = history_ab.compute_reputation();
 
         assert!(a_a == b_a);
         assert!(a_b == b_b);
@@ -801,9 +802,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("Time went backwards")
             .as_secs();
-        
-        let state_manager = node_b.inner.chain.lock().await.as_mut().unwrap().state_manager.clone();
-    
+            
         let result = submit_transaction(
             &mut node_b,
             &mut wallet_b,
@@ -829,39 +828,36 @@ mod tests {
 
         // now, make sure the chains are length 2
         let chain_b = node_b.inner.chain.lock().await;
+        let state_root = chain_b.as_ref().unwrap().get_state_root().unwrap();
+
         assert!(chain_b.as_ref().unwrap().depth == 2); // 3 blocks
         assert!(chain_b.as_ref().unwrap().blocks.len() == 3); // 3 blocks
+        let history_ba = chain_b.as_ref().unwrap().state_manager.get_account_or_default(&wallet_a.address, state_root).history.unwrap();
+        let history_bb = chain_b.as_ref().unwrap().state_manager.get_account_or_default(&wallet_b.address, state_root).history.unwrap();
         drop(chain_b);
         // assert the block is in the chain of node_a
         let chain_a = node_a.inner.chain.lock().await;
         assert!(chain_a.as_ref().unwrap().depth == 2); // 3 blocks
         assert!(chain_a.as_ref().unwrap().blocks.len() == 3); // 3 blocks
+        let history_aa = chain_a.as_ref().unwrap().state_manager.get_account_or_default(&wallet_a.address, state_root).history;
+        let history_ab = chain_a.as_ref().unwrap().state_manager.get_account_or_default(&wallet_b.address, state_root).history;
+
+        let history_aa = history_aa.unwrap();
+        let history_ab = history_ab.unwrap();
         drop(chain_a);
         // check reputations.
-        let reputations_b = node_b.inner.reputations.lock().await;
-        assert!(reputations_b.contains_key(&wallet_a.address));
-        assert!(reputations_b.contains_key(&wallet_b.address));
-        let history_a = reputations_b.get(&wallet_a.address).unwrap();
-        assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
-        assert_eq!(history_a.blocks_stamped.len(), 2); // 2 blocks stamped
-        let b_a = history_a.compute_reputation();
-        let history_b = reputations_b.get(&wallet_b.address).unwrap();
-        assert_eq!(history_b.blocks_mined.len(), 2); // 2 blocks mined
-        assert_eq!(history_b.blocks_stamped.len(), 2); // 2 blocks stamped
-        let b_b = history_b.compute_reputation();
-        drop(reputations_b);
-        let reputations_a = node_a.inner.reputations.lock().await;
-        assert!(reputations_a.contains_key(&wallet_a.address));
-        assert!(reputations_a.contains_key(&wallet_b.address));
-        let history_a = reputations_a.get(&wallet_a.address).unwrap();
-        assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
-        assert_eq!(history_a.blocks_stamped.len(), 2); // 2 blocks stamped
-        let a_a = history_a.compute_reputation();
-        let history_b = reputations_a.get(&wallet_b.address).unwrap();
-        assert_eq!(history_b.blocks_mined.len(), 2); // 2 blocks mined
-        assert_eq!(history_b.blocks_stamped.len(), 2); // 2 blocks stamped
-        let a_b = history_b.compute_reputation();
-        drop(reputations_a);
+        assert_eq!(history_ba.n_blocks_mined(), 0); // 0 blocks mined
+        assert_eq!(history_ba.n_blocks_stamped(), 2); // 2 blocks stamped
+        let b_a = history_ba.compute_reputation();
+        assert_eq!(history_bb.n_blocks_mined(), 2); // 2 blocks mined
+        assert_eq!(history_bb.n_blocks_stamped(), 2); // 2 blocks stamped
+        let b_b = history_bb.compute_reputation();
+        assert_eq!(history_aa.n_blocks_mined(), 0); // 0 blocks mined
+        assert_eq!(history_aa.n_blocks_stamped(), 2); // 2 blocks stamped
+        let a_a = history_aa.compute_reputation();
+        assert_eq!(history_ab.n_blocks_mined(), 2); // 2 blocks mined
+        assert_eq!(history_ab.n_blocks_stamped(), 2); // 2 blocks stamped
+        let a_b = history_ab.compute_reputation();
         assert!(a_a == b_a);
         assert!(a_b == b_b);
         assert!(a_b > a_a); // B has more reputation than A
@@ -902,8 +898,15 @@ mod tests {
         drop(peers_c);
         // make sure chain is length 3
         let chain_c = node_c.inner.chain.lock().await;
+        let state_root = chain_c.as_ref().unwrap().get_state_root().unwrap();
         assert!(chain_c.as_ref().unwrap().depth == 1); // 2 blocks
         assert!(chain_c.as_ref().unwrap().blocks.len() == 2); // 3 blocks
+        let history_a = chain_c.as_ref().unwrap().state_manager.get_account_or_default(&wallet_a.address, state_root).history;
+        let history_b = chain_c.as_ref().unwrap().state_manager.get_account_or_default(&wallet_b.address, state_root).history;
+        let history_c = chain_c.as_ref().unwrap().state_manager.get_account_or_default(&wallet_c.address, state_root).history;
+        let history_a = history_a.unwrap();
+        let history_b = history_b.unwrap();
+        assert!(history_c.is_none()); // node c has no history yet, as it is not stamped
         let chain_a = node_a.inner.chain.lock().await;
         // check hash equalities
         let mut ablocks = chain_a
@@ -927,47 +930,13 @@ mod tests {
         drop(chain_a);
         assert!(node_c.inner.state.lock().await.clone() == NodeState::Serving);
         // make sure reputations are correct
-        let reputations_c = node_c.inner.reputations.lock().await;
-        assert!(reputations_c.contains_key(&wallet_a.address));
-        assert!(reputations_c.contains_key(&wallet_b.address));
-        let history_a = reputations_c.get(&wallet_a.address).unwrap();
-        assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
-        assert_eq!(history_a.blocks_stamped.len(), 1); // 2 blocks stamped
+        assert_eq!(history_a.n_blocks_mined(), 0); // 0 blocks mined
+        assert_eq!(history_a.n_blocks_stamped(), 1); // 2 blocks stamped
         let c_a = history_a.compute_reputation();
-        let history_b = reputations_c.get(&wallet_b.address).unwrap();
-        assert_eq!(history_b.blocks_mined.len(), 1); // 2 blocks mined
-        assert_eq!(history_b.blocks_stamped.len(), 1); // 2 blocks stamped
+        assert_eq!(history_b.n_blocks_mined(), 1); // 2 blocks mined
+        assert_eq!(history_b.n_blocks_stamped(), 1); // 2 blocks stamped
         let c_b = history_b.compute_reputation();
-        drop(reputations_c);
-        let reputations_a = node_a.inner.reputations.lock().await;
-        assert!(reputations_a.contains_key(&wallet_a.address));
-        assert!(reputations_a.contains_key(&wallet_b.address));
-        let history_a = reputations_a.get(&wallet_a.address).unwrap();
-        assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
-        assert_eq!(history_a.blocks_stamped.len(), 1); // 2 blocks stamped
-        let a_a = history_a.compute_reputation();
-        let history_b = reputations_a.get(&wallet_b.address).unwrap();
-        assert_eq!(history_b.blocks_mined.len(), 1); // 2 blocks mined
-        assert_eq!(history_b.blocks_stamped.len(), 1); // 2 blocks stamped
-        let a_b = history_b.compute_reputation();
-        drop(reputations_a);
-        let reputations_b = node_b.inner.reputations.lock().await;
-        assert!(reputations_b.contains_key(&wallet_a.address));
-        assert!(reputations_b.contains_key(&wallet_b.address));
-        let history_a = reputations_b.get(&wallet_a.address).unwrap();
-        assert_eq!(history_a.blocks_mined.len(), 0); // 0 blocks mined
-        assert_eq!(history_a.blocks_stamped.len(), 1); // 2 blocks stamped
-        let b_a = history_a.compute_reputation();
-        let history_b = reputations_b.get(&wallet_b.address).unwrap();
-        assert_eq!(history_b.blocks_mined.len(), 1); // 2 blocks mined
-        assert_eq!(history_b.blocks_stamped.len(), 1); // 2 blocks stamped
-        let b_b = history_b.compute_reputation();
-        drop(reputations_b);
-        assert!(a_a == c_a);
-        assert!(a_b == c_b);
-        assert!(b_a == c_a);
-        assert!(b_b == c_b);
-        assert!(c_b > c_a); // C has more reputation than A
+        assert!(c_a < c_b);
     }
 
     #[tokio::test]
@@ -1124,36 +1093,6 @@ mod tests {
         let chain_a = node_a.inner.chain.lock().await;
         assert_eq!(chain_a.as_ref().unwrap().depth, 2); // 3 blocks
         assert_eq!(chain_a.as_ref().unwrap().blocks.len(), 3); // 3 blocks
-        // double check reputations
-        let reputations_a = node_a.inner.reputations.lock().await;
-        assert!(reputations_a.contains_key(&wallet_a.address));
-        assert!(reputations_a.contains_key(&wallet_b.address));
-        assert!(reputations_a.contains_key(&wallet_c.address));
-        let history_c = reputations_a.get(&wallet_c.address).unwrap();
-        assert_eq!(history_c.blocks_mined.len(), 0); // 0 blocks mined
-        assert_eq!(history_c.blocks_stamped.len(), 1); // 2 blocks stamped
-        let a_c = history_c.compute_reputation();
-        let history_b = reputations_a.get(&wallet_b.address).unwrap();
-        assert_eq!(history_b.blocks_mined.len(), 2); // 2 blocks mined
-        assert_eq!(history_b.blocks_stamped.len(), 2); // 2 blocks stamped
-        let a_b = history_b.compute_reputation();
-        // now check against C
-        let reputations_c = node_c.inner.reputations.lock().await;
-        assert!(reputations_c.contains_key(&wallet_a.address));
-        assert!(reputations_c.contains_key(&wallet_b.address));
-        assert!(reputations_c.contains_key(&wallet_c.address));
-        let history_c = reputations_c.get(&wallet_c.address).unwrap();
-        assert_eq!(history_c.blocks_mined.len(), 0); // 0 blocks mined
-        assert_eq!(history_c.blocks_stamped.len(), 1); // 2 blocks stamped
-        let c_c = history_c.compute_reputation();
-        let history_b = reputations_c.get(&wallet_b.address).unwrap();
-        assert_eq!(history_b.blocks_mined.len(), 2); // 2 blocks mined
-        assert_eq!(history_b.blocks_stamped.len(), 2); // 2 blocks stamped
-        let c_b = history_b.compute_reputation();
-        drop(reputations_c);
-        assert!(a_c == c_c);
-        assert!(a_b == c_b);
-        assert!(c_b > c_c); // C has more reputation than A
         // now, node A should be in serving state
         assert!(node_a.inner.state.lock().await.clone() == NodeState::Serving);
     }
@@ -1278,36 +1217,6 @@ mod tests {
         let chain_a = node_a.inner.chain.lock().await;
         assert_eq!(chain_a.as_ref().unwrap().depth, 3); // 3 blocks
         assert_eq!(chain_a.as_ref().unwrap().blocks.len(), 4); // 3 blocks
-        // double check reputations
-        let reputations_a = node_a.inner.reputations.lock().await;
-        assert!(reputations_a.contains_key(&wallet_a.address));
-        assert!(reputations_a.contains_key(&wallet_b.address));
-        assert!(reputations_a.contains_key(&wallet_c.address));
-        let history_c = reputations_a.get(&wallet_c.address).unwrap();
-        assert_eq!(history_c.blocks_mined.len(), 0); // 0 blocks mined
-        assert_eq!(history_c.blocks_stamped.len(), 2); // 2 blocks stamped
-        let a_c = history_c.compute_reputation();
-        let history_b = reputations_a.get(&wallet_b.address).unwrap();
-        assert_eq!(history_b.blocks_mined.len(), 3); // 2 blocks mined
-        assert_eq!(history_b.blocks_stamped.len(), 3); // 2 blocks stamped
-        let a_b = history_b.compute_reputation();
-        // now check against C
-        let reputations_c = node_c.inner.reputations.lock().await;
-        assert!(reputations_c.contains_key(&wallet_a.address));
-        assert!(reputations_c.contains_key(&wallet_b.address));
-        assert!(reputations_c.contains_key(&wallet_c.address));
-        let history_c = reputations_c.get(&wallet_c.address).unwrap();
-        assert_eq!(history_c.blocks_mined.len(), 0); // 0 blocks mined
-        assert_eq!(history_c.blocks_stamped.len(), 2); // 2 blocks stamped
-        let c_c = history_c.compute_reputation();
-        let history_b = reputations_c.get(&wallet_b.address).unwrap();
-        assert_eq!(history_b.blocks_mined.len(), 3); // 2 blocks mined
-        assert_eq!(history_b.blocks_stamped.len(), 3); // 2 blocks stamped
-        let c_b = history_b.compute_reputation();
-        drop(reputations_c);
-        assert!(a_c == c_c);
-        assert!(a_b == c_b);
-        assert!(c_b > c_c); // C has more reputation than A
         // now, node A should be in serving state
         assert!(node_a.inner.state.lock().await.clone() == NodeState::Serving);
     }

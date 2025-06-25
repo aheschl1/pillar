@@ -1,35 +1,50 @@
 use std::{cmp::max, collections::HashSet};
 
 use pillar_crypto::{hashing::{HashFunction, Hashable}, types::StdByteArray};
+use serde::{Deserialize, Serialize};
 
 use crate::{blockchain::{chain_shard::ChainShard, TrimmableChain}, primitives::block::{BlockHeader, BlockTail}, protocol::reputation::{block_worth_scaling_fn, BLOCK_STAMP_SCALING, N_TRANSMISSION_SIGNATURES}};
 
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+struct HeaderShard{
+    previous_hash: StdByteArray,
+    n_stamps: u32,
+    depth: u64,
+    timestamp: u64, // timestamp of the block
+}
+
+impl From<BlockHeader> for HeaderShard {
+    fn from(header: BlockHeader) -> Self {
+        HeaderShard {
+            previous_hash: header.previous_hash,
+            depth: header.depth,
+            n_stamps: header.tail.get_stampers().len() as u32, // number of stampers
+            timestamp: header.timestamp,
+        }
+    }
+}
+
 /// The reputation structure holds all the information needed to compute the reputation of a node
 /// This information should be stored by each node, and each node can add it to a side chain
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct NodeHistory{
     /// The public key of the node
     pub public_key: StdByteArray,
     /// The blocks that have been mined by the node - could be empty if the node does not mine
-    pub blocks_mined: Vec<BlockHeader>,
+    blocks_mined: Vec<HeaderShard>,
     /// the blocks that have been stamped by the node - could be empty if the node does not stamp
-    pub blocks_stamped: Vec<BlockHeader>,
-    /// the max chain depth at the time of computation
-    pub max_chain_depth: u64,
+    blocks_stamped: Vec<HeaderShard>,
 }
 
 impl NodeHistory{
     pub fn new(
-        public_key: StdByteArray,
-        blocks_mined: Vec<BlockHeader>,
-        blocks_stamped: Vec<BlockHeader>,
-        max_chain_depth: u64,
+        public_key: StdByteArray
     ) -> Self {
         NodeHistory {
             public_key,
-            max_chain_depth,
-            blocks_stamped,
-            blocks_mined
+            blocks_mined: vec![],
+            blocks_stamped: vec![]
         }
     }
     /// Returns the reputation of the node
@@ -41,7 +56,7 @@ impl NodeHistory{
         // trim the shard so that we elminate old forks that are now diregarded
         shard.trim();
         // we will start at each leaf, and track the blocks that have been mined by the miner.
-        let mut blocks_mined = vec![];
+        let mut blocks_mined: Vec<HeaderShard> = vec![];
         let mut blocks_seen = HashSet::new();
         let mut max_chain_depth: u64 = 0;
         for leaf in shard.leaves.iter(){
@@ -55,7 +70,7 @@ impl NodeHistory{
                 }
                 blocks_seen.insert(hash);
                 if current_block.miner_address.expect("no miner address on header") == miner{
-                    blocks_mined.push(current_block);
+                    blocks_mined.push(current_block.into());
                 }
                 curr = shard.get_block(&current_block.previous_hash); // recurse
             }
@@ -65,7 +80,6 @@ impl NodeHistory{
             public_key: miner,
             blocks_mined,
             blocks_stamped: vec![], // TODO: add this
-            max_chain_depth,
         }
     }
 
@@ -75,22 +89,18 @@ impl NodeHistory{
         if block.miner_address.is_none() || block.miner_address.unwrap() != self.public_key{
             panic!("Block does not belong to this miner");
         }
-        self.blocks_mined.push(block);
-        // update the max chain depth
-        self.max_chain_depth = max(self.max_chain_depth, block.depth);
+        self.blocks_mined.push(block.into());
     }
 
     /// Settle a new block into the history of the node
     /// This is used when the node has stamped a new block
-    pub fn settle_tail(&mut self, tail: &BlockTail, head: BlockHeader){
-        let stampers = tail.get_stampers();
+    pub fn settle_tail(&mut self, head: BlockHeader){
+        let stampers = head.tail.get_stampers();
         if !stampers.contains(&self.public_key){
             panic!("Block does not belong to this peer");
         }
         // now push the block into the history
-        self.blocks_stamped.push(head);
-        // update the max chain depth
-        self.max_chain_depth = max(self.max_chain_depth, head.depth);
+        self.blocks_stamped.push(head.into());
     }
 
     pub fn compute_mining_reputation(
@@ -101,10 +111,10 @@ impl NodeHistory{
         // furthermore, timestamp is taken into account
         // a brand new block is worth 1 reputation - it reduces exponentially over time
         let mut reputation: f64 = 0.0;
-        for block in self.blocks_mined.iter() {
+        for shard in self.blocks_mined.iter() {
             let n: f64 = N_TRANSMISSION_SIGNATURES as f64;
-            let stamp_boost_fn = (block.tail.n_stamps() as f64 + n) / n; // extra reward for mining when there are stamps
-            reputation += block_worth_scaling_fn(block.timestamp) * stamp_boost_fn;
+            let stamp_boost_fn = (shard.n_stamps as f64 + n) / n; // extra reward for mining when there are stamps
+            reputation += block_worth_scaling_fn(shard.timestamp) * stamp_boost_fn;
         }
         reputation
     }
@@ -132,5 +142,13 @@ impl NodeHistory{
         let stamping_reputation = self.compute_block_stamp_reputation();
         // the reputation is the sum of the two
         mining_reputation + stamping_reputation
+    }
+
+    pub fn n_blocks_mined(&self) -> usize {
+        self.blocks_mined.len()
+    }
+
+    pub fn n_blocks_stamped(&self) -> usize {
+        self.blocks_stamped.len()
     }
 }
