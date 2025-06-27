@@ -701,7 +701,6 @@ mod tests {
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 4));
         let port_b = 8021;
 
-        let datastore = GenesisDatastore::new();
         
         let (mut node_b, mut wallet_b) = create_empty_node_genisis(
             ip_address_b,

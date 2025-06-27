@@ -3,7 +3,7 @@ use std::{collections::{HashMap, HashSet, VecDeque}, fmt::Debug, marker::Phantom
 use serde::{Deserialize, Serialize};
 use slotmap::{new_key_type, SlotMap};
 
-use crate::{hashing::{DefaultHash, HashFunction, Hashable}, types::StdByteArray};
+use crate::{hashing::{DefaultHash, HashFunction, Hashable}, proofs::generate_proof_of_inclusion, types::StdByteArray};
 new_key_type! { pub struct NodeKey; }
 
 /// In order to store account states, a Merkle Patricia Trie will be used
@@ -19,6 +19,7 @@ new_key_type! { pub struct NodeKey; }
 
 pub struct TrieNode<V: for<'a> Deserialize<'a>> {
     _phantum: PhantomData<V>,
+    references: u16, // track for deletions
     pub(crate) children: [Option<NodeKey>; 16], // 16 children for each nibble (0-9, a-f)
     pub(crate) value: Option<Vec<u8>>, // Account state
 }
@@ -27,6 +28,7 @@ impl<T: for<'a> Deserialize<'a>> Clone for TrieNode<T> {
     fn clone(&self) -> Self {
         TrieNode {
             _phantum: PhantomData,
+            references: self.references,
             children: self.children,
             value: self.value.clone(),
         }
@@ -38,6 +40,7 @@ impl<T: for<'a> Deserialize<'a>> TrieNode<T>{
         TrieNode {
             _phantum: PhantomData,
             children: [None; 16],
+            references: 0, // the one creating the node
             value: None,
         }
     }
@@ -79,7 +82,8 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
         if !self.roots.is_empty() {
             return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "Genesis already exists"));
         }
-        let genesis_root = TrieNode::<V>::new();
+        let mut genesis_root = TrieNode::<V>::new();
+        genesis_root.references = 1; // The genesis node is referenced by itself
         let genesis_key = self.nodes.insert(genesis_root);
 
         self._insert(key, value, genesis_key).expect("Failed to insert genesis node");
@@ -99,7 +103,9 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
             let index = nibble as usize;
             let mut curr_pointer = self.nodes.get(current_node_key).unwrap().children[index];
             if curr_pointer.is_none() {
-                let new_node_key = self.nodes.insert(TrieNode::new());
+                let mut new_node = TrieNode::new();
+                new_node.references += 1;
+                let new_node_key = self.nodes.insert(new_node);
                 self.nodes.get_mut(current_node_key).unwrap().children[index] = Some(new_node_key);
                 curr_pointer = Some(new_node_key);
             }
@@ -220,6 +226,8 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
         let origin_root_key = *self.roots.get(&origin).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Origin root not found"))?;
         let origin_root = self.nodes.get(origin_root_key).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Root node not found"))?.clone();
         let new_root_key = self.nodes.insert(origin_root);
+        // reference count for the new root
+        self.nodes.get_mut(new_root_key).unwrap().references += 1;
 
         let mut new_keys: HashSet<NodeKey> = HashSet::new();
         
@@ -237,7 +245,6 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
                         child_key
                     } else {   
                         let cloned_child = self.nodes.get(child_key).unwrap().clone();
-                        
                         self.nodes.insert(cloned_child)
                     }
                 } else {
@@ -245,9 +252,17 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
                 };
                 new_keys.insert(new_child_key);
 
-                // let mut updated_node = current_node;
+                // THE CURRENT_NODE MUST BE ADDED BEFORE THE REFERENCE COUNTS
                 let current_node = self.nodes.get_mut(current_node_key).unwrap();
                 current_node.children[index] = Some(new_child_key);
+                // let mut updated_node = current_node;
+                for child in self.nodes.get_mut(current_node_key).unwrap().children.clone().iter_mut() {
+                    if let Some(child_key) = child {
+                        let child_node = self.nodes.get_mut(*child_key).unwrap();
+                        child_node.references += 1;
+                    }
+                }
+                // increment references for all the children of the new 
                 current_node_key = new_child_key;
             }
             // update the value in the new branch
@@ -258,6 +273,33 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
         let new_root_hash = self.get_hash_for(new_root_key, &mut DefaultHash::new()).unwrap();
         self.roots.insert(new_root_hash, new_root_key);
         Ok(new_root_hash)
+    }
+
+    pub fn trim_branch(&mut self, root: StdByteArray) -> Result<(), std::io::Error> {
+        let root_key = self.roots.get(&root).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Root not found"))?;
+        let mut visit_queue = VecDeque::new();
+        visit_queue.push_back(*root_key);
+
+        while let Some(current_key) = visit_queue.pop_front() {
+            let node = self.nodes.get_mut(current_key).unwrap();
+            println!("Removing node: {:?} - {}", node.value, node.references);
+            // TODO we can probably reduce this to log(n) instead of n
+            for child in node.children.iter() {
+                if let Some(child_key) = child {
+                    visit_queue.push_back(*child_key);
+                }
+            }
+            if node.references == 1{
+                // If the node is only referenced once, remove it
+                self.nodes.remove(current_key);
+            } else {
+                // Otherwise, decrement the reference count
+                node.references -= 1;
+            }
+        }
+        self.roots.remove(&root);
+        Ok(())
+        
     }
 
     /// Computes the hash for the given node.
@@ -624,5 +666,57 @@ mod tests {
         assert!(all_values.contains(&account2));
         assert!(all_values.contains(&account3));
         assert!(!all_values.contains(&account4));
+    }
+
+    #[test]
+    fn test_trim(){
+        let initial_account_info = AccountState { balance: 100, nonce: 1 };
+        let mut trie = MerkleTrie::<&str, AccountState>::new();
+        let initial_root = trie.create_genesis("account0", initial_account_info.clone()).expect("Failed to create genesis");
+
+        let account1 = AccountState { balance: 200, nonce: 2 };
+        trie.insert("account1", account1.clone(), initial_root).unwrap();
+
+        let account2 = AccountState { balance: 300, nonce: 3 };
+        trie.insert("account2", account2.clone(), initial_root).unwrap();
+
+        // branch 
+        let mut updates = HashMap::new();
+        updates.insert("account3", AccountState { balance: 0, nonce: 1 });
+        let new_root = trie.branch(Some(initial_root), updates).unwrap();
+
+        let all_values = trie.get_all(initial_root);
+        assert_eq!(all_values.len(), 3); // account0, account1, account2
+
+        let mut pass = false;
+        for (_, node) in trie.nodes.iter(){
+            if node.value.is_some() && node.value.as_ref().unwrap() == &bincode::serialize(&AccountState { balance: 0, nonce: 1 }).unwrap() {
+                pass = true;
+                break;
+            }
+        }
+        assert!(pass);
+
+        // trim the branch
+        trie.trim_branch(new_root).expect("Failed to trim branch");
+
+        // check that the new root is still there
+        assert!(trie.get(&"account3", new_root).is_none());
+        
+        // check that the old root is still there
+        assert_eq!(trie.get(&"account1", initial_root), Some(account1));
+        assert_eq!(trie.get(&"account2", initial_root), Some(account2));
+        assert_eq!(trie.get(&"account0", initial_root), Some(initial_account_info));
+
+        // getall, make sure account 3 does not exist
+        let all_values = trie.get_all(initial_root);
+        assert_eq!(all_values.len(), 3); // account0, account1, account2
+
+        // check all node values for not having acc3
+        for (_, node) in trie.nodes.iter(){
+            if node.value.is_some() && node.value.as_ref().unwrap() == &bincode::serialize(&AccountState { balance: 0, nonce: 1 }).unwrap() {
+                panic!("Node with account3 value still exists after trim");
+            }
+        }
     }
 }
