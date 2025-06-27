@@ -60,68 +60,42 @@ mod tests {
             .try_init();
     }
 
-    #[tokio::test]
-    async fn test_create_empty_node() {
-        let public_key = [0u8; 32];
-        let private_key = [1u8; 32];
-        let ip_address = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
-        let port = 8080;
-        let peers = vec![];
-        let chain = None;
-        let transaction_pool = None;
+    async fn create_empty_node_genisis(
+        ip_address: IpAddr, 
+        port: u16, 
+        peers: Vec<Peer>,
+        genesis_store: bool,
+        miner_pool: Option<MinerPool>,
+    ) -> (Node, Wallet){
+        let wallet = Wallet::generate_random();
+
 
         let node = Node::new(
-            public_key,
-            private_key,
+            wallet.address,
+            wallet.get_private_key(),
             ip_address,
             port,
-            peers,
-            chain,
-            transaction_pool,
+            peers.clone(),
+            if genesis_store {Some(Arc::new(GenesisDatastore::new()))} else {None},
+            miner_pool.clone(),
         );
 
-        assert_eq!(node.inner.public_key, public_key);
-        assert_eq!(node.inner.private_key, private_key);
+        assert_eq!(node.inner.public_key, wallet.address);
+        assert_eq!(node.inner.private_key, wallet.get_private_key());
         assert_eq!(node.ip_address, ip_address);
         assert_eq!(node.port, port);
-        assert!(node.inner.peers.lock().await.is_empty());
-        assert!(node.inner.chain.lock().await.is_none());
-        assert!(node.miner_pool.is_none());
+        assert_eq!(node.inner.peers.lock().await.len(), peers.len());
+        assert_eq!(node.inner.chain.lock().await.is_some(), genesis_store);
+        assert_eq!(node.miner_pool.is_some(), miner_pool.is_some());
         assert!(node.inner.transaction_filters.lock().await.is_empty());
         assert!(node.inner.filter_callbacks.lock().await.is_empty());
-        assert!(node.inner.state.lock().await.clone() == NodeState::ICD);
-    }
+        if genesis_store{
+            assert_eq!(node.inner.state.lock().await.clone(), NodeState::ChainOutdated);
+        }else{
+            assert_eq!(node.inner.state.lock().await.clone(), NodeState::ICD);
+        }
 
-    #[tokio::test]
-    async fn test_create_empty_node_genisis() {
-        let public_key = [0u8; 32];
-        let private_key = [1u8; 32];
-        let ip_address = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
-        let port = 8080;
-        let peers = vec![];
-        let datastore = Some(Arc::new(GenesisDatastore::new()));
-        let transaction_pool = None;
-
-        let node = Node::new(
-            public_key,
-            private_key,
-            ip_address,
-            port,
-            peers,
-            datastore.map(|ds| ds as Arc<dyn Datastore>),
-            transaction_pool,
-        );
-
-        assert_eq!(node.inner.public_key, public_key);
-        assert_eq!(node.inner.private_key, private_key);
-        assert_eq!(node.ip_address, ip_address);
-        assert_eq!(node.port, port);
-        assert!(node.inner.peers.lock().await.is_empty());
-        assert!(node.inner.chain.lock().await.is_some());
-        assert!(node.miner_pool.is_none());
-        assert!(node.inner.transaction_filters.lock().await.is_empty());
-        assert!(node.inner.filter_callbacks.lock().await.is_empty());
-        assert!(node.inner.state.lock().await.clone() == NodeState::ChainOutdated);
+        (node, wallet)
     }
 
     #[tokio::test]
@@ -159,8 +133,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_two_node_chat() {
-        let public_key = [0u8; 32];
-        let private_key = [1u8; 32];
         let ip_address = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
         let port = 8069;
         let peers = vec![Peer::new(
@@ -168,18 +140,15 @@ mod tests {
             IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)),
             8081,
         )];
-        let datastore = GenesisDatastore::new();
-        let transaction_pool = None;
-        
-        let mut node1 = Node::new(
-            public_key,
-            private_key,
+
+        let (mut node1, wallet1) = create_empty_node_genisis(
             ip_address,
             port,
             peers,
-            Some(Arc::new(datastore.clone())),
-            transaction_pool,
-        );
+            true,
+            None,
+        )
+        .await;
 
         node1.serve().await;
 
@@ -189,20 +158,15 @@ mod tests {
         drop(state);
 
         // create a second node
-        let public_key2 = [2u8; 32];
-        let private_key2 = [3u8; 32];
-        let ip_address2 = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2));
-        let port2 = 8070;
 
-        let mut node2 = Node::new(
-            public_key2,
-            private_key2,
-            ip_address2,
-            port2,
+        let (mut node2, wallet2) = create_empty_node_genisis(
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)),
+            8070,
             vec![node1.clone().into()],
-            Some(Arc::new(datastore)),
+            true,
             None,
-        );
+        )
+        .await;
 
         node2.serve().await;
 
@@ -211,7 +175,7 @@ mod tests {
         assert!(*state == NodeState::ChainSyncing);
         drop(state);
 
-        // attemp to make node 2 work alongside node 1
+        // attempt to make node 2 work alongside node 1
         tokio::time::sleep(std::time::Duration::from_secs(3)).await; // wait for the node to start
         // check if the node is in serving state
         let state = node1.inner.state.lock().await.clone();
@@ -224,90 +188,73 @@ mod tests {
         result.unwrap(); // should be successful
         // make sure that node2 is in the list of peers for node 1
         let peers = node1.inner.peers.lock().await;
-        assert!(peers.contains_key(&public_key2));
+        assert!(peers.contains_key(&wallet2.address));
         drop(peers);
 
         // make sure the [9u8; 32] is in the list of peers for node 2
         let peers = node2.inner.peers.lock().await;
-        assert!(peers.contains_key(&public_key));
+        assert!(peers.contains_key(&wallet1.address));
         assert!(peers.contains_key(&[8u8; 32])); // the peer we added
         drop(peers);
-        assert!(
-            node2
-                .inner
-                .chain
-                .lock()
-                .await
-                .as_ref()
-                .unwrap()
-                .blocks
-                .len()
-                == 1
-        );
+        assert_eq!(node2.inner.chain.lock().await.as_ref().unwrap().blocks.len(), 1);
     }
 
     #[tokio::test]
     async fn test_complex_peer_discovery() {
-        let public_key_a = [0u8; 32];
-        let private_key_a = [1u8; 32];
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
         let port_a = 8060;
 
-        let public_key_b = [2u8; 32];
-        let private_key_b = [3u8; 32];
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2));
         let port_b = 8061;
 
-        let public_key_c = [4u8; 32];
-        let private_key_c = [5u8; 32];
         let ip_address_c = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 3));
         let port_c = 8062;
 
-        let public_key_d = [6u8; 32];
-        let private_key_d = [7u8; 32];
         let ip_address_d = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 4));
         let port_d = 8063;
 
-        let datastore = GenesisDatastore::new();
 
-        let mut node_a = Node::new(
-            public_key_a,
-            private_key_a,
+        let (mut node_a, wallet_a) = create_empty_node_genisis(
             ip_address_a,
             port_a,
-            vec![Peer::new(public_key_b, ip_address_b, port_b)],
-            Some(Arc::new(datastore.clone())),
+            vec![],
+            true,
             None,
-        );
+        )
+        .await;
 
-        let mut node_b = Node::new(
-            public_key_b,
-            private_key_b,
-            ip_address_b,
-            port_b,
-            vec![Peer::new(public_key_c, ip_address_c, port_c)],
-            Some(Arc::new(datastore.clone())),
-            None,
-        );
-
-        let mut node_c = Node::new(
-            public_key_c,
-            private_key_c,
-            ip_address_c,
-            port_c,
-            vec![Peer::new(public_key_d, ip_address_d, port_d)],
-            Some(Arc::new(datastore.clone())),
-            None,
-        );
-
-        let mut node_d = Node::new(
-            public_key_d,
-            private_key_d,
+        let (mut node_d, wallet_d) = create_empty_node_genisis(
             ip_address_d,
             port_d,
-            vec![Peer::new(public_key_a, ip_address_a, port_a)],
-            Some(Arc::new(datastore.clone())),
+            vec![Peer::new(wallet_a.address, ip_address_a, port_a)],
+            true,
             None,
+        )
+        .await;
+
+        let (mut node_c, wallet_c) = create_empty_node_genisis(
+            ip_address_c,
+            port_c,
+            vec![Peer::new(wallet_d.address, ip_address_d, port_d)],
+            true,
+            None,
+        )
+        .await;
+
+
+        let (mut node_b, wallet_b) = create_empty_node_genisis(
+            ip_address_b,
+            port_b,
+            vec![Peer::new(wallet_c.address, ip_address_c, port_c)],
+            true,
+            None,
+        )
+        .await;
+
+        // nned to ammend b into a
+        node_a.inner.peers.lock().await.insert(
+            wallet_b.address,
+            Peer::new(wallet_b.address, ip_address_b, port_b),
         );
 
         node_d.serve().await; // no discovery
@@ -320,27 +267,27 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
         let peers_a = node_a.inner.peers.lock().await;
-        assert!(peers_a.contains_key(&public_key_b));
-        assert!(peers_a.contains_key(&public_key_c));
-        assert!(!peers_a.contains_key(&public_key_d)); // node A does not know about D yet
+        assert!(peers_a.contains_key(&wallet_b.address));
+        assert!(peers_a.contains_key(&wallet_c.address));
+        assert!(!peers_a.contains_key(&wallet_d.address)); // node A does not know about D yet
         drop(peers_a);
 
         let peers_b = node_b.inner.peers.lock().await;
-        assert!(peers_b.contains_key(&public_key_a));
-        assert!(peers_b.contains_key(&public_key_c));
-        assert!(!peers_b.contains_key(&public_key_d));
+        assert!(peers_b.contains_key(&wallet_a.address));
+        assert!(peers_b.contains_key(&wallet_c.address));
+        assert!(!peers_b.contains_key(&wallet_d.address));
         drop(peers_b);
 
         let peers_c = node_c.inner.peers.lock().await;
-        assert!(!peers_c.contains_key(&public_key_a));
-        assert!(peers_c.contains_key(&public_key_b));
-        assert!(peers_c.contains_key(&public_key_d));
+        assert!(!peers_c.contains_key(&wallet_a.address));
+        assert!(peers_c.contains_key(&wallet_b.address));
+        assert!(peers_c.contains_key(&wallet_d.address));
         drop(peers_c);
 
         let peers_d = node_d.inner.peers.lock().await;
-        assert!(peers_d.contains_key(&public_key_a));
-        assert!(!peers_d.contains_key(&public_key_b));
-        assert!(peers_d.contains_key(&public_key_c));
+        assert!(peers_d.contains_key(&wallet_a.address));
+        assert!(!peers_d.contains_key(&wallet_b.address));
+        assert!(peers_d.contains_key(&wallet_c.address));
         drop(peers_d);
 
         // D does not know of B.
@@ -352,64 +299,59 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
         let peers_a = node_a.inner.peers.lock().await;
-        assert!(peers_a.contains_key(&public_key_b));
-        assert!(peers_a.contains_key(&public_key_c));
-        assert!(!peers_a.contains_key(&public_key_a));
-        assert!(peers_a.contains_key(&public_key_d)); // node A does not know about D yet
+        assert!(peers_a.contains_key(&wallet_b.address));
+        assert!(peers_a.contains_key(&wallet_c.address));
+        assert!(!peers_a.contains_key(&wallet_a.address));
+        assert!(peers_a.contains_key(&wallet_d.address)); // node A does not know about D yet
         drop(peers_a);
 
         let peers_b = node_b.inner.peers.lock().await;
-        assert!(peers_b.contains_key(&public_key_a));
-        assert!(peers_b.contains_key(&public_key_c));
-        assert!(!peers_b.contains_key(&public_key_d));
+        assert!(peers_b.contains_key(&wallet_a.address));
+        assert!(peers_b.contains_key(&wallet_c.address));
+        assert!(!peers_b.contains_key(&wallet_d.address));
         drop(peers_b);
 
         let peers_c = node_c.inner.peers.lock().await;
-        assert!(!peers_c.contains_key(&public_key_a));
-        assert!(peers_c.contains_key(&public_key_b));
-        assert!(peers_c.contains_key(&public_key_d));
+        assert!(!peers_c.contains_key(&wallet_a.address));
+        assert!(peers_c.contains_key(&wallet_b.address));
+        assert!(peers_c.contains_key(&wallet_d.address));
         drop(peers_c);
 
         let peers_d = node_d.inner.peers.lock().await;
-        assert!(peers_d.contains_key(&public_key_a));
-        assert!(peers_d.contains_key(&public_key_b));
-        assert!(peers_d.contains_key(&public_key_c));
+        assert!(peers_d.contains_key(&wallet_a.address));
+        assert!(peers_d.contains_key(&wallet_b.address));
+        assert!(peers_d.contains_key(&wallet_c.address));
         drop(peers_d);
     }
 
     #[tokio::test]
     async fn test_start_account() {
-        let mut wallet_a = Wallet::generate_random();
 
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
         let port_a = 8020;
 
-        let wallet_b = Wallet::generate_random();
-
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2));
         let port_b = 8021;
 
-        let datastore = GenesisDatastore::new();
 
-        let mut node_a = Node::new(
-            wallet_a.address,
-            wallet_a.get_private_key(),
-            ip_address_a,
-            port_a,
-            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
-            Some(Arc::new(datastore.clone())),
-            None,
-        );
 
-        let mut node_b = Node::new(
-            wallet_b.address,
-            wallet_b.get_private_key(),
+        let (mut node_b, wallet_b) = create_empty_node_genisis(
             ip_address_b,
             port_b,
             vec![],
-            Some(Arc::new(datastore.clone())),
+            true,
             None,
-        );
+        )
+        .await;
+
+        let (mut node_a, mut wallet_a) = create_empty_node_genisis(
+            ip_address_a,
+            port_a,
+            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
+            true,
+            None,
+        )
+        .await;
 
         node_b.serve().await;
         node_a.serve().await;
@@ -717,37 +659,30 @@ mod tests {
 
     #[tokio::test]
     async fn test_transaction_and_block_proposal() {
-        let mut wallet_a = Wallet::generate_random();
-
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 9));
         let port_a = 8020;
-
-        let wallet_b = Wallet::generate_random();
 
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 8));
         let port_b = 8021;
 
-        let datastore = GenesisDatastore::new();
 
-        let mut node_a = Node::new(
-            wallet_a.address,
-            wallet_a.get_private_key(),
-            ip_address_a,
-            port_a,
-            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
-            Some(Arc::new(datastore.clone())),
-            None,
-        );
-
-        let node_b = Node::new(
-            wallet_b.address,
-            wallet_b.get_private_key(),
+        let (node_b, wallet_b) = create_empty_node_genisis(
             ip_address_b,
             port_b,
             vec![],
-            Some(Arc::new(datastore.clone())),
-            Some(MinerPool::new()), // we will mine from this node
-        );
+            true,
+            Some(MinerPool::new()),
+        )
+        .await;
+
+        let (mut node_a, mut wallet_a) = create_empty_node_genisis(
+            ip_address_a,
+            port_a,
+            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
+            true,
+            None,
+        )
+        .await;
 
         inner_test_transaction_and_block_proposal(
             &mut node_a,
@@ -760,34 +695,29 @@ mod tests {
 
     #[tokio::test]
     async fn test_double_transaction() {
-        let mut wallet_a = Wallet::generate_random();
-
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 3));
         let port_a = 8020;
 
-        let mut wallet_b = Wallet::generate_random();
-
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 4));
         let port_b = 8021;
+
         let datastore = GenesisDatastore::new();
-        let mut node_a = Node::new(
-            wallet_a.address,
-            wallet_a.get_private_key(),
-            ip_address_a,
-            port_a,
-            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
-            Some(Arc::new(datastore.clone())),
-            None,
-        );
-        let mut node_b = Node::new(
-            wallet_b.address,
-            wallet_b.get_private_key(),
+        
+        let (mut node_b, mut wallet_b) = create_empty_node_genisis(
             ip_address_b,
             port_b,
             vec![],
-            Some(Arc::new(datastore.clone())),
+            true,
             Some(MinerPool::new()), // we will mine from this node
-        );
+        ).await;
+
+        let (mut node_a, mut wallet_a) = create_empty_node_genisis(
+           ip_address_a,
+            port_a,
+            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
+            true,
+            None,
+        ).await;
 
         inner_test_transaction_and_block_proposal(
             &mut node_a,
@@ -941,48 +871,41 @@ mod tests {
 
     #[tokio::test]
     async fn test_new_node_online() {
-        let mut wallet_a = Wallet::generate_random();
-
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 3));
         let port_a = 8015;
 
-        let wallet_b = Wallet::generate_random();
-
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 4));
         let port_b = 8016;
-        let datastore = GenesisDatastore::new();
-        let mut node_a = Node::new(
-            wallet_a.address,
-            wallet_a.get_private_key(),
-            ip_address_a,
-            port_a,
-            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
-            Some(Arc::new(datastore.clone())),
-            None,
-        );
-        let mut node_b = Node::new(
-            wallet_b.address,
-            wallet_b.get_private_key(),
-            ip_address_b,
-            port_b,
-            vec![],
-            Some(Arc::new(datastore.clone())),
-            Some(MinerPool::new()), // we will mine from this node
-        );
-        // new node - node c
-        let wallet_c = Wallet::generate_random();
 
         let ip_address_c = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 5));
         let port_c = 8022;
-        let mut node_c = Node::new(
-            wallet_c.address,
-            wallet_c.get_private_key(),
+
+        let (mut node_b, wallet_b) = create_empty_node_genisis(
+            ip_address_b,
+            port_b,
+            vec![],
+            true,
+            Some(MinerPool::new()),
+        )
+        .await;
+
+        let (mut node_a, mut wallet_a) = create_empty_node_genisis(
+            ip_address_a,
+            port_a,
+            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
+            true,
+            None,
+        )
+        .await;
+
+        let (mut node_c, wallet_c) = create_empty_node_genisis(
             ip_address_c,
             port_c,
             vec![Peer::new(wallet_a.address, ip_address_a, port_a)],
-            Some(Arc::new(EmptyDatastore::new())), // empty datastore, needs ICD
+            false,
             None,
-        );
+        )
+        .await;
 
         inner_test_new_node_online(
             &mut node_a,
@@ -997,48 +920,42 @@ mod tests {
 
     #[tokio::test]
     async fn test_sync_later() {
-        let mut wallet_a = Wallet::generate_random();
-
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 3));
         let port_a = 8008;
 
-        let wallet_b = Wallet::generate_random();
-
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 4));
         let port_b = 8009;
-        let datastore = GenesisDatastore::new();
-        let mut node_a = Node::new(
-            wallet_a.address,
-            wallet_a.get_private_key(),
-            ip_address_a,
-            port_a,
-            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
-            Some(Arc::new(datastore.clone())),
-            None,
-        );
-        let mut node_b = Node::new(
-            wallet_b.address,
-            wallet_b.get_private_key(),
-            ip_address_b,
-            port_b,
-            vec![],
-            Some(Arc::new(datastore.clone())),
-            Some(MinerPool::new()), // we will mine from this node
-        );
-        // node c
-        let mut wallet_c = Wallet::generate_random();
 
         let ip_address_c = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 5));
         let port_c = 8010;
-        let mut node_c = Node::new(
-            wallet_c.address,
-            wallet_c.get_private_key(),
+
+
+        let (mut node_b, wallet_b) = create_empty_node_genisis(
+            ip_address_b,
+            port_b,
+            vec![],
+            true,
+            Some(MinerPool::new()),
+        )
+        .await;
+
+        let (mut node_a, mut wallet_a) = create_empty_node_genisis(
+            ip_address_a,
+            port_a,
+            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
+            true,
+            None,
+        )
+        .await;
+
+        let (mut node_c, mut wallet_c) = create_empty_node_genisis(
             ip_address_c,
             port_c,
             vec![Peer::new(wallet_a.address, ip_address_a, port_a)],
-            Some(Arc::new(EmptyDatastore::new())), // empty datastore, needs ICD
+            false,
             None,
-        );
+        )
+        .await;
 
         inner_test_new_node_online(
             &mut node_a,
@@ -1055,7 +972,6 @@ mod tests {
         // pause a sec - TODO remove this after fixing the join on stoping
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         // now, C will submit a transaction to B
-        let state_manager = node_c.inner.chain.lock().await.as_mut().unwrap().state_manager.clone();
         let _ = submit_transaction(
             &mut node_c,
             &mut wallet_c,
@@ -1099,48 +1015,42 @@ mod tests {
 
     #[tokio::test]
     async fn test_sync_two_blocks() {
-        let mut wallet_a = Wallet::generate_random();
-
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 8));
         let port_a = 7999;
 
-        let wallet_b = Wallet::generate_random();
-
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 9));
         let port_b = 7998;
-        let datastore = GenesisDatastore::new();
 
-        let mut node_a = Node::new(
-            wallet_a.address,
-            wallet_a.get_private_key(),
-            ip_address_a,
-            port_a,
-            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
-            Some(Arc::new(datastore.clone())),
-            None,
-        );
-        let mut node_b = Node::new(
-            wallet_b.address,
-            wallet_b.get_private_key(),
+        let ip_address_c = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 5));
+        let port_c = 7997;
+
+
+        let (mut node_b, wallet_b) = create_empty_node_genisis(
             ip_address_b,
             port_b,
             vec![],
-            Some(Arc::new(datastore.clone())),
-            Some(MinerPool::new()), // we will mine from this node
-        );
-        // node c
-        let mut wallet_c = Wallet::generate_random();
-        let ip_address_c = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 5));
-        let port_c = 7997;
-        let mut node_c = Node::new(
-            wallet_c.address,
-            wallet_c.get_private_key(),
+            true,
+            Some(MinerPool::new()),
+        )
+        .await;
+
+        let (mut node_a, mut wallet_a) = create_empty_node_genisis(
+            ip_address_a,
+            port_a,
+            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
+            true,
+            None,
+        )
+        .await;
+
+        let (mut node_c, mut wallet_c) = create_empty_node_genisis(
             ip_address_c,
             port_c,
             vec![Peer::new(wallet_a.address, ip_address_a, port_a)],
-            Some(Arc::new(EmptyDatastore::new())), // empty datastore, needs ICD
+            false,
             None,
-        );
+        )
+        .await;
 
         inner_test_new_node_online(
             &mut node_a,
@@ -1223,34 +1133,29 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_transaction_one_block() {
-        let mut wallet_a = Wallet::generate_random();
-
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 8));
         let port_a = 7997;
 
-        let wallet_b = Wallet::generate_random();
-
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 9));
         let port_b = 7996;
-        let datastore = GenesisDatastore::new();
-        let mut node_a = Node::new(
-            wallet_a.address,
-            wallet_a.get_private_key(),
-            ip_address_a,
-            port_a,
-            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
-            Some(Arc::new(datastore.clone())),
-            None,
-        );
-        let node_b = Node::new(
-            wallet_b.address,
-            wallet_b.get_private_key(),
+
+        let (node_b, wallet_b) = create_empty_node_genisis(
             ip_address_b,
             port_b,
             vec![],
-            Some(Arc::new(datastore.clone())),
-            Some(MinerPool::new()), // we will mine from this node
-        );
+            true,
+            Some(MinerPool::new()),
+        )
+        .await;
+
+        let (mut node_a, mut wallet_a) = create_empty_node_genisis(
+            ip_address_a,
+            port_a,
+            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
+            true,
+            None,
+        )
+        .await;
 
         let mut miner_b = Miner::new(node_b.clone()).unwrap();
 
@@ -1323,34 +1228,29 @@ mod tests {
     #[tokio::test]
     async fn test_50_transactions(){
         // make 2 nodes
-        let mut wallet_a = Wallet::generate_random();
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 10));
         let port_a = 8000;
-        let mut wallet_b = Wallet::generate_random();
+        
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 11));
         let port_b = 8001;
         
-        let datastore = GenesisDatastore::new();
-
-        let mut node_a = Node::new(
-            wallet_a.address,
-            wallet_a.get_private_key(),
-            ip_address_a,
-            port_a,
-            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
-            Some(Arc::new(datastore.clone())),
-            None,
-        );
-
-        let node_b = Node::new(
-            wallet_b.address,
-            wallet_b.get_private_key(),
+        let (node_b, mut wallet_b) = create_empty_node_genisis(
             ip_address_b,
             port_b,
             vec![],
-            Some(Arc::new(datastore.clone())),
-            Some(MinerPool::new()), // we will mine from this node
-        );
+            true,
+            Some(MinerPool::new()),
+        )
+        .await;
+
+        let (mut node_a, mut wallet_a) = create_empty_node_genisis(
+            ip_address_a,
+            port_a,
+            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
+            true,
+            None,
+        )
+        .await;
 
         // start the nodes
         let mut miner_b = Miner::new(node_b.clone()).unwrap();
