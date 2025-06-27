@@ -343,6 +343,7 @@ impl TrimmableChain for Chain {
     }
 
     fn remove_header(&mut self, hash: &StdByteArray) {
+        self.state_manager.remove_branch(self.headers.get(hash).unwrap().state_root.unwrap());
         self.blocks.remove(hash);
     }
 }

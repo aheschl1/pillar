@@ -44,6 +44,11 @@ impl StateManager{
         self.state_trie.lock().unwrap().get_all(root)
     }
 
+    pub fn remove_branch(&mut self, root: StdByteArray){
+        let mut state_trie = self.state_trie.lock().expect("Failed to lock state trie");
+        state_trie.trim_branch(root).expect("Failed to remove branch from state trie");
+    }
+
     /// Updates the accounts from the block
     /// This is called when a new block is added to the chain
     /// This does NOT verify the block - VERIFY THE BLOCK FIRST
