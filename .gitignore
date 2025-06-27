@@ -1,3 +1,4 @@
 /target
 /test_output
 /libs/*/test_output
+*.ai

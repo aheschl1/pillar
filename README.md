@@ -1,6 +1,6 @@
 
 <div style="display: flex; align-items: center; gap: 12px;">
-  <img src="./figures/logo.png" alt="Logo" style="height: 50px;">
+  <img src="./figures/logo.svg" alt="Logo" style="height: 50px; margin: 10px">
   <h1 style="margin: 0;">Pillar</h1>
 </div>
 
