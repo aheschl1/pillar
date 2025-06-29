@@ -713,6 +713,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lz4_flex"
+version = "0.11.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08ab2867e3eeeca90e844d1940eab391c9dc5228783db2ed999acbc0a9ed375a"
+dependencies = [
+ "twox-hash",
+]
+
+[[package]]
 name = "matchers"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -863,7 +872,6 @@ dependencies = [
 name = "pillar"
 version = "0.1.0"
 dependencies = [
- "bincode",
  "chrono",
  "ctor",
  "flume",
@@ -890,6 +898,7 @@ dependencies = [
  "crypto",
  "ed25519",
  "ed25519-dalek",
+ "lz4_flex",
  "rand",
  "rand_core 0.6.4",
  "serde",
@@ -1515,6 +1524,12 @@ dependencies = [
  "tracing-log",
  "tracing-subscriber",
 ]
+
+[[package]]
+name = "twox-hash"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b907da542cbced5261bd3256de1b3a1bf340a3d37f93425a07362a1d687de56"
 
 [[package]]
 name = "typenum"
