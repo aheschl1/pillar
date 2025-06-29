@@ -1,9 +1,8 @@
 use std::collections::HashSet;
 
-use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, primitives::{block::{Block, BlockHeader}, transaction::{Transaction, TransactionFilter}}};
+use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, nodes::peer::Peer, primitives::{block::{Block, BlockHeader}, transaction::{Transaction, TransactionFilter}}};
 use pillar_crypto::{hashing::{HashFunction, Hashable}, proofs::MerkleProof, types::StdByteArray};
 use serde::{Serialize, Deserialize};
-use super::peer::Peer;
 
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use pillar_crypto::types::StdByteArray;
 
-use crate::{accounting::state::ReputationMap, blockchain::chain::Chain, nodes::{messages::Message, node::{Broadcaster, Node}, peer::Peer}, primitives::block::BlockHeader, reputation::history::NodeHistory};
+use crate::{accounting::state::ReputationMap, blockchain::chain::Chain, nodes::{node::{Broadcaster, Node}, peer::Peer}, primitives::{block::BlockHeader, messages::Message}, reputation::history::NodeHistory};
 
 const MINING_WORTH_HALF_LIFE: f64 = 8f64;
 const MINING_WORTH_MAX: f64 = 1f64;

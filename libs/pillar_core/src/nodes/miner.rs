@@ -1,9 +1,9 @@
 use pillar_crypto::hashing::DefaultHash;
 use tracing::instrument;
 
-use crate::{primitives::block::{Block, BlockTail}, protocol::pow::mine};
+use crate::{primitives::{block::{Block, BlockTail}, messages::Message}, protocol::pow::mine};
 
-use super::{messages::Message, node::{Broadcaster, Node}};
+use super::{node::{Broadcaster, Node}};
 
 pub const MAX_TRANSACTION_WAIT_TIME: u64 = 5; // seconds
 pub const MAX_BLOCK_TRANSACTION_SIZE: usize = 10; // number of transactions to mine at once

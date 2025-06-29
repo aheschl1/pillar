@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::nodes::{messages::Message, node::Node, peer::Peer};
+use crate::{nodes::{node::Node, peer::Peer}, primitives::messages::Message};
 
 /// Find new peers by queerying the existing peers
 /// and adding them to the list of peers
@@ -49,8 +49,8 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::*;
-    use crate::nodes::messages::{get_declaration_length, Versions};
-    use crate::nodes::{messages::Message, node::Node, peer::Peer};
+    use crate::nodes::{node::Node, peer::Peer};
+    use crate::primitives::messages::{get_declaration_length, Versions};
     use std::net::{IpAddr, Ipv4Addr};
     use std::str::FromStr;
 

@@ -5,18 +5,13 @@ use tracing::instrument;
 use std::{any::Any, collections::{HashMap, HashSet}, net::IpAddr, sync::Arc};
 use tokio::sync::Mutex;
 
-use super::messages::Message;
-
 use crate::{
     blockchain::chain::Chain,
     persistence::database::{Datastore, EmptyDatastore},
-    primitives::{block::{Block, BlockHeader, Stamp},
-    pool::MinerPool,
-    transaction::{FilterMatch, TransactionFilter}},
+    primitives::{block::{Block, BlockHeader, Stamp}, messages::Message, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}},
     protocol::{chain::{block_settle_consumer, dicover_chain, service_sync, sync_chain},
     communication::{broadcast_knowledge, serve_peers},
     reputation::{nth_percentile_peer, N_TRANSMISSION_SIGNATURES}},
-    reputation::history::NodeHistory
 };
  
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

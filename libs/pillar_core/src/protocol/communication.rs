@@ -8,10 +8,7 @@ use tokio::time::{timeout, Duration};
 use tracing::instrument;
 
 use crate::{
-    nodes::{
-        messages::{Message, Versions, get_declaration_length},
-        node::{Broadcaster, Node},
-    },
+    nodes::node::{Broadcaster, Node}, primitives::messages::{get_declaration_length, Message, Versions},
 };
 
 /// Background process that consumes mined blocks, and transactions which must be forwarded

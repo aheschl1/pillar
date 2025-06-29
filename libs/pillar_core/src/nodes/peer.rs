@@ -3,7 +3,7 @@ use std::{net::IpAddr, time::Duration};
 use serde::{Serialize, Deserialize};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream, time::timeout};
 
-use super::messages::Message;
+use crate::primitives::messages::Message;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash)]
 pub struct Peer{
@@ -86,7 +86,7 @@ mod tests{
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    use crate::nodes::{messages::{get_declaration_length, Message, Versions}, peer::Peer};
+    use crate::{nodes::peer::Peer, primitives::messages::{get_declaration_length, Message, Versions}};
 
     #[test]
     fn test_peer_new(){
