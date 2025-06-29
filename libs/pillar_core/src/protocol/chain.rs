@@ -289,8 +289,7 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
         }
         let state = node.inner.state.lock().await.clone();
         if !state.is_consume() {continue;}
-        let value = timeout(tokio::time::Duration::from_secs(3), node.inner.settle_receiver.recv_async()).await;
-        if let Ok(Ok(block)) = value{
+        if let Some(block) = node.inner.late_settle_queue.dequeue(){
             tracing::debug!("Settling block...");
             let mut chain_lock = node.inner.chain.lock().await;
             let chain = chain_lock.as_mut().unwrap();

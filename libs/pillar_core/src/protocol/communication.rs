@@ -22,15 +22,8 @@ pub async fn broadcast_knowledge(node: Node, stop_signal: Option<flume::Receiver
             }
         }
         if let Some(pool) = &node.miner_pool {
-            // broadcast out of mining pool
-            // while pool.ready_block_count() > 0 {
-            //     node.broadcast(&Message::BlockTransmission(pool.pop_ready_block().unwrap()))
-            //     .await?;
-            // }
-            while pool.proposed_block_count() > 0 {
-                let m = Message::BlockTransmission(
-                    pool.pop_block_preposition().await.unwrap(),
-                );
+            while let Some(proposed_block) = pool.pop_block_proposition(){
+                let m: Message = Message::BlockTransmission(proposed_block);
                 let hash = m.hash(&mut hasher).unwrap();
                 let mut broadcased = node.inner.broadcasted_already.lock().await;
                 // do not broadcast if already broadcasted
@@ -45,15 +38,14 @@ pub async fn broadcast_knowledge(node: Node, stop_signal: Option<flume::Receiver
         }
         let mut i = 0;
         let mut broadcasted_already = node.inner.broadcasted_already.lock().await;
-        while i < 10 && !node.inner.broadcast_receiver.is_empty() {
+        while i < 10 && let Some(broadcast) = node.inner.broadcast_queue.dequeue() {
             // receive the transaction from the sender
-            let message = node.inner.broadcast_receiver.recv().unwrap();
-            let hash = message.hash(&mut hasher).unwrap();
+            let hash = broadcast.hash(&mut hasher).unwrap();
             // do not broadcast if already broadcasted
             if broadcasted_already.contains(&hash) {
                 continue;
             }
-            node.broadcast(&message).await?;
+            node.broadcast(&broadcast).await?;
             broadcasted_already.insert(hash);
             // add the message to the broadcasted list
             i += 1; // We want to make sure we check back at the mining pool
