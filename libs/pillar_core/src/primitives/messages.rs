@@ -38,7 +38,7 @@ pub enum Message {
     // a request for proof over a transaction
     TransactionProofRequest(TransactionStub),
     // a reponse for the proof. includes block header for hash verification, and merkle proof
-    TransactionProofResponse(MerkleProof, BlockHeader),
+    TransactionProofResponse(MerkleProof),
     /// register a transaction filter
     TransactionFilterRequest(TransactionFilter, Peer),
     /// An acknowledgement of a transaction filter

@@ -1,7 +1,9 @@
 use flume::Receiver;
-use pillar_crypto::{hashing::{DefaultHash, Hashable}, signing::{SigFunction, Signable}, types::StdByteArray};
+use pillar_crypto::{hashing::{DefaultHash, Hashable}, proofs::{verify_proof_of_inclusion, MerkleProof}, signing::{SigFunction, Signable}, types::StdByteArray};
+use sled::transaction;
+use tracing::instrument;
 
-use crate::{accounting::wallet::Wallet, nodes::node::{Broadcaster, Node}, primitives::{block::BlockHeader, messages::Message, transaction::Transaction}};
+use crate::{accounting::{account::TransactionStub, wallet::Wallet}, nodes::node::{Broadcaster, Node}, primitives::{block::BlockHeader, messages::Message, transaction::Transaction}};
 
 /// Submit a transaction to the network
 /// 
@@ -24,7 +26,7 @@ pub async fn submit_transaction(
     amount: u64,
     register_completion_callback: bool,
     timestamp: Option<u64>
-) -> Result<Option<Receiver<BlockHeader>>, std::io::Error> {
+) -> Result<(Option<Receiver<BlockHeader>>, Transaction), std::io::Error> {
     let nonce = wallet.nonce; wallet.nonce += 1;
 
     let timestamp = match timestamp{
@@ -61,13 +63,37 @@ pub async fn submit_transaction(
         true => {
             if register_completion_callback {
                 let receiver = node.register_transaction_callback(transaction.into()).await;
-                Ok(Some(receiver))
+                Ok((Some(receiver), transaction))
             }else{
-                Ok(None)
+                Ok((None, transaction))
             }
         },
         false => {
             Err(std::io::Error::other("Transaction not acknowledged"))
         }
     }
+}
+
+#[instrument(skip(node, header))]
+pub async fn get_transaction_proof(node: &mut Node, transaction: &Transaction, header: &BlockHeader) -> bool{
+    let message = Message::TransactionProofRequest(TransactionStub { 
+        block_hash: header.hash(&mut DefaultHash::new()).unwrap(), 
+        transaction_hash: transaction.hash });
+
+    let results = node.broadcast(&message).await.unwrap();
+    for (i, result) in results.iter().enumerate() {
+        if let Message::TransactionProofResponse(proof) = result {
+            if verify_proof_of_inclusion(
+                transaction.clone(),
+                &proof,
+                header.merkle_root,
+                &mut DefaultHash::new()
+            ){
+                tracing::info!("Transaction proof verified by peer {}", i);
+                return true;
+            }
+        }
+    }
+    tracing::info!("No proof available, with {} responses.", results.len());
+    return false;
 }

@@ -367,7 +367,7 @@ impl Node {
                     
                     if let Some(block) = block{
                         let proof = block.get_proof_for_transaction(stub.transaction_hash);
-                        Ok(Message::TransactionProofResponse(proof.unwrap(), block.header))
+                        Ok(Message::TransactionProofResponse(proof.unwrap()))
                     }else{
                         Ok(Message::Error("Block does not exist".into()))
                     }                 

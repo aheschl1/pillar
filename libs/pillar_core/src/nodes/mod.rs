@@ -7,6 +7,7 @@ mod tests {
 
     use chrono::Local;
     use pillar_crypto::{hashing::{DefaultHash, Hashable}, signing::{SigFunction, Signable}, types::StdByteArray};
+    use sled::transaction;
     use tracing::level_filters::LevelFilter;
     use tracing_subscriber::{
         Layer, Registry,
@@ -18,7 +19,7 @@ mod tests {
     use crate::{
         accounting::wallet::Wallet, nodes::{
             miner::{Miner, MAX_TRANSACTION_WAIT_TIME}, node::NodeState, peer::Peer
-        }, persistence::database::GenesisDatastore, primitives::{messages::Message, pool::MinerPool, transaction::Transaction}, protocol::{difficulty::get_reward_from_depth_and_stampers, peers::discover_peers, transactions::submit_transaction}
+        }, persistence::database::GenesisDatastore, primitives::{messages::Message, pool::MinerPool, transaction::Transaction}, protocol::{difficulty::get_reward_from_depth_and_stampers, peers::discover_peers, transactions::{get_transaction_proof, submit_transaction}}
     };
 
     use super::node::Node;
@@ -392,7 +393,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(result.is_none());
+        assert!(result.0.is_none());
 
         tokio::time::sleep(std::time::Duration::from_secs(MAX_TRANSACTION_WAIT_TIME)).await;
 
@@ -504,7 +505,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(result.is_none());
+        assert!(result.0.is_none());
 
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
@@ -741,7 +742,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(result.is_none());
+        assert!(result.0.is_none());
         // at this point, there should be 8 total broadcasts each - after a pause
         tokio::time::sleep(std::time::Duration::from_secs(
             MAX_TRANSACTION_WAIT_TIME + 5,
@@ -1472,6 +1473,51 @@ mod tests {
         let balance_b = acc.balance;
         assert_eq!(balance_b, get_reward_from_depth_and_stampers(1, 2) + get_reward_from_depth_and_stampers(2, 2) - 100); // 0 is the balance after sending 10 * 10 = 100
         drop(acc);
+
+    }
+
+    #[tokio::test]
+    async fn test_callback_for_transaction(){
+        let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 12));
+        let port_a = 8002;
+        let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 13));
+        let port_b = 8003;
+        let (node_b, wallet_b) = create_empty_node_genisis(
+            ip_address_b,
+            port_b,
+            vec![],
+            true,
+            Some(MinerPool::new()),
+        )
+        .await;
+        let (mut node_a, mut wallet_a) = create_empty_node_genisis(
+            ip_address_a,
+            port_a,
+            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
+            true,
+            None,
+        )
+        .await;
+
+        let mut miner_b = Miner::new(node_b.clone()).unwrap();
+        miner_b.serve().await;
+        node_a.serve().await;
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await; // wait for the nodes to connect
+        
+        // discover peers for a
+        discover_peers(&mut node_a).await.unwrap();
+        let (channel, transaction) = submit_transaction(
+            &mut node_a, 
+            &mut wallet_a, 
+            wallet_b.address, 
+            0, 
+            true, 
+            None
+        ).await.unwrap();
+        // we should get a callback
+        let header = channel.unwrap().recv_async().await.expect("Issue with callback");
+        let is_provable = get_transaction_proof(&mut node_a, &transaction, &header).await;
+        assert!(is_provable);
 
     }
 }
