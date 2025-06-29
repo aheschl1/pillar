@@ -58,6 +58,29 @@ mod tests {
             .with(file_layer)
             .with(console_layer)
             .try_init();
+
+        // write this code to bytes_parser.py
+        let code = "
+total_bytes = 0
+
+with open(\"output.log\", \"r\") as f:
+    for line in f:
+        if \"Sent\" in line and \"bytes to peer\" in line:
+            # Extract the number between \"Sent \" and \" bytes\"
+            try:
+                start = line.index(\"Sent \") + len(\"Sent \")
+                end = line.index(\" bytes\", start)
+                num_str = line[start:end].strip()
+                total_bytes += int(num_str)
+            except ValueError:
+                # Skip lines that don't match properly
+                continue
+
+print(\"Total bytes sent to peer:\", total_bytes)
+        ";
+        // write the code to output_folder to bytes_parser.py
+        let bytes_parser_path = format!("{log_dir}/bytes_parser.py");
+        std::fs::write(bytes_parser_path, code).expect("failed to write bytes parser script");
     }
 
     async fn create_empty_node_genisis(

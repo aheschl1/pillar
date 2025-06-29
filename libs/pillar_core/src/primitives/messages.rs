@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, nodes::peer::Peer, primitives::{block::{Block, BlockHeader}, transaction::{Transaction, TransactionFilter}}};
 use pillar_crypto::{hashing::{HashFunction, Hashable}, proofs::MerkleProof, types::StdByteArray};
 use serde::{Serialize, Deserialize};
+use pillar_crypto::serialization::serialize;
 
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -59,7 +60,7 @@ pub enum Message {
 
 impl Hashable for Message{
     fn hash(&self, hasher: &mut impl HashFunction) -> Result<StdByteArray, std::io::Error> {
-        let bin = bincode::serialize(self).unwrap();
+        let bin = serialize(self).unwrap();
         hasher.update(bin);
         hasher.digest()
     }
@@ -75,6 +76,32 @@ pub enum Versions{
 pub const fn get_declaration_length(version: Versions) -> u64 {
     match version {
         Versions::V1V4 => 50, // enum tag + public key + IP tag + IPv4 + port + u32
-        Versions::V1V6 => 1 + 32 + 1 + 16 + 2 + 4, // enum tag + public key + IP tag + IPv6 + port + u32
+        Versions::V1V6 => 62, // enum tag + public key + IP tag + IPv6 + port + u32
+    }
+}
+
+mod tests{
+    use pillar_crypto::serialization::{serialize, serialize_no_compress};
+
+    use crate::{nodes::peer::Peer, primitives::messages::{get_declaration_length, Message, Versions}};
+
+
+    #[test]
+    fn test_declaration_length() {
+        let declaration = Message::Declaration(Peer::new(
+            [0; 32], 
+            std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)), 
+            8000), 
+            1
+        );
+
+        let declarationv1v6 = Message::Declaration(Peer::new(
+            [0; 32], 
+            std::net::IpAddr::V6(std::net::Ipv6Addr::new(0, 2, 0, 0, 0, 0, 0, 1)), 
+            8000), 
+            1
+        );
+        assert_eq!(get_declaration_length(Versions::V1V4), serialize_no_compress(declaration).unwrap().len() as u64);
+        assert_eq!(get_declaration_length(Versions::V1V6), serialize_no_compress(declarationv1v6).unwrap().len() as u64);
     }
 }

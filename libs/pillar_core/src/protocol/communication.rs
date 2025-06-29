@@ -1,4 +1,4 @@
-use pillar_crypto::hashing::{DefaultHash, Hashable};
+use pillar_crypto::{hashing::{DefaultHash, Hashable}, serialization::{deserialize, deserialize_no_compress, serialize}};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -8,7 +8,7 @@ use tokio::time::{timeout, Duration};
 use tracing::instrument;
 
 use crate::{
-    nodes::node::{Broadcaster, Node}, primitives::messages::{get_declaration_length, Message, Versions},
+    nodes::node::{Broadcaster, Node}, primitives::messages::{get_declaration_length, Message, Versions}
 };
 
 /// Background process that consumes mined blocks, and transactions which must be forwarded
@@ -104,7 +104,7 @@ pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
                 ).await;
                 return;
             };
-            let declaration: Result<Message, Box<bincode::ErrorKind>> = bincode::deserialize(&buffer[..n]);
+            let declaration: Result<Message, std::io::Error> = deserialize_no_compress(&buffer[..n]);
             if declaration.is_err() {
                 // halt communication
                 send_error_message(
@@ -141,7 +141,7 @@ pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
             // read actual the message
             let mut buffer = vec![0; message_length as usize];
             let _ = stream.read_exact(&mut buffer).await.unwrap();
-            let message: Result<Message, Box<bincode::ErrorKind>> = bincode::deserialize(&buffer);
+            let message: Result<Message, std::io::Error> = deserialize(&buffer);
             if message.is_err() {
                 // halt
                 send_error_message(&mut stream, message.unwrap_err()).await;
@@ -152,13 +152,15 @@ pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
             match response {
                 Err(e) => send_error_message(&mut stream, e).await,
                 Ok(message) => {
-                    let nbytes = bincode::serialized_size(&message).unwrap() as u32;
+                    let serialized = serialize(&message).unwrap();
+                    let nbytes = serialized.len() as u32;
                     // write the size of the message as 4 bytes - 4 bytes because we are using u32
                     stream.write_all(&nbytes.to_le_bytes()[..4]).await.unwrap();
                     stream
-                        .write_all(&bincode::serialize(&message).unwrap())
+                        .write_all(&serialized)
                         .await
-                        .unwrap()
+                        .unwrap();
+                    tracing::debug!("Sent {} bytes to peer", nbytes);
                 }
             };
         });
@@ -166,21 +168,25 @@ pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
 }
 
 /// sends an error response when given a string description
+#[instrument(skip_all)]
 async fn send_error_message(stream: &mut TcpStream, e: impl std::error::Error) {
     // writye message size
-    let nbytes = bincode::serialized_size(&Message::Error(e.to_string())).unwrap() as u32;
+    let serialized = serialize(&Message::Error(e.to_string())).unwrap();
+    let nbytes = serialized.len() as u32;
     // write the size of the message as 4 bytes - 4 bytes because we are using u32
     stream.write_all(&nbytes.to_le_bytes()[..4]).await.unwrap();
     // write the error message to the stream
     stream
-        .write_all(&bincode::serialize(&Message::Error(e.to_string())).unwrap())
+        .write_all(&serialized)
         .await
         .unwrap();
+    tracing::debug!("Sent {} bytes to peer", nbytes);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pillar_crypto::serialization::serialize_no_compress;
     use tokio::net::TcpStream;
     use crate::nodes::peer::Peer;
     use crate::{
@@ -211,7 +217,7 @@ mod tests {
         };
 
         let declaration = Message::Declaration(peer.clone(), 0);
-        let serialized = bincode::serialize(&declaration).unwrap();
+        let serialized = serialize_no_compress(&declaration).unwrap();
         stream.write_all(&serialized).await.unwrap();
 
         // Verify the peer was added
@@ -248,10 +254,10 @@ mod tests {
 
         let t = Transaction::new([0; 32], [0; 32], 0, 0, 0, &mut DefaultHash::new());
         let message = Message::TransactionBroadcast(t);
-        let serialized_message = bincode::serialize(&message).unwrap();
+        let serialized_message = serialize(&message).unwrap();
 
         let declaration = Message::Declaration(peer.clone(), serialized_message.len() as u32);
-        let serialized = bincode::serialize(&declaration).unwrap();
+        let serialized = serialize_no_compress(&declaration).unwrap();
         stream.write_all(&serialized).await.unwrap();
 
         stream.write_all(&serialized_message).await.unwrap();
@@ -264,7 +270,7 @@ mod tests {
 
         let mut b = [0; get_declaration_length(Versions::V1V4) as usize];
         let _ = peer_stream.read_exact(&mut b).await.unwrap();
-        let declaration: Message = bincode::deserialize(&b).unwrap();
+        let declaration: Message = deserialize_no_compress(&b).unwrap();
         match declaration {
             Message::Declaration(_, size) => {
                 assert_eq!(size, serialized_message.len() as u32);
@@ -274,7 +280,7 @@ mod tests {
 
         let mut buffer = vec![0; serialized_message.len() as usize];
         let n = peer_stream.read_exact(&mut buffer).await.unwrap();
-        let message: Message = bincode::deserialize(&buffer[..n]).unwrap();
+        let message: Message = deserialize(&buffer[..n]).unwrap();
         match message {
             Message::TransactionBroadcast(_) => {},
             _ => panic!("Expected a TransactionRequest message"),
@@ -282,7 +288,7 @@ mod tests {
         // respond with ack
         let response = Message::TransactionAck;
         // send bytes then message
-        let response_serialized = bincode::serialize(&response).unwrap();
+        let response_serialized = serialize(&response).unwrap();
         let nbytes = response_serialized.len() as u32;
         peer_stream.write_all(&nbytes.to_le_bytes()).await.unwrap();
         peer_stream.write_all(&response_serialized).await.unwrap();
@@ -310,7 +316,7 @@ mod tests {
 
         // let invalid_message = vec![0; 10]; // Invalid message
         let message = Message::Ping;
-        let serialized_message = bincode::serialize(&message).unwrap();
+        let serialized_message = serialize(&message).unwrap();
         stream.write_all(&serialized_message).await.unwrap();
 
         let mut b = [0; 4];
@@ -319,7 +325,7 @@ mod tests {
 
         let mut buffer = vec![0; size as usize];
         let n = stream.read_exact(&mut buffer).await.unwrap();
-        let response: Message = bincode::deserialize(&buffer[..n]).unwrap();
+        let response: Message = deserialize(&buffer[..n]).unwrap();
 
         match response {
             Message::Error(_) => {},
