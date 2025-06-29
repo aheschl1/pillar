@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use pillar_crypto::{hashing::DefaultHash, types::StdByteArray};
 use serde::{Deserialize, Serialize};
 
-use crate::{accounting::{account::Account, state::StateManager}, primitives::block::BlockHeader, protocol::chain::get_genesis_block};
+use crate::{accounting::{account::Account, state::StateManager}, primitives::{block::BlockHeader, errors::BlockValidationError}, protocol::chain::get_genesis_block};
 
 use super::{chain::Chain, TrimmableChain};
 
@@ -18,7 +18,7 @@ pub struct ChainShard {
 
 impl ChainShard{
     /// ensures the hashs are good, and the depths work
-    pub fn validate(&self) -> bool{
+    pub fn validate(&self) -> Result<(), BlockValidationError>{
         let mut genesis_found = false;
         let state_manager = StateManager::new();
         let state_root = state_manager.state_trie
@@ -30,35 +30,48 @@ impl ChainShard{
         for (declared_hash, header) in &self.headers {
             if header.depth == 0{
                 if genesis_found{
-                    return false;
+                    return Err(BlockValidationError::MalformedShard("Multiple genesis blocks found".to_string()));
                 }
                 // make sure valid genesis
                 let correct_gensis = get_genesis_block(Some(state_root));
                 if *header != correct_gensis.header{
-                    return false;
+                    return Err(BlockValidationError::MalformedShard("Genesis block does not match".to_string()));
                 }
                 genesis_found = true;
             }
-            if !header.validate(
+            header.validate(
                 *declared_hash,
                 &mut DefaultHash::new() 
-            ){
-                return false;
-            }
+            )?;
 
             // check the previous hashes exists
             let previous_hash = header.previous_hash;
             let previous_block = self.headers.get(&previous_hash);
-            let valid = match previous_block {
-                Some(last_block) => (last_block.depth + 1 == header.depth) && (header.timestamp >= last_block.timestamp),
-                None => header.depth == 0 // genesis block has no previous hash
-            };
-            if !valid {
-                return false;
-            }
+
+            match previous_block {
+                Some(last_block) => {
+                    if last_block.depth + 1 != header.depth {
+                        return Err(BlockValidationError::MalformedShard("Depth does not match previous block".into()));
+                    } else if header.timestamp < last_block.timestamp {
+                        return Err(BlockValidationError::MalformedShard("Timestamp is before previous block".into()));
+                    } else {
+                        Ok(())
+                    }
+                },
+                None => {
+                    if header.depth != 0 { // genesis block has no previous hash
+                        return Err(BlockValidationError::MalformedShard("Previous block not found".into()));
+                    }
+                    Ok(())
+                }
+            }?;
         }
         
-        genesis_found // the last check
+        if genesis_found{
+            Ok(())
+        } else{
+            Err(BlockValidationError::MalformedShard("No genesis block found".to_string()))
+        }
     }
 
     pub fn get_block(&self, hash: &StdByteArray) -> Option<BlockHeader>{

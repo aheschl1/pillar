@@ -3,7 +3,7 @@ use std::{net::IpAddr, time::Duration};
 use serde::{Serialize, Deserialize};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream, time::timeout};
 
-use super::messages::Message;
+use crate::primitives::messages::Message;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash)]
 pub struct Peer{
@@ -44,11 +44,11 @@ impl Peer{
         let declaration = Message::Declaration(initializing_peer.clone(), serialized_message.as_ref().unwrap().len() as u32);
         // serialize with bincode
         stream.write_all(bincode::serialize(&declaration).map_err(
-            |e| std::io::Error::new(std::io::ErrorKind::Other, e)
+            std::io::Error::other
         )?.as_slice()).await?;
         // send the message
         stream.write_all(serialized_message.map_err(
-            |e| std::io::Error::new(std::io::ErrorKind::Other, e)
+            std::io::Error::other
         )?.as_slice()).await?;
         Ok(stream)
     }
@@ -66,7 +66,7 @@ impl Peer{
         let n = stream.read_exact(&mut buffer).await?;
         // deserialize with bincode
         let message: Message = bincode::deserialize(&buffer[..n]).map_err(
-            |e| std::io::Error::new(std::io::ErrorKind::Other, e)
+            std::io::Error::other
         )?;
         Ok(message)
     }
@@ -86,7 +86,7 @@ mod tests{
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    use crate::nodes::{messages::{get_declaration_length, Message, Versions}, peer::Peer};
+    use crate::{nodes::peer::Peer, primitives::messages::{get_declaration_length, Message, Versions}};
 
     #[test]
     fn test_peer_new(){

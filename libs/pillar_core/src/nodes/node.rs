@@ -5,18 +5,13 @@ use tracing::instrument;
 use std::{any::Any, collections::{HashMap, HashSet}, net::IpAddr, sync::Arc};
 use tokio::sync::Mutex;
 
-use super::messages::Message;
-
 use crate::{
     blockchain::chain::Chain,
     persistence::database::{Datastore, EmptyDatastore},
-    primitives::{block::{Block, BlockHeader, Stamp},
-    pool::MinerPool,
-    transaction::{FilterMatch, TransactionFilter}},
+    primitives::{block::{Block, BlockHeader, Stamp}, messages::Message, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}},
     protocol::{chain::{block_settle_consumer, dicover_chain, service_sync, sync_chain},
     communication::{broadcast_knowledge, serve_peers},
     reputation::{nth_percentile_peer, N_TRANSMISSION_SIGNATURES}},
-    reputation::history::NodeHistory
 };
  
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -92,9 +87,7 @@ pub struct NodeInner {
     // the blockchain
     pub chain: Mutex<Option<Chain>>,
     /// transactions to be broadcasted
-    pub broadcast_receiver: Receiver<Message>,
-    /// transaction input
-    pub broadcast_sender: Sender<Message>,
+    pub broadcast_queue: lfqueue::UnboundedQueue<Message>,
     // a collection of things already broadcasted
     pub broadcasted_already: Mutex<HashSet<StdByteArray>>,
     // transaction filter queue
@@ -102,8 +95,7 @@ pub struct NodeInner {
     /// the datastore
     pub datastore: Option<Arc<dyn Datastore>>,
     /// A queue of blocks which are to be settled to the chain
-    pub settle_sender: Sender<Block>,
-    pub settle_receiver: Receiver<Block>,
+    pub late_settle_queue: lfqueue::UnboundedQueue<Block>,
     /// the state represents the nodes ability to communicate with other nodes
     pub state: Mutex<NodeState>,
     /// registered filters for the local node - producer will be this node, and consumer will be some backgroung thread that polls
@@ -151,8 +143,8 @@ impl Node {
             tracing::warn!("Node created without a database. This will not persist the chain or transactions.");
             database = Some(Arc::new(EmptyDatastore::new()));
         }
-        let (broadcast_sender, broadcast_receiver) = flume::unbounded();
-        let (settle_sender, settle_receiver) = flume::unbounded();
+        let broadcast_queue = lfqueue::UnboundedQueue::new();
+        let late_settle_queue = lfqueue::UnboundedQueue::new();
         let transaction_filters = Mutex::new(Vec::new());
         let broadcasted_already = Mutex::new(HashSet::new());
         let peer_map = peers
@@ -169,13 +161,11 @@ impl Node {
             peers: Mutex::new(peer_map),
             chain: Mutex::new(maybe_chain),
             broadcasted_already,
-            broadcast_receiver,
-            broadcast_sender,
             transaction_filters,
+            broadcast_queue,
             filter_callbacks: Mutex::new(HashMap::new()), // initially no callbacks
             state: Mutex::new(state), // initially in discovery mode
-            settle_receiver,
-            settle_sender,
+            late_settle_queue,
             datastore: database,
             }.into(),
             ip_address,
@@ -276,7 +266,7 @@ impl Node {
         self.inner.transaction_filters.lock().await.push((filter.clone(), self.clone().into()));
         tracing::info!("Transaction filter registered, starting brodcast");
         // broadcast the filter to all peers
-        self.inner.broadcast_sender.send(Message::TransactionFilterRequest(filter, self.clone().into())).unwrap();
+        self.inner.broadcast_queue.enqueue(Message::TransactionFilterRequest(filter, self.clone().into()));
         // return the receiver
         receiver
     }
@@ -310,13 +300,13 @@ impl Node {
                 if let Some(ref pool) = self.miner_pool{
                     if state.is_consume() {
                         tracing::info!("Adding transaction to mining pool.");
-                        pool.add_transaction(*transaction).await;
+                        pool.add_transaction(*transaction);
                     }
                 }
                 // to be broadcasted
                 if state.is_forward(){
                     tracing::info!("Broadcasting transaction");
-                    self.inner.broadcast_sender.send(Message::TransactionBroadcast(transaction.to_owned())).unwrap();
+                    self.inner.broadcast_queue.enqueue(Message::TransactionBroadcast(transaction.to_owned()));
                 }
                 Ok(Message::TransactionAck)
             }
@@ -332,7 +322,7 @@ impl Node {
                 // and handle callback if mined
                 if (state.is_track() || state.is_consume()) && block.header.miner_address.is_some() {
                     tracing::info!("Handling callbacks and settle for mined block.");
-                    self.inner.settle_sender.send(block.clone()).unwrap();
+                    self.inner.late_settle_queue.enqueue(block.clone());
                     self.handle_callbacks(&block).await;
                 }
 
@@ -343,7 +333,7 @@ impl Node {
                         tracing::info!("Stamping and broadcasting only because not ");
                         let _ = self.stamp_block(&mut block.clone());
                     }
-                    self.inner.broadcast_sender.send(Message::BlockTransmission(block.clone())).unwrap(); // forward
+                    self.inner.broadcast_queue.enqueue(Message::BlockTransmission(block.clone())); // forward
                 }
                 Ok(Message::BlockAck)
             },
@@ -389,7 +379,7 @@ impl Node {
                 // place into the transaction filter queue - if it is not already there
                 let mut transaction_filters = self.inner.transaction_filters.lock().await;
                 if transaction_filters.iter().any(|(f, p)| f == filter && p == peer) {
-                    self.inner.broadcast_sender.send(Message::TransactionFilterRequest(filter.to_owned(), peer.to_owned())).unwrap();
+                    self.inner.broadcast_queue.enqueue(Message::TransactionFilterRequest(filter.to_owned(), peer.to_owned()));
                     transaction_filters.push((filter.to_owned(), peer.to_owned()));
                 }
                 // to be broadcasted
@@ -465,7 +455,7 @@ impl Node {
         if (already_broadcasted || n_stamps == N_TRANSMISSION_SIGNATURES) && self.miner_pool.is_some(){
             // add the block to the pool
             tracing::info!("Adding block to miner pool.");
-            self.miner_pool.as_ref().unwrap().add_ready_block(block.clone()).await;
+            self.miner_pool.as_ref().unwrap().add_mine_ready_block(block.clone());
         }
         Ok(())
     }

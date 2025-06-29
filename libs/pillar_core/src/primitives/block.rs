@@ -8,6 +8,7 @@ use pillar_crypto::types::StdByteArray;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::{serde_as, Bytes};
 
+use crate::primitives::errors::BlockValidationError;
 use crate::protocol::difficulty::get_difficulty_from_depth;
 use crate::protocol::pow::is_valid_hash;
 use crate::protocol::reputation::N_TRANSMISSION_SIGNATURES;
@@ -216,26 +217,25 @@ impl BlockHeader {
     /// 
     /// # Arguments
     /// 
-    /// * `expected_difficulty` - The expected difficulty of the block
+    /// * `expected_hash` - The expected hash of the block
     /// * `hasher` - A mutable instance of a type implementing the HashFunction trait
     pub fn validate(
         &self, 
         expected_hash: StdByteArray,
         hasher: &mut impl HashFunction
-    ) -> bool{
+    ) -> Result<(), BlockValidationError> {
         // check the miner is declared
         if self.miner_address.is_none() {
-            return false;
+            return Err(BlockValidationError::NoMinerAddress(*self));
         }
         if self.state_root.is_none() {
-            // The validity of the state root will be checke later
-            return false;
+            return Err(BlockValidationError::NoStateRoot(*self));
         }
         if expected_hash != self.hash(hasher).unwrap() {
-            return false;
+            return Err(BlockValidationError::HashMismatch(expected_hash, self.hash(hasher).unwrap()));
         }
         if !is_valid_hash(get_difficulty_from_depth(self.depth), &self.hash(hasher).unwrap()) {
-            return false;
+            return Err(BlockValidationError::DifficultyMismatch(get_difficulty_from_depth(self.depth), *self));
         }
         // check that all the signatures work in the tail
         let tail = &mut self.tail.clone();
@@ -244,7 +244,7 @@ impl BlockHeader {
             let stamp = tail.stamps[i];
             let sigver = DefaultVerifier::from_bytes(&stamp.address);
             if !sigver.verify(&stamp.signature, self) {
-                return false;
+                return Err(BlockValidationError::InvalidStampSignature(stamp.address));
             }
         }
 
@@ -256,9 +256,9 @@ impl BlockHeader {
             .as_secs();
         if self.timestamp > current_time + 60 * 60 {
             // one hour margin
-            return false;
+            return Err(BlockValidationError::FutureTimestamp(self.timestamp));
         }
-        true
+        Ok(())
     }
 
     /// A hashing function that doesnt rely on any moving pieces like the miner address
@@ -341,7 +341,7 @@ impl Block {
         Block {
             header,
             transactions,
-            hash: if let Ok(item) = hash {Some(item)} else {None},
+            hash: hash.ok(),
             merkle_tree
         }
     }

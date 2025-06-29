@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Debug, sync::{Arc, Mutex}};
 
 use pillar_crypto::{merkle_trie::MerkleTrie, types::StdByteArray};
 
-use crate::{accounting::account::Account, primitives::block::{Block, BlockHeader}, protocol::difficulty::get_reward_from_depth_and_stampers, reputation::history::{self, NodeHistory}};
+use crate::{accounting::account::Account, primitives::block::{Block, BlockHeader}, protocol::difficulty::get_reward_from_depth_and_stampers, reputation::history::NodeHistory};
 
 pub type ReputationMap = HashMap<StdByteArray, NodeHistory>;
 
@@ -42,6 +42,11 @@ impl StateManager{
 
     pub fn get_all_accounts(&self, root: StdByteArray) -> Vec<Account>{
         self.state_trie.lock().unwrap().get_all(root)
+    }
+
+    pub fn remove_branch(&mut self, root: StdByteArray){
+        let mut state_trie = self.state_trie.lock().expect("Failed to lock state trie");
+        state_trie.trim_branch(root).expect("Failed to remove branch from state trie");
     }
 
     /// Updates the accounts from the block
@@ -109,7 +114,7 @@ impl StateManager{
             let mut stamper = match state_updates.get(stamper){
                 Some(account) => account.clone(),
                 None => {
-                    state_trie.get(stamper, state_root).unwrap_or(Account::new(stamper.clone(), 0))
+                    state_trie.get(stamper, state_root).unwrap_or(Account::new(*stamper, 0))
                 }
             };
             if stamper.history.is_none(){

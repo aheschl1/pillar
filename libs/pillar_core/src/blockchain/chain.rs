@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 use crate::{
-    accounting::{account::Account, state::{StateManager}}, primitives::{block::{Block, BlockHeader}, transaction::Transaction}, protocol::chain::get_genesis_block
+    accounting::{account::Account, state::StateManager}, primitives::{block::{Block, BlockHeader}, errors::BlockValidationError, transaction::Transaction}, protocol::chain::get_genesis_block
 };
 
 use super::TrimmableChain;
@@ -106,35 +106,43 @@ impl Chain {
     
     /// Validates the structure and metadata of a block.
     #[instrument(skip_all, fields(block = ?block.hash))]
-    fn validate_block(&self, block: &Block) -> bool {
+    fn validate_block(&self, block: &Block) -> Result<(), BlockValidationError> {
         // check hash validity
         if block.hash.is_none() {
             tracing::info!("Block hash is None - Failing");
-            return false;
+            return Err(BlockValidationError::MalformedBlock("Hash is not specified".into()));
         }
-        if !block.header.validate(block.hash.unwrap(), &mut DefaultHash::new()) {
+        if let Err(error) = block.header.validate(block.hash.unwrap(), &mut DefaultHash::new()) {
             tracing::info!("Block header is not validated - Failing");
-            return false;
+            return Err(error);
         }
         // check the previous hash exists
         let previous_hash = block.header.previous_hash;
         let previous_block = self.blocks.get(&previous_hash);
+
         let valid = match previous_block {
-            Some(last_block) => (last_block.header.depth + 1 == block.header.depth) && (block.header.timestamp >= last_block.header.timestamp),
+            Some(last_block) => {
+                if last_block.header.depth + 1 != block.header.depth{
+                    tracing::info!("Block depth is invalid - Failing");
+                    return Err(BlockValidationError::MalformedBlock("Depth does not match previous block".into()));
+                } else if block.header.timestamp < last_block.header.timestamp{
+                    tracing::info!("Block timestamp is invalid - Failing");
+                    return Err(BlockValidationError::MalformedBlock("Timestamp is before previous block".into()));
+                } else{
+                    Ok(())
+                }
+            },
             None => {
                 tracing::info!("Previous block not found: {:?}", previous_hash);
-                false
+                Err(BlockValidationError::MalformedBlock("Previous block not found".into()))
             }
         };
 
         
-        if !valid {
-            tracing::info!("Block depth or timestamp is invalid - Failing");
-            return false;
-        }
+        valid?;
 
         tracing::info!("Block is valid - Continuing");
-        true
+        Ok(())
     }
 
     /// Ensures that all transactions in a block are valid and do not exceed available funds.
@@ -148,7 +156,7 @@ impl Chain {
     /// * `transactions` - A vector of transactions to validate.
     /// * `state_root` - The state root to use for account lookups. The state should be the previous block.
     #[instrument(skip_all, fields(transactions = ?transactions.iter().map(|t|t.hash).collect::<Vec<_>>()))]
-    fn validate_transaction_set(&mut self, transactions: &Vec<Transaction>, state_root: StdByteArray) -> bool {
+    fn validate_transaction_set(&mut self, transactions: &Vec<Transaction>, state_root: StdByteArray) -> Result<(), BlockValidationError> {
         // we need to make sure that there are no duplicated nonce values under the same user
         let per_user: HashMap<StdByteArray, Vec<&Transaction>> =
             transactions
@@ -167,16 +175,16 @@ impl Chain {
             let total_sum: u64 = transactions.iter().map(|t| t.header.amount).sum();
             if account.balance < total_sum {
                 tracing::info!("Account balance is insufficient for user {:?} - Failing", user);
-                return false;
+                return Err(BlockValidationError::TransactionInsufficientBalance(account.balance));
             }
             let mut nonces = vec![];
             // now validate each individual transaction
             for transaction in transactions {
                 nonces.push(transaction.header.nonce);
                 let result = self.validate_transaction(transaction, state_root);
-                if !result {
+                if let Err(err) = result {
                     tracing::info!("Invalid transaction - Failing");
-                    return false;
+                    return Err(err);
                 }
             }
             // nonces need tto be contiguous
@@ -184,19 +192,25 @@ impl Chain {
             for i in 0..nonces.len() - 1 {
                 if nonces[i] + 1 != nonces[i + 1] {
                     tracing::info!("Nonces are not contiguous for user {:?} - Failing", user);
-                    return false;
+                    return Err(BlockValidationError::TransactionNonceMismatch(
+                        nonces[i] + 1,
+                        nonces[i + 1],
+                    ));
                 }
             }
 
             // and the first one needs to be the accounts nonce
             if nonces[0] != account.nonce {
                 tracing::info!("First nonce does not match account nonce for user {:?} - Failing", user);
-                return false;
+                return Err(BlockValidationError::TransactionNonceMismatch(
+                    account.nonce,
+                    nonces[0],
+                ));
             }
 
         }
 
-        true
+        Ok(())
     }
 
     /// Find the longest existing fork in the chain.
@@ -229,7 +243,7 @@ impl Chain {
     /// 3. The sender has sufficient balance.
     /// 4. The nonce matches the sender's expected value.
     #[instrument(skip_all, fields(transaction = ?transaction.hash))]
-    fn validate_transaction(&self, transaction: &Transaction, state_root: StdByteArray) -> bool {
+    fn validate_transaction(&self, transaction: &Transaction, state_root: StdByteArray) -> Result<(), BlockValidationError> {
         let sender = transaction.header.sender;
         let signature = transaction.signature;
         // check for signature
@@ -243,43 +257,49 @@ impl Chain {
         };
         if !signing_validity {
             tracing::info!("Transaction signature is invalid - Failing");
-            return false;
+            return Err(BlockValidationError::TransactionInvalidSignature);
         }
         // check the hash
         if transaction.hash != transaction.header.hash(&mut DefaultHash::new()) {
             tracing::info!("Transaction hash is invalid - Failing");
-            return false;
+            return Err(BlockValidationError::HashMismatch(
+                transaction.hash,
+                transaction.header.hash(&mut DefaultHash::new()),
+            ));
         }
         // verify balance
         let account = self.state_manager.get_account(&sender, state_root).unwrap_or(Account::new(sender, 0));
         if account.balance < transaction.header.amount {
             tracing::info!("Account balance is insufficient - Failing");
-            return false;
+            return Err(BlockValidationError::TransactionInsufficientBalance(account.balance));
         } 
-        true
+        Ok(())
     }
 
     /// Verifies the validity of a block, including its transactions and metadata.
-    pub fn verify_block(&mut self, block: &Block) -> bool {
-        let mut result = self.validate_block(block);
-        result = result && self.validate_transaction_set(&block.transactions, self.blocks.get(&block.header.previous_hash).unwrap().header.state_root.unwrap());
-        result
+    pub fn verify_block(&mut self, block: &Block) -> Result<(), BlockValidationError> {
+        self.validate_block(block)?;
+        self.validate_transaction_set(
+            &block.transactions, 
+            self.blocks.get(&block.header.previous_hash).unwrap().header.state_root.unwrap()
+        )?;
+        Ok(())
     }
 
     /// Call this only after a block has been verified
     #[instrument(skip_all, fields(block = ?block.hash))]
-    fn settle_new_block(&mut self, block: Block) -> bool{
+    fn settle_new_block(&mut self, block: Block) -> Result<(), BlockValidationError>{
         if self.blocks.get(&block.hash.unwrap()).is_some() {
             tracing::warn!("Block with hash {:?} already exists in the chain - skipping", block.hash);
-            return true;
+            return Ok(());
         }
         let prev_header = self.headers.get(&block.header.previous_hash).expect("Previous block header must exist");
         let new_root = self.state_manager.branch_from_block(&block, prev_header);
         // last check - is the root the same as the one in the block?
         if block.header.state_root.unwrap() != new_root {
             tracing::error!("Block state root does not match the computed state root - Failing");
-            // TODO trim out the root
-            return false;
+            self.state_manager.remove_branch(new_root);
+            return Err(BlockValidationError::MalformedBlock("State root does not match".into()));
         }
         tracing::debug!("Account settled");
         self.blocks.insert(block.hash.unwrap(), block.clone());
@@ -294,7 +314,7 @@ impl Chain {
             self.deepest_hash = block.hash.unwrap();
             self.depth = block.header.depth;
         }
-        true
+        Ok(())
     }
 
     /// Adds a new block to the chain if it is valid.
@@ -308,27 +328,11 @@ impl Chain {
     /// * `Ok(())` if the block is successfully added.
     /// * `Err(std::io::Error)` if the block is invalid.
     #[instrument(skip_all, fields(block = ?block.hash))]
-    pub fn add_new_block(&mut self, block: Block) -> Result<(), std::io::Error> {
-        if self.verify_block(&block) {
-            tracing::info!("Block is valid, settling...");
-            let result = self.settle_new_block(block);
-            if result{
-                tracing::info!("Block settled in chain successfully");
-            }else{
-                tracing::error!("State does not match");
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "State does not match",
-                ));
-            }
-            Ok(())
-        } else {
-            tracing::error!("Block is not valid, cannot add to chain");
-            Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Block is not valid",
-            ))
-        }
+    pub fn add_new_block(&mut self, block: Block) -> Result<(), BlockValidationError> {
+        self.verify_block(&block)?;
+        tracing::info!("Block is valid, settling...");
+        self.settle_new_block(block)?;
+        Ok(())
     } 
 }
 
@@ -343,6 +347,7 @@ impl TrimmableChain for Chain {
     }
 
     fn remove_header(&mut self, hash: &StdByteArray) {
+        self.state_manager.remove_branch(self.headers.get(hash).unwrap().state_root.unwrap());
         self.blocks.remove(hash);
     }
 }

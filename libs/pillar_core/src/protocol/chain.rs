@@ -2,10 +2,9 @@ use std::{collections::{HashMap, HashSet}};
 
 use pillar_crypto::{hashing::{DefaultHash, Hashable}, merkle::generate_tree, types::StdByteArray};
 use rand::{rng, seq::{IteratorRandom}};
-use tokio::time::timeout;
 use tracing::{instrument, warn};
 
-use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, nodes::{messages::Message, node::{Broadcaster, Node}, peer::Peer}, primitives::{block::{Block, BlockTail}, transaction::Transaction}};
+use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, nodes::{node::{Broadcaster, Node}, peer::Peer}, primitives::{block::{Block, BlockTail}, errors::{BlockValidationError, QueryError}, messages::Message, transaction::Transaction}};
 
 use super::peers::discover_peers;
 
@@ -14,39 +13,41 @@ async fn query_block_from_peer(
     peer: &mut Peer,
     initializing_peer: &Peer,
     hash: StdByteArray
-) -> Result<Block, std::io::Error>{
+) -> Result<Block, QueryError>{
     // send the block request to the peer
     // TODO better error handling
-    let response = peer.communicate(&Message::BlockRequest(hash), initializing_peer).await?;
+    let response = peer.communicate(&Message::BlockRequest(hash), initializing_peer).await.map_err(
+        QueryError::IOError
+    )?;
     let block = match response {
         Message::BlockResponse(Some(block)) => {
             // we need to verify that the header validates
             // and that the transactions are the same as declared
-            let mut result = true;
-            // check header
-            result &= block.header.validate(hash, &mut DefaultHash::new());
+            block.header.validate(hash, &mut DefaultHash::new()).map_err(
+                QueryError::BadBlock
+            )?;
             // verify merkle root
             let tree = generate_tree(
                 block.transactions.iter().collect(), 
                 &mut DefaultHash::new()
             );
-            result = result 
-                && tree.is_ok()  // tree worked
-                && tree.as_ref().unwrap().get_root_hash().is_some() // has root
-                && tree.unwrap().get_root_hash().unwrap() == block.header.merkle_root; // root matches
-            if result{
-                Ok(block)
-            }else{
-                Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Block failed verification"))
+
+            if tree.is_err() || tree.as_ref().unwrap().get_root_hash().is_none(){
+                warn!("Merkle tree generation failed: {:?}", tree.err());
+                return Err(QueryError::BadBlock(BlockValidationError::MalformedBlock("Merkle tree generation failed".to_string())));
             }
+            if block.header.merkle_root != tree.unwrap().get_root_hash().unwrap() {
+                return Err(QueryError::BadBlock(BlockValidationError::MalformedBlock("Merkle root does not match".to_string())));
+            }
+            Ok(block)
         }
-        _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Peer responded wrong"))
-    };
-    block
+        _ => Err(QueryError::InvalidResponse)
+    }?;
+    Ok(block)
 }
 
 /// Given a shard (validated) uses the node to get the chain
-async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std::io::Error> {
+async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, QueryError> {
     let mut threads = Vec::new();
     // get many blocks simultaneously
     for (hash, _) in shard.headers{
@@ -93,20 +94,24 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, std
 
 
 /// Discovery algorithm for the chain
-pub async fn dicover_chain(mut node: Node) -> Result<(), std::io::Error> {
+pub async fn dicover_chain(mut node: Node) -> Result<(), QueryError> {
     // get the peers first
-    discover_peers(&mut node).await?;
+    discover_peers(&mut node).await.map_err(
+        QueryError::IOError
+    )?;
     // broadcast the chain shard request to all peers
     let mut peers = node.inner.peers.lock().await;
     let mut chain_shards = Vec::new();
     for (_, peer) in peers.iter_mut() {
         // send the chain shard request to the peer
-        let response = peer.communicate(&Message::ChainShardRequest, &(node.clone().into())).await?;
+        let response = peer.communicate(&Message::ChainShardRequest, &(node.clone().into())).await
+            .map_err(QueryError::IOError)?;
         if let Message::ChainShardResponse(shard) = response {
             // add the shard to the chain   
-            if shard.validate(){
-                chain_shards.push(shard);
-            }
+            shard.validate().map_err(
+                QueryError::BadBlock
+            )?;
+            chain_shards.push(shard);
             // TODO perhaps blacklist the peer
         }  
 
@@ -122,14 +127,11 @@ pub async fn dicover_chain(mut node: Node) -> Result<(), std::io::Error> {
 
 /// Find the deepest chain shard - they shoudl in theory be the same but we want the longest
 /// TODO: Maybe we should check agreement of hashes and such, but with POW deepest should be accurate
-pub fn deepest_shard(shards: &[ChainShard]) -> Result<ChainShard, std::io::Error> {
+pub fn deepest_shard(shards: &[ChainShard]) -> Result<ChainShard, QueryError> {
     let shard = shards.iter().max_by_key(|shard| shard.leaves.iter().max_by_key(|leaf| shard.headers[*leaf].depth).unwrap());
     match shard {
         Some(shard) => Ok(shard.clone()),
-        None => Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "No shards found",
-        )),   
+        None => Err(QueryError::NoReply),   
     }
 }
 
@@ -156,7 +158,7 @@ pub fn get_genesis_block(state_root: Option<StdByteArray>) -> Block{
 /// May take ownership of mutexed chain for a while
 /// TODO this may try to duplicate if there are forks in extensions - fix the final portion of the sync
 #[instrument(fields(node = ?node.inner.public_key))]
-pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
+pub async fn sync_chain(node: Node) -> Result<(), QueryError> {
     if node.inner.peers.lock().await.is_empty(){
         tracing::info!("No peers to sync with, skipping chain sync");
         return Ok(());
@@ -164,14 +166,16 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
     // the sync request
     let mut chain = node.inner.chain.lock().await;
     if chain.is_none() {
-        return Err(std::io::Error::other("No chain to sync"));
+        return Err(QueryError::InsufficientInfo("Chain is not initialized".to_string()));
     }
     let chain = chain.as_mut().unwrap();
     let leaves = chain.leaves.clone();
     
     let request = Message::ChainSyncRequest(leaves.clone());
     // broadcast the request
-    let responses = node.broadcast(&request).await?;
+    let responses = node.broadcast(&request).await.map_err(
+        QueryError::IOError
+    )?;
     if responses.is_empty() {
         tracing::info!("No responses to chain sync request, skipping sync");
         return Ok(());
@@ -193,7 +197,7 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
                         // two things can happen here - if the existing chain has the previous block
                         // then we need to validate the block on that chain - otherwise validate on the shard
                         tracing::debug!("Found connection {:?}", leaves.contains(&current_block.header.previous_hash));
-                        if leaves.contains(&current_block.header.previous_hash) && chain.verify_block(&current_block){ // double check that this is a valid connection by verifying the block
+                        if leaves.contains(&current_block.header.previous_hash) && chain.verify_block(&current_block).is_ok(){ // double check that this is a valid connection by verifying the block
                             // we have reached it. record this verified shard
                             if let Some((_, existing_depth)) = extensions.get(&current_block.header.previous_hash) {
                                 // insert if this is deeper
@@ -234,7 +238,9 @@ pub async fn sync_chain(node: Node) -> Result<(), std::io::Error> {
             tracing::debug!("Adding {} blocks to the chain", to_add.len());
             for block in to_add.iter().rev(){
                 // verifies again
-                chain.add_new_block(block.clone())?;
+                chain.add_new_block(block.clone()).map_err(
+                    QueryError::BadBlock
+                )?;
             }
         }
     }
@@ -282,8 +288,7 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
         }
         let state = node.inner.state.lock().await.clone();
         if !state.is_consume() {continue;}
-        let value = timeout(tokio::time::Duration::from_secs(3), node.inner.settle_receiver.recv_async()).await;
-        if let Ok(Ok(block)) = value{
+        if let Some(block) = node.inner.late_settle_queue.dequeue(){
             tracing::debug!("Settling block...");
             let mut chain_lock = node.inner.chain.lock().await;
             let chain = chain_lock.as_mut().unwrap();

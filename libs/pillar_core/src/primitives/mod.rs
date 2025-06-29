@@ -1,6 +1,8 @@
 pub mod transaction;
 pub mod block;
 pub mod pool;
+pub mod messages;
+pub mod errors;
 
 #[cfg(test)]
 mod tests{
