@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use pillar_crypto::types::StdByteArray;
 
-use crate::{accounting::state::ReputationMap, blockchain::chain::Chain, nodes::{node::{Broadcaster, Node}, peer::Peer}, primitives::{block::BlockHeader, messages::Message}, reputation::history::NodeHistory};
+use crate::{blockchain::chain::Chain, nodes::{node::{Broadcaster, Node}, peer::Peer}, primitives::messages::Message};
 
 const MINING_WORTH_HALF_LIFE: f64 = 8f64;
 const MINING_WORTH_MAX: f64 = 1f64;
@@ -81,7 +81,7 @@ pub async fn query_for_peers_by_reputation(node: Node, lower_n: f32, upper_n: f3
                 peers.iter().collect::<HashSet<_>>()
             },
             _ => {
-                panic!("Expected PercentileFilteredPeerResponse, got {:?}", m); // TODO dont just panic here
+                panic!("Expected PercentileFilteredPeerResponse, got {m:?}"); // TODO dont just panic here
             }
         }
     }).collect();

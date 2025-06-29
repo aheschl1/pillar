@@ -341,7 +341,7 @@ impl Block {
         Block {
             header,
             transactions,
-            hash: if let Ok(item) = hash {Some(item)} else {None},
+            hash: hash.ok(),
             merkle_tree
         }
     }

@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Debug, sync::{Arc, Mutex}};
 
 use pillar_crypto::{merkle_trie::MerkleTrie, types::StdByteArray};
 
-use crate::{accounting::account::Account, primitives::block::{Block, BlockHeader}, protocol::difficulty::get_reward_from_depth_and_stampers, reputation::history::{self, NodeHistory}};
+use crate::{accounting::account::Account, primitives::block::{Block, BlockHeader}, protocol::difficulty::get_reward_from_depth_and_stampers, reputation::history::NodeHistory};
 
 pub type ReputationMap = HashMap<StdByteArray, NodeHistory>;
 
@@ -114,7 +114,7 @@ impl StateManager{
             let mut stamper = match state_updates.get(stamper){
                 Some(account) => account.clone(),
                 None => {
-                    state_trie.get(stamper, state_root).unwrap_or(Account::new(stamper.clone(), 0))
+                    state_trie.get(stamper, state_root).unwrap_or(Account::new(*stamper, 0))
                 }
             };
             if stamper.history.is_none(){

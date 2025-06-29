@@ -39,12 +39,10 @@ impl ChainShard{
                 }
                 genesis_found = true;
             }
-            if let Err(err) = header.validate(
+            header.validate(
                 *declared_hash,
                 &mut DefaultHash::new() 
-            ){
-                return Err(err);
-            }
+            )?;
 
             // check the previous hashes exists
             let previous_hash = header.previous_hash;

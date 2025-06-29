@@ -3,7 +3,7 @@ use std::{cmp::max, collections::HashSet};
 use pillar_crypto::{hashing::{HashFunction, Hashable}, types::StdByteArray};
 use serde::{Deserialize, Serialize};
 
-use crate::{blockchain::{chain_shard::ChainShard, TrimmableChain}, primitives::block::{BlockHeader, BlockTail}, protocol::reputation::{block_worth_scaling_fn, BLOCK_STAMP_SCALING, N_TRANSMISSION_SIGNATURES}};
+use crate::{blockchain::{chain_shard::ChainShard, TrimmableChain}, primitives::block::BlockHeader, protocol::reputation::{block_worth_scaling_fn, BLOCK_STAMP_SCALING, N_TRANSMISSION_SIGNATURES}};
 
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]

@@ -3,7 +3,7 @@ use std::{collections::{HashMap, HashSet, VecDeque}, fmt::Debug, marker::Phantom
 use serde::{Deserialize, Serialize};
 use slotmap::{new_key_type, SlotMap};
 
-use crate::{hashing::{DefaultHash, HashFunction, Hashable}, proofs::generate_proof_of_inclusion, types::StdByteArray};
+use crate::{hashing::{DefaultHash, HashFunction, Hashable}, types::StdByteArray};
 new_key_type! { pub struct NodeKey; }
 
 /// In order to store account states, a Merkle Patricia Trie will be used
@@ -82,7 +82,7 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
         if !self.roots.is_empty() {
             return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "Genesis already exists"));
         }
-        let mut genesis_root = TrieNode::<V>::new();
+        let genesis_root = TrieNode::<V>::new();
         let genesis_key = self.nodes.insert(genesis_root);
 
         self._insert(key, value, genesis_key).expect("Failed to insert genesis node");
@@ -95,7 +95,7 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
 
     fn _insert(&mut self, key: K, value: V, root: NodeKey) -> Result<(), std::io::Error>{
         let nibbles = to_nibbles(&key);
-        let value = bincode::serialize(&value).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let value = bincode::serialize(&value).map_err(std::io::Error::other)?;
 
         let mut current_node_key = root;
         for nibble in nibbles {
@@ -179,7 +179,7 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
         while let Some(current_key) = visit_queue.pop_front(){
             let node = self.nodes.get(*current_key).unwrap();
             if let Some(value) = &node.value{
-                values.push(bincode::deserialize(&value).unwrap());
+                values.push(bincode::deserialize(value).unwrap());
             }
             for child in node.children.iter(){
                 if let Some(child_key) = child{
@@ -266,7 +266,7 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
             }
             // update the value in the new branch
             let current_node = self.nodes.get_mut(current_node_key).unwrap();
-            current_node.value = Some(bincode::serialize(&value).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?);
+            current_node.value = Some(bincode::serialize(&value).map_err(std::io::Error::other)?);
         }
 
         let new_root_hash = self.get_hash_for(new_root_key, &mut DefaultHash::new()).unwrap();
@@ -427,7 +427,7 @@ mod tests {
         assert!(valid, "Proof verification failed");
 
         let bin = bincode::serialize(&account1).unwrap();
-        println!("Account1 bin: {:?}", bin);
+        println!("Account1 bin: {bin:?}");
         let valid2 = proof.verify(
             bin, 
             trie.get_hash_for(*root_key, &mut DefaultHash::new()).unwrap(),

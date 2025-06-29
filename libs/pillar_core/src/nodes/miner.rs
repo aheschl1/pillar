@@ -24,8 +24,7 @@ impl Miner{
                 node,
             })
         }else{
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            Err(std::io::Error::other(
                 "miner_pool pool not found",
             ))
         }

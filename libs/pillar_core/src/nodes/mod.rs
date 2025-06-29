@@ -18,7 +18,7 @@ mod tests {
     use crate::{
         accounting::wallet::Wallet, nodes::{
             miner::{Miner, MAX_TRANSACTION_WAIT_TIME}, node::NodeState, peer::Peer
-        }, persistence::database::{Datastore, EmptyDatastore, GenesisDatastore}, primitives::{messages::Message, pool::MinerPool, transaction::Transaction}, protocol::{difficulty::get_reward_from_depth_and_stampers, peers::discover_peers, transactions::submit_transaction}
+        }, persistence::database::GenesisDatastore, primitives::{messages::Message, pool::MinerPool, transaction::Transaction}, protocol::{difficulty::get_reward_from_depth_and_stampers, peers::discover_peers, transactions::submit_transaction}
     };
 
     use super::node::Node;
@@ -34,7 +34,7 @@ mod tests {
     fn setup() {
         // === Setup folder structure under ./test_output/{timestamp} ===
         let timestamp = Local::now().format("%d_%H-%M-%S").to_string();
-        let log_dir = format!("./test_output/{}", timestamp);
+        let log_dir = format!("./test_output/{timestamp}");
         std::fs::create_dir_all(&log_dir).expect("failed to create log directory");
 
         let filename = format!("{log_dir}/output.log");
@@ -1261,7 +1261,7 @@ mod tests {
         // submit 50 transactions - first 10 from node a to node b
 
         for i in 0..10 {
-            println!("Submitting transaction {} from A to B", i);
+            println!("Submitting transaction {i} from A to B");
             let _ = submit_transaction(
                 &mut node_a,
                 &mut wallet_a,
@@ -1348,7 +1348,7 @@ mod tests {
         // now, b will send some of its money to a
 
         for i in 0..10 {
-            println!("Submitting transaction {} from B to A", i);
+            println!("Submitting transaction {i} from B to A");
             let _ = submit_transaction(
                 &mut miner_b.node,
                 &mut wallet_b,

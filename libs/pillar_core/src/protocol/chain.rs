@@ -2,7 +2,6 @@ use std::{collections::{HashMap, HashSet}};
 
 use pillar_crypto::{hashing::{DefaultHash, Hashable}, merkle::generate_tree, types::StdByteArray};
 use rand::{rng, seq::{IteratorRandom}};
-use tokio::time::timeout;
 use tracing::{instrument, warn};
 
 use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, nodes::{node::{Broadcaster, Node}, peer::Peer}, primitives::{block::{Block, BlockTail}, errors::{BlockValidationError, QueryError}, messages::Message, transaction::Transaction}};
@@ -18,14 +17,14 @@ async fn query_block_from_peer(
     // send the block request to the peer
     // TODO better error handling
     let response = peer.communicate(&Message::BlockRequest(hash), initializing_peer).await.map_err(
-        |e| QueryError::IOError(e)
+        QueryError::IOError
     )?;
     let block = match response {
         Message::BlockResponse(Some(block)) => {
             // we need to verify that the header validates
             // and that the transactions are the same as declared
             block.header.validate(hash, &mut DefaultHash::new()).map_err(
-                |e| QueryError::BadBlock(e)
+                QueryError::BadBlock
             )?;
             // verify merkle root
             let tree = generate_tree(
@@ -33,7 +32,7 @@ async fn query_block_from_peer(
                 &mut DefaultHash::new()
             );
 
-            if !tree.is_ok() || !tree.as_ref().unwrap().get_root_hash().is_some(){
+            if tree.is_err() || tree.as_ref().unwrap().get_root_hash().is_none(){
                 warn!("Merkle tree generation failed: {:?}", tree.err());
                 return Err(QueryError::BadBlock(BlockValidationError::MalformedBlock("Merkle tree generation failed".to_string())));
             }
@@ -98,7 +97,7 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, Que
 pub async fn dicover_chain(mut node: Node) -> Result<(), QueryError> {
     // get the peers first
     discover_peers(&mut node).await.map_err(
-        |e| QueryError::IOError(e)
+        QueryError::IOError
     )?;
     // broadcast the chain shard request to all peers
     let mut peers = node.inner.peers.lock().await;
@@ -106,11 +105,11 @@ pub async fn dicover_chain(mut node: Node) -> Result<(), QueryError> {
     for (_, peer) in peers.iter_mut() {
         // send the chain shard request to the peer
         let response = peer.communicate(&Message::ChainShardRequest, &(node.clone().into())).await
-            .map_err(|e| QueryError::IOError(e))?;
+            .map_err(QueryError::IOError)?;
         if let Message::ChainShardResponse(shard) = response {
             // add the shard to the chain   
             shard.validate().map_err(
-                |e| QueryError::BadBlock(e)
+                QueryError::BadBlock
             )?;
             chain_shards.push(shard);
             // TODO perhaps blacklist the peer
@@ -175,7 +174,7 @@ pub async fn sync_chain(node: Node) -> Result<(), QueryError> {
     let request = Message::ChainSyncRequest(leaves.clone());
     // broadcast the request
     let responses = node.broadcast(&request).await.map_err(
-        |e| QueryError::IOError(e)
+        QueryError::IOError
     )?;
     if responses.is_empty() {
         tracing::info!("No responses to chain sync request, skipping sync");
@@ -240,7 +239,7 @@ pub async fn sync_chain(node: Node) -> Result<(), QueryError> {
             for block in to_add.iter().rev(){
                 // verifies again
                 chain.add_new_block(block.clone()).map_err(
-                    |e| QueryError::BadBlock(e)
+                    QueryError::BadBlock
                 )?;
             }
         }

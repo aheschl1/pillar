@@ -139,9 +139,7 @@ impl Chain {
         };
 
         
-        if let Err(err) = valid{
-            return Err(err);
-        }
+        valid?;
 
         tracing::info!("Block is valid - Continuing");
         Ok(())
@@ -280,8 +278,8 @@ impl Chain {
 
     /// Verifies the validity of a block, including its transactions and metadata.
     pub fn verify_block(&mut self, block: &Block) -> Result<(), BlockValidationError> {
-        let _ = self.validate_block(block)?;
-        let _ = self.validate_transaction_set(
+        self.validate_block(block)?;
+        self.validate_transaction_set(
             &block.transactions, 
             self.blocks.get(&block.header.previous_hash).unwrap().header.state_root.unwrap()
         )?;
