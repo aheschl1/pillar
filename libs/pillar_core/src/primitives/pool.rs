@@ -8,9 +8,7 @@ use super::{block::Block, transaction::Transaction};
 #[derive(Clone)]
 pub struct MinerPool {
     // receiver channel
-    transaction_receiver: Receiver<Transaction>,
-    // sender channel
-    transaction_sender: Sender<Transaction>,
+    transactions_queue: Arc<lfqueue::UnboundedQueue<Transaction>>,
     // proposition blocks
     block_propositions_queue: Arc<lfqueue::UnboundedQueue<Block>>,
     // ready blocks
@@ -25,13 +23,12 @@ pub struct MinerPool {
 /// Rn, FIFO
 impl MinerPool{
     pub fn new() -> Self {
-        let (transaction_sender, transaction_receiver) = flume::unbounded();
         let (mine_abort_sender, mine_abort_receiver) = flume::unbounded();
+        let transactions_queue = Arc::new(lfqueue::UnboundedQueue::new());
         let block_propositions_queue = Arc::new(lfqueue::UnboundedQueue::new());
         let mine_ready_blocks_queue = Arc::new(lfqueue::UnboundedQueue::new());
         MinerPool {
-            transaction_receiver,
-            transaction_sender,
+            transactions_queue,
             block_propositions_queue,
             mine_ready_blocks_queue,
             mine_abort_sender,
@@ -40,18 +37,15 @@ impl MinerPool{
     }
 
     /// Adds a transaction to the pool
-    pub async fn add_transaction(&self, transaction: Transaction) {
+    pub fn add_transaction(&self, transaction: Transaction) {
         // send the transaction to the receiver
-        self.transaction_sender.send_async(transaction).await.unwrap();
+        self.transactions_queue.enqueue(transaction);
     }
 
     /// Returns the transaction at the front of the pool
-    pub async fn pop_transaction(&self) -> Option<Transaction> {
+    pub fn pop_transaction(&self) -> Option<Transaction> {
         // receive the transaction from the sender
-        match self.transaction_receiver.recv_async().await {
-            Ok(transaction) => Some(transaction),
-            Err(_) => None,
-        }
+        self.transactions_queue.dequeue()
     }
 
     /// Returns the block at the front of the pool

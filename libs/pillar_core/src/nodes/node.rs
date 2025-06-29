@@ -300,7 +300,7 @@ impl Node {
                 if let Some(ref pool) = self.miner_pool{
                     if state.is_consume() {
                         tracing::info!("Adding transaction to mining pool.");
-                        pool.add_transaction(*transaction).await;
+                        pool.add_transaction(*transaction);
                     }
                 }
                 // to be broadcasted

@@ -55,12 +55,8 @@ async fn monitor_transaction_pool(miner: Miner) {
     let mut last_polled_at: Option<u64> = None;
     loop {
         tracing::trace!("waiting for transactions to mine...");
-        let transaction = tokio::time::timeout(
-            tokio::time::Duration::from_secs(MAX_TRANSACTION_WAIT_TIME), 
-            miner.node.miner_pool.as_ref().unwrap().pop_transaction()
-        ).await.unwrap_or(None);
 
-        if let Some(transaction) = transaction{
+        if let Some(transaction) = miner.node.miner_pool.as_ref().unwrap().pop_transaction(){
             transactions.push(transaction);
             // grab unix timestamp
             last_polled_at = Some(std::time::SystemTime::now()
@@ -100,6 +96,7 @@ async fn monitor_transaction_pool(miner: Miner) {
             last_polled_at = None;
             transactions = vec![];
         }
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }
 }
 
