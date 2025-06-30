@@ -60,27 +60,27 @@ mod tests {
             .try_init();
 
         // write this code to bytes_parser.py
-        let code = "
-total_bytes = 0
+//         let code = "
+// total_bytes = 0
 
-with open(\"output.log\", \"r\") as f:
-    for line in f:
-        if \"Sent\" in line and \"bytes to peer\" in line:
-            # Extract the number between \"Sent \" and \" bytes\"
-            try:
-                start = line.index(\"Sent \") + len(\"Sent \")
-                end = line.index(\" bytes\", start)
-                num_str = line[start:end].strip()
-                total_bytes += int(num_str)
-            except ValueError:
-                # Skip lines that don't match properly
-                continue
+// with open(\"output.log\", \"r\") as f:
+//     for line in f:
+//         if \"Sent\" in line and \"bytes to peer\" in line:
+//             # Extract the number between \"Sent \" and \" bytes\"
+//             try:
+//                 start = line.index(\"Sent \") + len(\"Sent \")
+//                 end = line.index(\" bytes\", start)
+//                 num_str = line[start:end].strip()
+//                 total_bytes += int(num_str)
+//             except ValueError:
+//                 # Skip lines that don't match properly
+//                 continue
 
-print(\"Total bytes sent to peer:\", total_bytes)
-        ";
-        // write the code to output_folder to bytes_parser.py
-        let bytes_parser_path = format!("{log_dir}/bytes_parser.py");
-        std::fs::write(bytes_parser_path, code).expect("failed to write bytes parser script");
+// print(\"Total bytes sent to peer:\", total_bytes)
+//         ";
+//         // write the code to output_folder to bytes_parser.py
+//         let bytes_parser_path = format!("{log_dir}/bytes_parser.py");
+//         std::fs::write(bytes_parser_path, code).expect("failed to write bytes parser script");
     }
 
     async fn create_empty_node_genisis(
@@ -1541,6 +1541,72 @@ print(\"Total bytes sent to peer:\", total_bytes)
         let header = channel.unwrap().recv_async().await.expect("Issue with callback");
         let is_provable = get_transaction_proof(&mut node_a, &transaction, &header).await;
         assert!(is_provable);
+
+    }
+
+    #[tokio::test]
+    async fn test_invalid_transaction_not_included(){
+        let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 14));
+        let port_a = 8004;
+        let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 15));
+        let port_b = 8005;
+        let (node_b, wallet_b) = create_empty_node_genisis(
+            ip_address_b,
+            port_b,
+            vec![],
+            true,
+            Some(MinerPool::new()),
+        )
+        .await;
+        let (mut node_a, mut wallet_a) = create_empty_node_genisis(
+            ip_address_a,
+            port_a,
+            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
+            true,
+            None,
+        )
+        .await;
+
+        let mut miner_b = Miner::new(node_b.clone()).unwrap();
+        miner_b.serve().await;
+        node_a.serve().await;
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await; // wait for the nodes to connect
+        
+        // discover peers for a
+        discover_peers(&mut node_a).await.unwrap();
+        
+        // submit a transaction with an invalid signature
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_secs();
+        
+        let _ = submit_transaction(
+            &mut node_a, 
+            &mut wallet_a, 
+            wallet_b.address, 
+            1, 
+            false, 
+            Some(timestamp)
+        ).await;
+        // pause for a while, then check the chains. should be empty
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        // check the chain of b
+        let chain_b = miner_b.node.inner.chain.lock().await;
+        assert!(chain_b.as_ref().unwrap().depth == 0); // 1 blocks
+        assert!(chain_b.as_ref().unwrap().blocks.len() == 1); // 1 blocks
+        // check the chain of a
+        let chain_a = node_a.inner.chain.lock().await;
+        assert!(chain_a.as_ref().unwrap().depth == 0); // 1 blocks
+        assert!(chain_a.as_ref().unwrap().blocks.len() == 1); // 1 blocks
+        // make sure the broadcasts are greater than 2
+        let already_b = node_b.inner.broadcasted_already.lock().await;
+        assert_eq!(already_b.len(), 1);
+        drop(already_b);
+        let already_a = node_a.inner.broadcasted_already.lock().await;
+        assert_eq!(already_a.len(), 1);
+        drop(already_a);
+
 
     }
 }

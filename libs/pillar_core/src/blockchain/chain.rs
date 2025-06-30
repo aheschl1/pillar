@@ -238,12 +238,11 @@ impl Chain {
     /// Validates an individual transaction for correctness.
     ///
     /// Checks:
-    /// 1. The transaction is signed by the sender.
-    /// 2. The transaction hash is valid.
-    /// 3. The sender has sufficient balance.
-    /// 4. The nonce matches the sender's expected value.
+    /// 1. Signature validity.
+    /// 2. Hash integrity.
+    /// 3. Sufficient balance for the transaction amount.
     #[instrument(skip_all, fields(transaction = ?transaction.hash))]
-    fn validate_transaction(&self, transaction: &Transaction, state_root: StdByteArray) -> Result<(), BlockValidationError> {
+    pub(crate) fn validate_transaction(&self, transaction: &Transaction, state_root: StdByteArray) -> Result<(), BlockValidationError> {
         let sender = transaction.header.sender;
         let signature = transaction.signature;
         // check for signature

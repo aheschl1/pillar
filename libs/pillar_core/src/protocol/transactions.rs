@@ -3,7 +3,7 @@ use pillar_crypto::{hashing::{DefaultHash, Hashable}, proofs::{verify_proof_of_i
 use sled::transaction;
 use tracing::instrument;
 
-use crate::{accounting::{account::TransactionStub, wallet::Wallet}, nodes::node::{Broadcaster, Node}, primitives::{block::BlockHeader, messages::Message, transaction::Transaction}};
+use crate::{accounting::{account::TransactionStub, wallet::Wallet}, nodes::node::{Broadcaster, Node}, primitives::{block::BlockHeader, errors::QueryError, messages::Message, transaction::Transaction}};
 
 /// Submit a transaction to the network
 /// 
@@ -26,7 +26,7 @@ pub async fn submit_transaction(
     amount: u64,
     register_completion_callback: bool,
     timestamp: Option<u64>
-) -> Result<(Option<Receiver<BlockHeader>>, Transaction), std::io::Error> {
+) -> Result<(Option<Receiver<BlockHeader>>, Transaction), QueryError> {
     let nonce = wallet.nonce; wallet.nonce += 1;
 
     let timestamp = match timestamp{
@@ -54,7 +54,10 @@ pub async fn submit_transaction(
     let message = Message::TransactionBroadcast(transaction);
     // we do not want this to wait in broadcast queue, so we will lock it out immediately
     node.inner.broadcasted_already.lock().await.insert(message.hash(&mut DefaultHash::new()).unwrap());
-    let results = node.broadcast(&message).await?;
+    let results = node.broadcast(&message).await.map_err(|e| {
+        tracing::error!("Failed to broadcast transaction: {}", e);
+        QueryError::NoReply
+    })?;
     // check if the transaction was acknowledged at least once
     let ok = results.iter().any(|x| {
         matches!(x, Message::TransactionAck)
@@ -69,7 +72,7 @@ pub async fn submit_transaction(
             }
         },
         false => {
-            Err(std::io::Error::other("Transaction not acknowledged"))
+            Err(QueryError::NoReply)
         }
     }
 }

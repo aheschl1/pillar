@@ -56,6 +56,18 @@ async fn monitor_transaction_pool(miner: Miner) {
         tracing::trace!("waiting for transactions to mine...");
 
         if let Some(transaction) = miner.node.miner_pool.as_ref().unwrap().pop_transaction(){
+            let chain = miner.node.inner.chain.lock().await;
+            if let Some(chain) = chain.as_ref() {
+                // check if the transaction is valid
+                if !chain.validate_transaction(&transaction, chain.get_state_root().unwrap()).is_ok() {
+                    tracing::warn!("Invalid transaction received: {:?}", transaction);
+                    continue; // skip invalid transactions
+                }
+            } else {
+                tracing::error!("Chain is not initialized, cannot validate transaction.");
+                continue; // skip if chain is not initialized
+            }
+            drop(chain); // cause i feel like it
             transactions.push(transaction);
             // grab unix timestamp
             last_polled_at = Some(std::time::SystemTime::now()
@@ -87,10 +99,6 @@ async fn monitor_transaction_pool(miner: Miner) {
             // let address = *self.node.public_key;
             let pool = miner.node.miner_pool.clone();
             pool.as_ref().unwrap().add_block_proposition(block);
-            // tokio::spawn(async move {
-            //     mine(&mut block, address, DefaultHash::new()).await;
-            //     // send it back to the node
-            // });
             // reset for next mine
             last_polled_at = None;
             transactions = vec![];
