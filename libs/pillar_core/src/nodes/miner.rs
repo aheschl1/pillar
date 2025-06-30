@@ -1,7 +1,7 @@
 use pillar_crypto::hashing::DefaultHash;
 use tracing::instrument;
 
-use crate::{primitives::{block::{Block, BlockTail}, messages::Message}, protocol::pow::mine};
+use crate::{accounting::account::Account, primitives::{block::{Block, BlockTail}, messages::Message}, protocol::{pow::mine, reputation}};
 
 use super::{node::{Broadcaster, Node}};
 
@@ -124,10 +124,26 @@ async fn monitor_block_pool(miner: Miner) {
                 .state_manager
                 .branch_from_block(&block, prev_block);
 
+            let previous_block = chain.get_block(&block.header.previous_hash).expect("Previous block must exist");
+            let state_manager = &chain.state_manager;
+            let stampers = block.header.tail.get_stampers();
+            // get all reputations according to previous block
+            let reputations = stampers.iter().map(|stamper| {
+                let history = state_manager.get_account(stamper, previous_block.header.state_root.unwrap())
+                    .unwrap_or(Account::new(*stamper, 0)).history;
+                if let Some(history) = history {
+                    // compute based on new block
+                    history.compute_reputation(block.header.timestamp)
+                } else {
+                    0.0 // no history, no reputation
+                }
+            }).collect();
+            drop(chain_lock); // drop the lock before mining
             mine(
                 &mut block, 
                 miner.node.inner.public_key,
                 state_root,
+                reputations,
                 Some(miner.node.miner_pool.as_ref().unwrap().mine_abort_receiver.clone()),
                 DefaultHash::new()
             ).await;
@@ -142,7 +158,6 @@ async fn monitor_block_pool(miner: Miner) {
         }
     }
 }
-
 
 #[cfg(test)]
 mod test{
@@ -187,7 +202,7 @@ mod test{
             1, None, &mut hasher);
 
         // mine the block
-        mine(&mut block, miner.node.inner.public_key, [8; 32], None, hasher).await;
+        mine(&mut block, miner.node.inner.public_key, [8; 32], vec![], None, hasher).await;
         
         assert!(block.header.nonce > 0);
         assert!(block.header.miner_address.is_some());

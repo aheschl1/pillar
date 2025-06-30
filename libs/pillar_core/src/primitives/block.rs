@@ -9,7 +9,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::{serde_as, Bytes};
 
 use crate::primitives::errors::BlockValidationError;
-use crate::protocol::difficulty::get_difficulty_from_depth;
+use crate::protocol::difficulty::get_base_difficulty_from_depth;
 use crate::protocol::pow::is_valid_hash;
 use crate::protocol::reputation::N_TRANSMISSION_SIGNATURES;
 use super::transaction::Transaction;
@@ -234,8 +234,8 @@ impl BlockHeader {
         if expected_hash != self.hash(hasher).unwrap() {
             return Err(BlockValidationError::HashMismatch(expected_hash, self.hash(hasher).unwrap()));
         }
-        if !is_valid_hash(get_difficulty_from_depth(self.depth), &self.hash(hasher).unwrap()) {
-            return Err(BlockValidationError::DifficultyMismatch(get_difficulty_from_depth(self.depth), *self));
+        if !is_valid_hash(get_base_difficulty_from_depth(self.depth), &self.hash(hasher).unwrap()) {
+            return Err(BlockValidationError::DifficultyMismatch(get_base_difficulty_from_depth(self.depth), *self));
         }
         // check that all the signatures work in the tail
         let tail = &mut self.tail.clone();

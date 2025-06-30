@@ -104,7 +104,8 @@ impl NodeHistory{
     }
 
     pub fn compute_mining_reputation(
-        &self
+        &self,
+        current_time: u64
     ) -> f64{
         // we have the blocks mined by the miner
         // reputation will be built on the number of blocks mined and the number of transactions in the blocks
@@ -114,13 +115,14 @@ impl NodeHistory{
         for shard in self.blocks_mined.iter() {
             let n: f64 = N_TRANSMISSION_SIGNATURES as f64;
             let stamp_boost_fn = (shard.n_stamps as f64 + n) / n; // extra reward for mining when there are stamps
-            reputation += block_worth_scaling_fn(shard.timestamp) * stamp_boost_fn;
+            reputation += block_worth_scaling_fn(shard.timestamp, current_time) * stamp_boost_fn;
         }
         reputation
     }
 
     pub fn compute_block_stamp_reputation(
-        &self
+        &self,
+        current_time: u64
     ) -> f64{
         // we have the blocks mined by the miner
         // reputation will be built on the number of blocks mined and the number of transactions in the blocks
@@ -128,7 +130,7 @@ impl NodeHistory{
         // a brand new block is worth 1 reputation - it reduces exponentially over time
         let mut reputation: f64 = 0.0;
         for block in self.blocks_stamped.iter() {
-            reputation += block_worth_scaling_fn(block.timestamp)*BLOCK_STAMP_SCALING;
+            reputation += block_worth_scaling_fn(block.timestamp, current_time)*BLOCK_STAMP_SCALING;
         }
         reputation
     }
@@ -136,10 +138,11 @@ impl NodeHistory{
     /// Compute the reputation of the node
     /// This is the sum of the mining reputation and the stamping reputation
     pub fn compute_reputation(
-        &self
+        &self,
+        current_time: u64
     ) -> f64{
-        let mining_reputation = self.compute_mining_reputation();
-        let stamping_reputation = self.compute_block_stamp_reputation();
+        let mining_reputation = self.compute_mining_reputation(current_time);
+        let stamping_reputation = self.compute_block_stamp_reputation(current_time);
         // the reputation is the sum of the two
         mining_reputation + stamping_reputation
     }

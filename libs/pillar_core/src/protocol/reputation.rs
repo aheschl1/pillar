@@ -20,12 +20,10 @@ pub const N_TRANSMISSION_SIGNATURES: usize = 10;
 /// 
 /// # Arguments
 /// * `block_time` - the time of mining in seconds since epoch
-pub fn block_worth_scaling_fn(block_time: u64) -> f64 {
+/// * `now` - the current time in seconds since epoch
+pub fn block_worth_scaling_fn(block_time: u64, current_time: u64) -> f64 {
     // days since epoch
-    let current_time = (std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as f64) / 60.0 / 60.0 / 24.0;
+    let current_time = current_time as f64 / 60.0 / 60.0 / 24.0;
     
     let block_time = block_time as f64 / 60.0 / 60.0 / 24.0;
 
@@ -56,7 +54,7 @@ pub fn nth_percentile_peer(lower_n: f32, upper_n: f32, chain: &Chain) -> Vec<Std
             return (a.address, 0.0);
         }
         let rep = rep.clone().unwrap();
-        (a.address, rep.compute_reputation())
+        (a.address, rep.compute_reputation(chain.get_top_block().unwrap().header.timestamp))
     }).collect::<Vec<_>>();
     reputations.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap()); // this is ordering in ascending order
     let lower_n = (lower_n * reputations.len() as f32).round() as usize;
@@ -104,7 +102,10 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let worth = block_worth_scaling_fn(block_time);
+        let worth = block_worth_scaling_fn(
+            block_time,
+            block_time, 
+        );
         assert_eq!(worth, 1.0);
     }
 
@@ -114,7 +115,12 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as f64 - (MINING_WORTH_HALF_LIFE * 24.0 * 60.0 * 60.0);
-        let worth = block_worth_scaling_fn(block_time as u64);
+        let worth = block_worth_scaling_fn(block_time as u64, 
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        );
         assert_eq!(worth, MINING_WORTH_MAX / 2.0);
     }
 
@@ -124,7 +130,12 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as f64 + (MINING_WORTH_HALF_LIFE * 24.0 * 60.0 * 60.0);
-        let worth = block_worth_scaling_fn(block_time as u64);
+        let worth = block_worth_scaling_fn(block_time as u64, 
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        );
         assert_eq!(worth, MINING_WORTH_MAX);
     }
 
@@ -134,7 +145,12 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as f64 - (1000.0 * 24.0 * 60.0 * 60.0);
-        let worth = block_worth_scaling_fn(block_time as u64);
+        let worth = block_worth_scaling_fn(block_time as u64, 
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        );
         assert!(worth < 1e-10);
     }
 
@@ -144,7 +160,12 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as f64 - (2.0*MINING_WORTH_HALF_LIFE * 24.0 * 60.0 * 60.0);
-        let worth = block_worth_scaling_fn(block_time as u64);
+        let worth = block_worth_scaling_fn(block_time as u64, 
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        );
         assert_eq!(worth, MINING_WORTH_MAX / 4.0);
     }
 

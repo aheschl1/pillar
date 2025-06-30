@@ -597,6 +597,7 @@ mod tests {
         // miners wait 10 seconds for more transactions to come in
         println!("waiting for miner to process transactions");
         tokio::time::sleep(std::time::Duration::from_secs(MAX_TRANSACTION_WAIT_TIME)).await;
+        println!("done waiting");
         // now, by this time it should have been consumed into a block proposition.
         // this block proposition will be sent out from node_b to node_a.
         // we will check the already broadcasted messages first.
@@ -633,27 +634,36 @@ mod tests {
         let history_aa = history_aa.unwrap();
         let history_ab = history_ab.unwrap();
 
-        drop(chain_a);
         // check reputations.
 
         assert_eq!(history_ba.n_blocks_mined(), 0); // 0 blocks mined
         assert_eq!(history_ba.n_blocks_stamped(), 1); // 0 blocks stamped
-        let b_a = history_ba.compute_reputation();
+        let b_a = history_ba.compute_reputation(
+            chain_a.as_ref().unwrap().get_top_block().unwrap().header.timestamp,
+        );
 
         assert_eq!(history_bb.n_blocks_mined(), 1); // 1 block mined
         assert_eq!(history_bb.n_blocks_stamped(), 1); // 0 blocks stamped
-        let b_b = history_bb.compute_reputation();
+        let b_b = history_bb.compute_reputation(
+            chain_a.as_ref().unwrap().get_top_block().unwrap().header.timestamp,
+        );
 
         assert_eq!(history_aa.n_blocks_mined(), 0); // 0 blocks mined
         assert_eq!(history_aa.n_blocks_stamped(), 1); // 0 blocks stamped
-        let a_a = history_aa.compute_reputation();
+        let a_a = history_aa.compute_reputation(
+            chain_a.as_ref().unwrap().get_top_block().unwrap().header.timestamp,
+        );
         assert_eq!(history_ab.n_blocks_mined(), 1); // 1 block mined
         assert_eq!(history_ab.n_blocks_stamped(), 1); // 0 blocks stamped
-        let a_b = history_ab.compute_reputation();
+        let a_b = history_ab.compute_reputation(
+            chain_a.as_ref().unwrap().get_top_block().unwrap().header.timestamp,
+        );
 
         assert!(a_a == b_a);
         assert!(a_b == b_b);
         assert!(a_b > a_a);
+
+        drop(chain_a);
 
         // check miner got paid
         let chain_b = node_b.inner.chain.lock().await;
@@ -796,20 +806,27 @@ mod tests {
 
         let history_aa = history_aa.unwrap();
         let history_ab = history_ab.unwrap();
-        drop(chain_a);
         // check reputations.
         assert_eq!(history_ba.n_blocks_mined(), 0); // 0 blocks mined
         assert_eq!(history_ba.n_blocks_stamped(), 2); // 2 blocks stamped
-        let b_a = history_ba.compute_reputation();
+        let b_a = history_ba.compute_reputation(
+            chain_a.as_ref().unwrap().get_top_block().unwrap().header.timestamp,
+        );
         assert_eq!(history_bb.n_blocks_mined(), 2); // 2 blocks mined
         assert_eq!(history_bb.n_blocks_stamped(), 2); // 2 blocks stamped
-        let b_b = history_bb.compute_reputation();
+        let b_b = history_bb.compute_reputation(
+            chain_a.as_ref().unwrap().get_top_block().unwrap().header.timestamp,
+        );
         assert_eq!(history_aa.n_blocks_mined(), 0); // 0 blocks mined
         assert_eq!(history_aa.n_blocks_stamped(), 2); // 2 blocks stamped
-        let a_a = history_aa.compute_reputation();
+        let a_a = history_aa.compute_reputation(
+            chain_a.as_ref().unwrap().get_top_block().unwrap().header.timestamp,
+        );
         assert_eq!(history_ab.n_blocks_mined(), 2); // 2 blocks mined
         assert_eq!(history_ab.n_blocks_stamped(), 2); // 2 blocks stamped
-        let a_b = history_ab.compute_reputation();
+        let a_b = history_ab.compute_reputation(
+            chain_a.as_ref().unwrap().get_top_block().unwrap().header.timestamp,
+        );
         assert!(a_a == b_a);
         assert!(a_b == b_b);
         assert!(a_b > a_a); // B has more reputation than A
@@ -879,15 +896,18 @@ mod tests {
         assert_eq!(ablocks[0].hash.unwrap(), cblocks[0].hash.unwrap(),);
         assert_eq!(ablocks[1].hash.unwrap(), cblocks[1].hash.unwrap(),);
         drop(chain_c);
-        drop(chain_a);
         assert!(node_c.inner.state.lock().await.clone() == NodeState::Serving);
         // make sure reputations are correct
         assert_eq!(history_a.n_blocks_mined(), 0); // 0 blocks mined
         assert_eq!(history_a.n_blocks_stamped(), 1); // 2 blocks stamped
-        let c_a = history_a.compute_reputation();
+        let c_a = history_a.compute_reputation(
+            chain_a.as_ref().unwrap().get_top_block().unwrap().header.timestamp,
+        ); // compute based on newest block
         assert_eq!(history_b.n_blocks_mined(), 1); // 2 blocks mined
         assert_eq!(history_b.n_blocks_stamped(), 1); // 2 blocks stamped
-        let c_b = history_b.compute_reputation();
+        let c_b = history_b.compute_reputation(
+            chain_a.as_ref().unwrap().get_top_block().unwrap().header.timestamp,
+        );
         assert!(c_a < c_b);
     }
 
@@ -1606,7 +1626,5 @@ mod tests {
         let already_a = node_a.inner.broadcasted_already.lock().await;
         assert_eq!(already_a.len(), 1);
         drop(already_a);
-
-
     }
 }

@@ -394,7 +394,7 @@ mod tests {
         );
         let prev_header = chain.headers.get(&block.header.previous_hash).expect("Previous block header not found");
         let state_root = chain.state_manager.branch_from_block(&block, prev_header);
-        mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
+        mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
         let result = chain.add_new_block(block);
         assert!(result.is_ok());
     }
@@ -453,7 +453,7 @@ mod tests {
             let prev_header = chain.headers.get(&block.header.previous_hash)
                 .expect("Previous block header not found");
             let state_root = chain.state_manager.branch_from_block(&block, prev_header);
-            mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
+            mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
             parent_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -477,7 +477,7 @@ mod tests {
         let prev_header = chain.headers.get(&fork_block.header.previous_hash)
             .expect("Previous block header not found");
         let state_root = chain.state_manager.branch_from_block(&fork_block, prev_header);
-        mine(&mut fork_block, sender, state_root, None, DefaultHash::new()).await;
+        mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
         chain.add_new_block(fork_block.clone()).unwrap();
 
         assert!(chain.blocks.contains_key(&fork_block.hash.unwrap()));
@@ -518,7 +518,7 @@ mod tests {
             let prev_header = chain.headers.get(&block.header.previous_hash)
                 .expect("Previous block header not found");
             let state_root = chain.state_manager.branch_from_block(&block, prev_header);
-            mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
+            mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
             parent_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -540,7 +540,7 @@ mod tests {
         let prev_header = chain.headers.get(&fork_block.header.previous_hash)
             .expect("Previous block header not found");
         let state_root = chain.state_manager.branch_from_block(&fork_block, prev_header);
-        mine(&mut fork_block, sender, state_root, None, DefaultHash::new()).await;
+        mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
         let fork_hash = fork_block.hash.unwrap();
         chain.add_new_block(fork_block).unwrap();
 
@@ -577,7 +577,7 @@ mod tests {
             let prev_header = chain.headers.get(&block.header.previous_hash)
                 .expect("Previous block header not found");
             let state_root = chain.state_manager.branch_from_block(&block, prev_header);
-            mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
+            mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -601,7 +601,7 @@ mod tests {
             let prev_header = chain.headers.get(&fork_block.header.previous_hash)
                 .expect("Previous block header not found");
             let state_root = chain.state_manager.branch_from_block(&fork_block, prev_header);   
-            mine(&mut fork_block, sender, state_root, None, DefaultHash::new()).await;
+            mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
             let hash = fork_block.hash.unwrap();
             fork_hashes.push(hash);
             chain.add_new_block(fork_block).unwrap();
@@ -662,7 +662,7 @@ mod tests {
             let prev_header = chain.headers.get(&block.header.previous_hash)
                 .expect("Previous block header not found");
             let state_root = chain.state_manager.branch_from_block(&block, prev_header);
-            mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
+            mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -688,7 +688,7 @@ mod tests {
                 let prev_header = chain.headers.get(&fork_block.header.previous_hash)
                     .expect("Previous block header not found");
                 let state_root = chain.state_manager.branch_from_block(&fork_block, prev_header);
-                mine(&mut fork_block, sender, state_root, None, DefaultHash::new()).await;
+                mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
                 parent_hash = fork_block.hash.unwrap();
                 if depth == fork_length {
                     fork_hashes.push(parent_hash);
@@ -744,7 +744,7 @@ mod tests {
             let prev_header = chain.headers.get(&block.header.previous_hash)
                 .expect("Previous block header not found");
             let state_root = chain.state_manager.branch_from_block(&block, prev_header);
-            mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
+            mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -768,7 +768,7 @@ mod tests {
             let prev_header = chain.headers.get(&fork_block.header.previous_hash)
                 .expect("Previous block header not found");
             let state_root = chain.state_manager.branch_from_block(&fork_block, prev_header);
-            mine(&mut fork_block, sender, state_root, None, DefaultHash::new()).await;
+            mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
             fork_hash = fork_block.hash.unwrap();
             chain.add_new_block(fork_block).unwrap();
         }
@@ -812,7 +812,7 @@ mod tests {
             let prev_header = chain.headers.get(&block.header.previous_hash)
                 .expect("Previous block header not found");
             let state_root = chain.state_manager.branch_from_block(&block, prev_header);
-            mine(&mut block, sender, state_root, None, DefaultHash::new()).await;
+            mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
         }
@@ -836,7 +836,7 @@ mod tests {
             let prev_header = chain.headers.get(&fork_block.header.previous_hash)
                 .expect("Previous block header not found");
             let state_root = chain.state_manager.branch_from_block(&fork_block, prev_header);
-            mine(&mut fork_block, sender, state_root, None, DefaultHash::new()).await;
+            mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
             fork_hash = fork_block.hash.unwrap();
             chain.add_new_block(fork_block).unwrap();
         }
