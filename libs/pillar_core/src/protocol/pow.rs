@@ -6,7 +6,7 @@ use pillar_crypto::{hashing::{HashFunction, Hashable}, merkle::MerkleTree, merkl
 
 use crate::{accounting::{account::Account, state::StateManager}, primitives::block::{Block, BlockHeader}};
 
-use super::difficulty::get_base_difficulty_from_depth;
+use super::difficulty::_get_base_difficulty_from_depth;
 
 pub const POR_THRESHOLD: f64 = 50f64;
 pub const POR_INCLUSION_MINIMUM: f64 = 1f64;
@@ -32,8 +32,7 @@ pub fn is_valid_hash(difficulty: u64, hash: &StdByteArray) -> bool {
 /// 
 /// # Arguments
 /// * `header` - the block header
-/// * `state_root` - the state root of the chain
-/// * `state_trie` - the state trie of the chain
+/// * `reputations` - the reputations of the stampers
 pub fn get_difficulty_for_block(
     header: &BlockHeader, 
     reputations: &Vec<f64>,
@@ -45,9 +44,9 @@ pub fn get_difficulty_for_block(
     if cummulative_reputation > POR_THRESHOLD {
         // if the cummulative reputation is above the threshold, we use the depth to determine difficulty
         // reduce the depth argument. -1 depth for every 10 reputation points
-        return get_base_difficulty_from_depth(min(1, header.depth - (cummulative_reputation / 10.0) as u64));
+        return _get_base_difficulty_from_depth(min(1, header.depth - (cummulative_reputation / 10.0) as u64));
     }
-    get_base_difficulty_from_depth(header.depth)
+    _get_base_difficulty_from_depth(header.depth)
 }
 
 pub async fn mine(
@@ -59,13 +58,15 @@ pub async fn mine(
     mut hash_function: impl HashFunction
 ){
     // the block is already pupulated
+    let difficulty = get_difficulty_for_block(&block.header, &reputations);
+
     block.header.nonce = 0;
     block.header.miner_address = Some(address);
     block.header.state_root = Some(state_root);
+    block.header.difficulty_target = Some(difficulty);
     loop {
         match block.header.hash(&mut hash_function){
             Ok(hash) => {
-                let difficulty = get_difficulty_for_block(&block.header, &reputations);
                 if is_valid_hash(difficulty, &hash) {
                     block.hash = Some(hash);
                     break;

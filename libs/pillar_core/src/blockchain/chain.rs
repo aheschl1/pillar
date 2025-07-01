@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 use crate::{
-    accounting::{account::Account, state::StateManager}, primitives::{block::{Block, BlockHeader}, errors::BlockValidationError, transaction::Transaction}, protocol::chain::get_genesis_block
+    accounting::{account::Account, state::StateManager}, primitives::{block::{Block, BlockHeader}, errors::BlockValidationError, transaction::Transaction}, protocol::{chain::get_genesis_block, pow::get_difficulty_for_block}
 };
 
 use super::TrimmableChain;
@@ -112,6 +112,30 @@ impl Chain {
             tracing::info!("Block hash is None - Failing");
             return Err(BlockValidationError::MalformedBlock("Hash is not specified".into()));
         }
+        // make sure that the declared difficulty target is correct
+        let previous_block = self.get_block(&block.header.previous_hash).
+            ok_or_else(|| BlockValidationError::MalformedBlock("Previous block not found".into()))?;
+        let state_manager = &self.state_manager;
+        let stampers = block.header.tail.get_stampers();
+        // get all reputations according to previous block
+        let reputations: Vec<f64> = stampers.iter().map(|stamper| {
+            let history = state_manager.get_account(stamper, previous_block.header.state_root.unwrap())
+                .unwrap_or(Account::new(*stamper, 0)).history;
+            if let Some(history) = history {
+                // compute based on new block
+                history.compute_reputation(block.header.timestamp)
+            } else {
+                0.0 // no history, no reputation
+            }
+        }).collect();
+
+        let expected_target = get_difficulty_for_block(&block.header, &reputations);
+
+        if block.header.difficulty_target.is_none() || expected_target != block.header.difficulty_target.unwrap() {
+            tracing::info!("Block difficulty target is invalid - Failing");
+            return Err(BlockValidationError::MalformedBlock("Difficulty target does not match".into()));
+        }
+
         if let Err(error) = block.header.validate(block.hash.unwrap(), &mut DefaultHash::new()) {
             tracing::info!("Block header is not validated - Failing");
             return Err(error);
@@ -390,6 +414,7 @@ mod tests {
             BlockTail::default().stamps,
             1,
             None,
+            None,
             &mut DefaultHash::new()
         );
         let prev_header = chain.headers.get(&block.header.previous_hash).expect("Previous block header not found");
@@ -420,6 +445,7 @@ mod tests {
             BlockTail::default().stamps,
             0,
             None,
+            None,
             &mut DefaultHash::new()
         );
         let result = chain.add_new_block(block);
@@ -448,6 +474,7 @@ mod tests {
                 BlockTail::default().stamps,
                 depth,
                 None,
+                None,
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&block.header.previous_hash)
@@ -471,6 +498,7 @@ mod tests {
             Some(sender),
             BlockTail::default().stamps,
             1,
+            None,
             None,
             &mut DefaultHash::new(),
         );
@@ -513,6 +541,7 @@ mod tests {
                 BlockTail::default().stamps,
                 depth,
                 None,
+                None,
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&block.header.previous_hash)
@@ -534,6 +563,7 @@ mod tests {
             Some(sender),
             BlockTail::default().stamps,
             1,
+            None,
             None,
             &mut DefaultHash::new(),
         );
@@ -572,6 +602,7 @@ mod tests {
                 BlockTail::default().stamps,
                 depth,
                 None,
+                None,
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&block.header.previous_hash)
@@ -595,6 +626,7 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 1,
+                None,
                 None,
                 &mut DefaultHash::new(),
             );
@@ -657,6 +689,7 @@ mod tests {
                 BlockTail::default().stamps,
                 depth,
                 None,
+                None,
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&block.header.previous_hash)
@@ -682,6 +715,7 @@ mod tests {
                     Some(sender),
                     BlockTail::default().stamps,
                     depth,
+                    None,
                     None,
                     &mut DefaultHash::new(),
                 );
@@ -739,6 +773,7 @@ mod tests {
                 BlockTail::default().stamps,
                 depth,
                 None,
+                None,
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&block.header.previous_hash)
@@ -762,6 +797,7 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 depth,
+                None,
                 None,
                 &mut DefaultHash::new(),
             );
@@ -807,6 +843,7 @@ mod tests {
                 BlockTail::default().stamps,
                 depth,
                 None,
+                None,
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&block.header.previous_hash)
@@ -830,6 +867,7 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 depth,
+                None,
                 None,
                 &mut DefaultHash::new(),
             );

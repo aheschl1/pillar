@@ -9,8 +9,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::{serde_as, Bytes};
 
 use crate::primitives::errors::BlockValidationError;
-use crate::protocol::difficulty::get_base_difficulty_from_depth;
-use crate::protocol::pow::is_valid_hash;
+use crate::protocol::pow::{get_difficulty_for_block, is_valid_hash};
 use crate::protocol::reputation::N_TRANSMISSION_SIGNATURES;
 use super::transaction::Transaction;
 
@@ -50,6 +49,7 @@ impl<'de> Deserialize<'de> for Block {
             helper.header.miner_address,
             helper.header.tail.stamps,
             helper.header.depth,
+            helper.header.difficulty_target,
             helper.header.state_root,
             &mut DefaultHash::new()
         ))
@@ -182,6 +182,8 @@ pub struct BlockHeader{
     pub miner_address: Option<StdByteArray>,
     // the depth is a depth of the block in the chain
     pub depth: u64,
+    // difficulty target of the block
+    pub difficulty_target: Option<u64>,
     // tail is the tail of the block which can contain stamps
     pub tail: BlockTail,
 }
@@ -194,7 +196,8 @@ impl BlockHeader {
         nonce: u64, timestamp: u64,
         miner_address: Option<StdByteArray>,
         tail: BlockTail,
-        depth: u64
+        depth: u64,
+        difficulty_target: Option<u64>,
     ) -> Self {
         BlockHeader {
             previous_hash,
@@ -204,7 +207,8 @@ impl BlockHeader {
             timestamp,
             miner_address,
             depth,
-            tail
+            tail,
+            difficulty_target,
         }
     }
 
@@ -234,8 +238,8 @@ impl BlockHeader {
         if expected_hash != self.hash(hasher).unwrap() {
             return Err(BlockValidationError::HashMismatch(expected_hash, self.hash(hasher).unwrap()));
         }
-        if !is_valid_hash(get_base_difficulty_from_depth(self.depth), &self.hash(hasher).unwrap()) {
-            return Err(BlockValidationError::DifficultyMismatch(get_base_difficulty_from_depth(self.depth), *self));
+        if !is_valid_hash(self.difficulty_target.unwrap(), &self.hash(hasher).unwrap()) {
+            return Err(BlockValidationError::DifficultyMismatch(self.difficulty_target.unwrap(), *self));
         }
         // check that all the signatures work in the tail
         let tail = &mut self.tail.clone();
@@ -294,6 +298,12 @@ impl Hashable for BlockHeader {
                 "State root is not set"
             ));
         }
+        if self.difficulty_target.is_none() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Difficulty target is not set"
+            ));
+        }
         hash_function.update(self.previous_hash);
         hash_function.update(self.merkle_root);
         hash_function.update(self.miner_address.unwrap());
@@ -301,6 +311,8 @@ impl Hashable for BlockHeader {
         hash_function.update(self.nonce.to_le_bytes());
         hash_function.update(self.timestamp.to_le_bytes());
         hash_function.update(self.depth.to_le_bytes());
+        hash_function.update(self.difficulty_target.unwrap().to_le_bytes());
+
         for i in 0..N_TRANSMISSION_SIGNATURES {
             hash_function.update(self.tail.stamps[i].signature);
             hash_function.update(self.tail.stamps[i].address);
@@ -320,6 +332,7 @@ impl Block {
         miner_address: Option<StdByteArray>,
         stamps: [Stamp; N_TRANSMISSION_SIGNATURES],
         depth: u64,
+        difficulty_target: Option<u64>,
         state_root: Option<StdByteArray>,
         hasher: &mut impl HashFunction,
     ) -> Self {
@@ -336,6 +349,7 @@ impl Block {
             miner_address,
             tail,
             depth,
+            difficulty_target
         );
         let hash = header.hash(hasher);
         Block {

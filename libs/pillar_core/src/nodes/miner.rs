@@ -93,6 +93,7 @@ async fn monitor_transaction_pool(miner: Miner) {
                 BlockTail::default().stamps,
                 chain.depth + 1,
                 None, // undefined state
+                None, // undefined difficulty
                 &mut DefaultHash::new()
             );
             // spawn off the mining process
@@ -165,7 +166,7 @@ mod test{
 
     use pillar_crypto::hashing::DefaultHash;
 
-    use crate::{persistence::database::GenesisDatastore, primitives::{block::{Block, BlockTail}, pool::MinerPool, transaction::Transaction}, protocol::pow::mine};
+    use crate::{persistence::database::GenesisDatastore, primitives::{block::{Block, BlockTail}, pool::MinerPool, transaction::Transaction}, protocol::{difficulty::MIN_DIFFICULTY, pow::mine}};
     use crate::nodes::miner::Miner;
     use super::Node;
 
@@ -199,7 +200,7 @@ mod test{
             previous_hash, nonce, 
             timestamp, transactions, 
             miner_address, BlockTail::default().stamps,
-            1, None, &mut hasher);
+            1, None, None, &mut hasher);
 
         // mine the block
         mine(&mut block, miner.node.inner.public_key, [8; 32], vec![], None, hasher).await;
@@ -208,6 +209,7 @@ mod test{
         assert!(block.header.miner_address.is_some());
         assert_eq!(block.header.previous_hash, previous_hash);
         assert_eq!(block.header.timestamp, timestamp);
+        assert_eq!(block.header.difficulty_target, Some(MIN_DIFFICULTY)); // assuming initial difficulty is 4
         assert!(block.hash.is_some());
     }
 }

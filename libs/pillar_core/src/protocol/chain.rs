@@ -147,6 +147,7 @@ pub fn get_genesis_block(state_root: Option<StdByteArray>) -> Block{
         Some([0; 32]),
         BlockTail::default().stamps,
         0,
+        Some(0), // difficulty target
         state_root,
         &mut DefaultHash::new()
     )
@@ -293,7 +294,7 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
             let mut chain_lock = node.inner.chain.lock().await;
             let chain = chain_lock.as_mut().unwrap();
             if chain.get_block(&block.hash.unwrap()).is_some(){
-                warn!("Block already exists in chain, skipping settlement: {:?}", block.hash.unwrap());
+                warn!("Block already exists in chain, skippiNone,ng settlement: {:?}", block.hash.unwrap());
                 continue; // block already exists, skip
             }
             // then we settle the block

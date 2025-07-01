@@ -143,6 +143,7 @@ mod tests {
                 BlockTail::default().stamps,
                 depth,
                 None,
+                None,
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&parent_hash).expect("Parent hash must exist");
@@ -165,6 +166,7 @@ mod tests {
             Some(sender),
             BlockTail::default().stamps,
             1,
+            None,
             None,
             &mut DefaultHash::new(),
         );
@@ -207,6 +209,7 @@ mod tests {
                 BlockTail::default().stamps,
                 depth,
                 None,
+                None,
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&parent_hash).expect("Parent hash must exist");
@@ -227,6 +230,7 @@ mod tests {
             Some(sender),
             BlockTail::default().stamps,
             1,
+            None,
             None,
             &mut DefaultHash::new(),
         );
@@ -265,6 +269,7 @@ mod tests {
                 BlockTail::default().stamps,
                 depth,
                 None,
+                None,
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&main_hash).expect("Parent hash must exist");
@@ -287,6 +292,7 @@ mod tests {
                 Some(sender),
                 BlockTail::default().stamps,
                 1,
+                None,
                 None,
                 &mut DefaultHash::new(),
             );
