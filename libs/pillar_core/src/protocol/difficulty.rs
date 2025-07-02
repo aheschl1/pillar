@@ -1,4 +1,4 @@
-use crate::protocol::reputation::N_TRANSMISSION_SIGNATURES;
+use crate::{accounting::account::Account, blockchain::chain::Chain, primitives::block::BlockHeader, protocol::reputation::N_TRANSMISSION_SIGNATURES};
 
 const INITIAL_BLOCK_REWARD: u64 = 10_000;
 pub const MIN_DIFFICULTY: u64 = 4; // minimum difficulty for the first 500 blocks

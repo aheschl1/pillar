@@ -1,7 +1,7 @@
 use pillar_crypto::hashing::DefaultHash;
 use tracing::instrument;
 
-use crate::{accounting::account::Account, primitives::{block::{Block, BlockTail}, messages::Message}, protocol::{pow::mine, reputation}};
+use crate::{accounting::account::Account, primitives::{block::{Block, BlockTail}, messages::Message}, protocol::{pow::mine, reputation::{self, get_current_reputations_for_stampers}}};
 
 use super::{node::{Broadcaster, Node}};
 
@@ -124,21 +124,10 @@ async fn monitor_block_pool(miner: Miner) {
             let state_root = chain
                 .state_manager
                 .branch_from_block(&block, prev_block);
-
-            let previous_block = chain.get_block(&block.header.previous_hash).expect("Previous block must exist");
-            let state_manager = &chain.state_manager;
-            let stampers = block.header.tail.get_stampers();
-            // get all reputations according to previous block
-            let reputations = stampers.iter().map(|stamper| {
-                let history = state_manager.get_account(stamper, previous_block.header.state_root.unwrap())
-                    .unwrap_or(Account::new(*stamper, 0)).history;
-                if let Some(history) = history {
-                    // compute based on new block
-                    history.compute_reputation(block.header.timestamp)
-                } else {
-                    0.0 // no history, no reputation
-                }
-            }).collect();
+            let reputations = get_current_reputations_for_stampers(
+                chain, 
+                &block.header
+            ).values().cloned().collect::<Vec<f64>>();
             drop(chain_lock); // drop the lock before mining
             mine(
                 &mut block, 

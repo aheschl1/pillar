@@ -10,6 +10,7 @@ use super::difficulty::_get_base_difficulty_from_depth;
 
 pub const POR_THRESHOLD: f64 = 50f64;
 pub const POR_INCLUSION_MINIMUM: f64 = 1f64;
+pub const POR_MINER_SHARE_DIVISOR: u64 = 2;
 
 pub fn is_valid_hash(difficulty: u64, hash: &StdByteArray) -> bool {
     // check for 'difficulty' leading 0 bits
@@ -36,7 +37,7 @@ pub fn is_valid_hash(difficulty: u64, hash: &StdByteArray) -> bool {
 pub fn get_difficulty_for_block(
     header: &BlockHeader, 
     reputations: &Vec<f64>,
-) -> u64 {
+) -> (u64, bool) {
     let cummulative_reputation: f64 = reputations.iter().filter(
         |&&rep| rep >= POR_INCLUSION_MINIMUM
     ).sum();
@@ -44,9 +45,9 @@ pub fn get_difficulty_for_block(
     if cummulative_reputation > POR_THRESHOLD {
         // if the cummulative reputation is above the threshold, we use the depth to determine difficulty
         // reduce the depth argument. -1 depth for every 10 reputation points
-        return _get_base_difficulty_from_depth(min(1, header.depth - (cummulative_reputation / 10.0) as u64));
+        return (_get_base_difficulty_from_depth(min(1, header.depth - (cummulative_reputation / 10.0) as u64)), true);
     }
-    _get_base_difficulty_from_depth(header.depth)
+    (_get_base_difficulty_from_depth(header.depth), false)
 }
 
 pub async fn mine(
@@ -58,7 +59,7 @@ pub async fn mine(
     mut hash_function: impl HashFunction
 ){
     // the block is already pupulated
-    let difficulty = get_difficulty_for_block(&block.header, &reputations);
+    let (difficulty, _) = get_difficulty_for_block(&block.header, &reputations);
 
     block.header.nonce = 0;
     block.header.miner_address = Some(address);

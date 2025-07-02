@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Debug, sync::{Arc, Mutex}};
 
 use pillar_crypto::{merkle_trie::MerkleTrie, types::StdByteArray};
 
-use crate::{accounting::account::Account, primitives::block::{Block, BlockHeader}, protocol::difficulty::get_reward_from_depth_and_stampers, reputation::history::NodeHistory};
+use crate::{accounting::account::Account, primitives::block::{Block, BlockHeader}, protocol::{difficulty::get_reward_from_depth_and_stampers, pow::{get_difficulty_for_block, POR_INCLUSION_MINIMUM, POR_MINER_SHARE_DIVISOR}, reputation::get_current_reputations_for_stampers_from_state}, reputation::history::NodeHistory};
 
 pub type ReputationMap = HashMap<StdByteArray, NodeHistory>;
 
@@ -19,6 +19,13 @@ impl Debug for StateManager {
         f.debug_struct("StateManager")
             .finish()
     }
+}
+
+fn div_up(x: u64, y: u64) -> u64 {
+    if y == 0 {
+        panic!("Division by zero");
+    }
+    (x + y - 1) / y
 }
 
 impl StateManager{
@@ -54,6 +61,16 @@ impl StateManager{
     /// This does NOT verify the block - VERIFY THE BLOCK FIRST
     /// This is called when a new block is added to the chain
     pub fn branch_from_block(&mut self, block: &Block, prev_header: &BlockHeader) -> StdByteArray{
+        // grab info on the stampers from the previous block
+        let previous_reputations = get_current_reputations_for_stampers_from_state(
+            &self,
+            prev_header,
+            &block.header,
+        );
+        let (_, por_enabled) = get_difficulty_for_block(
+            &block.header,
+            &previous_reputations.values().cloned().collect(),
+        );
         // Update the accounts from the block
         let mut state_updates: HashMap<StdByteArray, Account> = HashMap::new();
         let state_root = prev_header.state_root.expect("Previous block must have a state root");
@@ -100,16 +117,41 @@ impl StateManager{
                 state_trie.get(&miner_address, state_root).unwrap_or(Account::new(miner_address, 0))
             }
         };
-        miner_account.balance += reward;
+        miner_account.balance += if !por_enabled {reward} else {div_up(reward, POR_MINER_SHARE_DIVISOR)};
         if miner_account.history.is_none(){
             miner_account.history = Some(NodeHistory::new(miner_address));
+        }
+        // distribute POR shares if PoR is enabled
+        if por_enabled {
+            let remaining_reward = reward - div_up(reward, POR_MINER_SHARE_DIVISOR);
+            let reward_stampers: Vec<(&[u8; 32], &f64)> = previous_reputations.iter().filter(|(_, rep)| {
+                **rep >= POR_INCLUSION_MINIMUM
+            }).collect();
+
+            let stamper_reward = if reward_stampers.len() > 0 {
+                remaining_reward / reward_stampers.len() as u64
+            } else {
+                0 // no stamper, no reward
+            };
+            for (stamper, _) in reward_stampers {
+                let mut stamper_account = match state_updates.get(stamper) {
+                    Some(account) => account.clone(),
+                    None => {
+                        state_trie.get(stamper, state_root).unwrap_or(Account::new(*stamper, 0))
+                    }
+                };
+                stamper_account.balance += stamper_reward;
+                if stamper_account.history.is_none() {
+                    stamper_account.history = Some(NodeHistory::new(*stamper));
+                }
+                state_updates.insert(stamper_account.address, stamper_account);
+            }
         }
         // settle reputation
         let history = miner_account.history.as_mut().unwrap();
         history.settle_head(block.header);
 
         state_updates.insert(miner_address, miner_account);
-        // now do reputations
         for stamper in block.header.tail.get_stampers().iter(){
             let mut stamper = match state_updates.get(stamper){
                 Some(account) => account.clone(),

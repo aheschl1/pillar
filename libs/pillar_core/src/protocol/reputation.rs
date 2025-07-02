@@ -1,10 +1,10 @@
 
 use core::f64;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use pillar_crypto::types::StdByteArray;
 
-use crate::{blockchain::chain::Chain, nodes::{node::{Broadcaster, Node}, peer::Peer}, primitives::messages::Message};
+use crate::{accounting::{account::Account, state::StateManager}, blockchain::chain::Chain, nodes::{node::{Broadcaster, Node}, peer::Peer}, primitives::{block::BlockHeader, messages::Message}};
 
 const MINING_WORTH_HALF_LIFE: f64 = 8f64;
 const MINING_WORTH_MAX: f64 = 1f64;
@@ -89,6 +89,38 @@ pub async fn query_for_peers_by_reputation(node: Node, lower_n: f32, upper_n: f3
         final_response = final_response.intersection(i).cloned().collect();
     }
     Ok(final_response.iter().cloned().cloned().collect::<Vec<Peer>>()) // super sus souble clone here
+}
+
+pub fn get_current_reputations_for_stampers_from_state(
+    state_manager: &StateManager,
+    previous_header: &BlockHeader,
+    header: &BlockHeader,
+) -> HashMap<StdByteArray, f64> {
+    let stampers = header.tail.get_stampers();
+    // get all reputations according to previous block
+    stampers.iter().map(|stamper| {
+        let history = state_manager.get_account(stamper, previous_header.state_root.unwrap())
+            .unwrap_or(Account::new(*stamper, 0)).history;
+        if let Some(history) = history {
+            // compute based on new block
+            (*stamper, history.compute_reputation(header.timestamp))
+        } else {
+            (*stamper, 0.0) // no history, no reputation
+        }
+    }).collect()
+}
+
+pub fn get_current_reputations_for_stampers(
+    chain: &Chain,
+    header: &BlockHeader,
+) -> HashMap<StdByteArray, f64> {
+    let previous_block = chain.get_block(&header.previous_hash).expect("Previous block must exist");
+    let state_manager = &chain.state_manager;
+    get_current_reputations_for_stampers_from_state(
+        state_manager,
+        &previous_block.header,
+        header,
+    )
 }
 
 

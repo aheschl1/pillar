@@ -1627,4 +1627,5 @@ mod tests {
         assert_eq!(already_a.len(), 1);
         drop(already_a);
     }
+
 }
