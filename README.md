@@ -4,7 +4,7 @@
   <h1 style="margin: 0;">Pillar</h1>
 </div>
 
-Zero-trust decentralized ledger with trust layer.
+Zero-trust decentralized ledger using Proof of Reputation (PoR) with trust layer.
 
 Vision:
 
@@ -12,6 +12,8 @@ Vision:
   - The main network handles transaction through proof of work consensus
   - A second tier of the network is a rank system for external submition for arbitrary work to be done on a specific level of trust.
 - Incentive does not come through transaction fees, but rather through ranking up trust in order to be employed by paying third parties for computations
+- Custom PoR consensus mechanism to reduce environmental impact and centralization.
+- Non-mining nodes can earn rewards in the participation of the network.
 
 Currently in heavy development.
 
