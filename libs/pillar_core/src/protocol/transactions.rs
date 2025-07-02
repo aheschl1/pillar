@@ -1,6 +1,5 @@
 use flume::Receiver;
-use pillar_crypto::{hashing::{DefaultHash, Hashable}, proofs::{verify_proof_of_inclusion, MerkleProof}, signing::{SigFunction, Signable}, types::StdByteArray};
-use sled::transaction;
+use pillar_crypto::{hashing::{DefaultHash, Hashable}, proofs::verify_proof_of_inclusion, signing::{SigFunction, Signable}, types::StdByteArray};
 use tracing::instrument;
 
 use crate::{accounting::{account::TransactionStub, wallet::Wallet}, nodes::node::{Broadcaster, Node}, primitives::{block::BlockHeader, errors::QueryError, messages::Message, transaction::Transaction}};
@@ -87,8 +86,8 @@ pub async fn get_transaction_proof(node: &mut Node, transaction: &Transaction, h
     for (i, result) in results.iter().enumerate() {
         if let Message::TransactionProofResponse(proof) = result {
             if verify_proof_of_inclusion(
-                transaction.clone(),
-                &proof,
+                *transaction,
+                proof,
                 header.merkle_root,
                 &mut DefaultHash::new()
             ){

@@ -171,7 +171,7 @@ pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
 #[instrument(skip_all)]
 async fn send_error_message(stream: &mut TcpStream, e: impl std::error::Error) {
     // writye message size
-    let serialized = serialize(&Message::Error(e.to_string())).unwrap();
+    let serialized = serialize(Message::Error(e.to_string())).unwrap();
     let nbytes = serialized.len() as u32;
     // write the size of the message as 4 bytes - 4 bytes because we are using u32
     stream.write_all(&nbytes.to_le_bytes()[..4]).await.unwrap();

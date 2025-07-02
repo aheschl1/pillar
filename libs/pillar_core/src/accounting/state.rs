@@ -25,7 +25,7 @@ fn div_up(x: u64, y: u64) -> u64 {
     if y == 0 {
         panic!("Division by zero");
     }
-    (x + y - 1) / y
+    x.div_ceil(y)
 }
 
 impl StateManager{
@@ -63,7 +63,7 @@ impl StateManager{
     pub fn branch_from_block(&mut self, block: &Block, prev_header: &BlockHeader) -> StdByteArray{
         // grab info on the stampers from the previous block
         let previous_reputations = get_current_reputations_for_stampers_from_state(
-            &self,
+            self,
             prev_header,
             &block.header,
         );
@@ -128,7 +128,7 @@ impl StateManager{
                 **rep >= POR_INCLUSION_MINIMUM
             }).collect();
 
-            let stamper_reward = if reward_stampers.len() > 0 {
+            let stamper_reward = if !reward_stampers.is_empty() {
                 remaining_reward / reward_stampers.len() as u64
             } else {
                 0 // no stamper, no reward

@@ -7,7 +7,7 @@ mod tests {
 
     use chrono::Local;
     use pillar_crypto::{hashing::{DefaultHash, Hashable}, signing::{SigFunction, Signable}, types::StdByteArray};
-    use sled::transaction;
+    
     use tracing::level_filters::LevelFilter;
     use tracing_subscriber::{
         Layer, Registry,

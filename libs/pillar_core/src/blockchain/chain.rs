@@ -113,7 +113,7 @@ impl Chain {
             return Err(BlockValidationError::MalformedBlock("Hash is not specified".into()));
         }
         // get all reputations according to previous block
-        let reputations = get_current_reputations_for_stampers(&self, &block.header).values().cloned().collect::<Vec<f64>>();
+        let reputations = get_current_reputations_for_stampers(self, &block.header).values().cloned().collect::<Vec<f64>>();
 
         let (expected_target, is_por) = get_difficulty_for_block(&block.header, &reputations);
 

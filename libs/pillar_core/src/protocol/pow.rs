@@ -1,10 +1,10 @@
 use std::cmp::min;
 
 use flume::Receiver;
-use pillar_crypto::{hashing::{HashFunction, Hashable}, merkle::MerkleTree, merkle_trie::MerkleTrie, types::StdByteArray};
+use pillar_crypto::{hashing::{HashFunction, Hashable}, types::StdByteArray};
 
 
-use crate::{accounting::{account::Account, state::StateManager}, primitives::block::{Block, BlockHeader}};
+use crate::primitives::block::{Block, BlockHeader};
 
 use super::difficulty::_get_base_difficulty_from_depth;
 

@@ -1,7 +1,7 @@
 use pillar_crypto::hashing::DefaultHash;
 use tracing::instrument;
 
-use crate::{accounting::account::Account, primitives::{block::{Block, BlockTail}, messages::Message}, protocol::{pow::mine, reputation::{self, get_current_reputations_for_stampers}}};
+use crate::{primitives::{block::{Block, BlockTail}, messages::Message}, protocol::{pow::mine, reputation::get_current_reputations_for_stampers}};
 
 use super::{node::{Broadcaster, Node}};
 
@@ -59,7 +59,7 @@ async fn monitor_transaction_pool(miner: Miner) {
             let chain = miner.node.inner.chain.lock().await;
             if let Some(chain) = chain.as_ref() {
                 // check if the transaction is valid
-                if !chain.validate_transaction(&transaction, chain.get_state_root().unwrap()).is_ok() {
+                if chain.validate_transaction(&transaction, chain.get_state_root().unwrap()).is_err() {
                     tracing::warn!("Invalid transaction received: {:?}", transaction);
                     continue; // skip invalid transactions
                 }

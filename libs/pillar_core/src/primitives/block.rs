@@ -9,7 +9,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::{serde_as, Bytes};
 
 use crate::primitives::errors::BlockValidationError;
-use crate::protocol::pow::{get_difficulty_for_block, is_valid_hash};
+use crate::protocol::pow::is_valid_hash;
 use crate::protocol::reputation::N_TRANSMISSION_SIGNATURES;
 use super::transaction::Transaction;
 

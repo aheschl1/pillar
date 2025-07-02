@@ -42,7 +42,7 @@ impl Peer{
     #[instrument(skip(self, message, initializing_peer))]
     async fn send_initial(&mut self, message: &Message, initializing_peer: &Peer) -> Result<TcpStream, std::io::Error> {
         let mut stream = tokio::net::TcpStream::connect(format!("{}:{}", self.ip_address, self.port)).await?;
-        let serialized_message = serialize(&message);
+        let serialized_message = serialize(message);
         // always send a "peer" object of the initializing node first, and length of the message in bytes
         let declaration = Message::Declaration(initializing_peer.clone(), serialized_message.as_ref().unwrap().len() as u32);
         // serialize with bincode
