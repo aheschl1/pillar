@@ -85,7 +85,7 @@ impl NodeHistory{
 
     /// Settle a new block into the history of the node
     /// This is used when the node is a miner and has mined a new block
-    pub fn settle_head(&mut self, block: BlockHeader){
+    pub fn settle_miner(&mut self, block: BlockHeader){
         if block.miner_address.is_none() || block.miner_address.unwrap() != self.public_key{
             panic!("Block does not belong to this miner");
         }
@@ -94,7 +94,7 @@ impl NodeHistory{
 
     /// Settle a new block into the history of the node
     /// This is used when the node has stamped a new block
-    pub fn settle_tail(&mut self, head: BlockHeader){
+    pub fn settle_stampers(&mut self, head: BlockHeader){
         let stampers = head.tail.get_stampers();
         if !stampers.contains(&self.public_key){
             panic!("Block does not belong to this peer");

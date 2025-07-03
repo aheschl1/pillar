@@ -151,7 +151,7 @@ impl StateManager{
         if !por_enabled{
             // do not upgrade the trust for mining in PoR mode
             let history = miner_account.history.as_mut().unwrap();
-            history.settle_head(block.header);
+            history.settle_miner(block.header);
             state_updates.insert(miner_address, miner_account);
         }
 
@@ -166,7 +166,7 @@ impl StateManager{
                 stamper.history = Some(NodeHistory::new(stamper.address));
             }
             let history = stamper.history.as_mut().unwrap();
-            history.settle_tail(block.header);
+            history.settle_stampers(block.header);
             state_updates.insert(stamper.address, stamper);
         }
         // branch the state trie with the updates
