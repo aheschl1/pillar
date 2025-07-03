@@ -148,10 +148,13 @@ impl StateManager{
             }
         }
         // settle reputation
-        let history = miner_account.history.as_mut().unwrap();
-        history.settle_head(block.header);
+        if !por_enabled{
+            // do not upgrade the trust for mining in PoR mode
+            let history = miner_account.history.as_mut().unwrap();
+            history.settle_head(block.header);
+            state_updates.insert(miner_address, miner_account);
+        }
 
-        state_updates.insert(miner_address, miner_account);
         for stamper in block.header.tail.get_stampers().iter(){
             let mut stamper = match state_updates.get(stamper){
                 Some(account) => account.clone(),
