@@ -1,9 +1,8 @@
 use std::collections::HashSet;
 
 use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, nodes::peer::Peer, primitives::{block::{Block, BlockHeader}, transaction::{Transaction, TransactionFilter}}};
-use pillar_crypto::{hashing::{HashFunction, Hashable}, proofs::MerkleProof, types::StdByteArray};
+use pillar_crypto::{hashing::{HashFunction, Hashable}, proofs::MerkleProof, serialization::PillarSerialize, types::StdByteArray};
 use serde::{Serialize, Deserialize};
-use pillar_crypto::serialization::serialize;
 
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -58,9 +57,39 @@ pub enum Message {
     Error(String)
 }
 
+impl PillarSerialize for Message {
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        match self {
+            Message::Declaration(_, _) => {
+                bincode::serialize(&self).map_err(std::io::Error::other)
+            },
+            _ => {
+                let encoded = bincode::serialize(&self).map_err(std::io::Error::other)?;
+                let compressed = lz4_flex::compress_prepend_size(&encoded);
+                Ok(compressed)
+            }
+        }
+    }
+
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        // bincode::deserialize::<Self>(data).map_err(std::io::Error::other)
+        let decompressed = lz4_flex::decompress_size_prepended(data).map_err(std::io::Error::other);
+        match decompressed {
+            Ok(decompressed) => {
+                bincode::deserialize::<Self>(&decompressed).map_err(std::io::Error::other)
+            },
+            Err(_) => {
+                // if the decompression fails, try to deserialize without decompression
+                bincode::deserialize::<Self>(data).map_err(std::io::Error::other)
+            }
+        }
+    }
+}
+
+
 impl Hashable for Message{
     fn hash(&self, hasher: &mut impl HashFunction) -> Result<StdByteArray, std::io::Error> {
-        let bin = serialize(self).unwrap();
+        let bin = PillarSerialize::serialize_pillar(self).unwrap();
         hasher.update(bin);
         hasher.digest()
     }
@@ -81,7 +110,8 @@ pub const fn get_declaration_length(version: Versions) -> u64 {
 }
 
 mod tests{
-    use pillar_crypto::serialization::serialize_no_compress;
+
+    use pillar_crypto::serialization::PillarSerialize;
 
     use crate::{nodes::peer::Peer, primitives::messages::{get_declaration_length, Message, Versions}};
 
@@ -101,7 +131,7 @@ mod tests{
             8000), 
             1
         );
-        assert_eq!(get_declaration_length(Versions::V1V4), serialize_no_compress(declaration).unwrap().len() as u64);
-        assert_eq!(get_declaration_length(Versions::V1V6), serialize_no_compress(declarationv1v6).unwrap().len() as u64);
+        assert_eq!(get_declaration_length(Versions::V1V4), declaration.serialize_pillar().unwrap().len() as u64);
+        assert_eq!(get_declaration_length(Versions::V1V6), declarationv1v6.serialize_pillar().unwrap().len() as u64);
     }
 }

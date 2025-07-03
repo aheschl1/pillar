@@ -872,11 +872,13 @@ dependencies = [
 name = "pillar"
 version = "0.1.0"
 dependencies = [
+ "bincode",
  "chrono",
  "ctor",
  "flume",
  "futures-util",
  "lfqueue",
+ "lz4_flex",
  "pillar_crypto",
  "rand",
  "serde",

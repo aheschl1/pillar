@@ -46,7 +46,7 @@ pub async fn discover_peers(node: &mut Node) -> Result<(), std::io::Error> {
 
 #[cfg(test)]
 mod tests {
-    use pillar_crypto::serialization::{deserialize, deserialize_no_compress, serialize};
+    use pillar_crypto::serialization::PillarSerialize;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::*;
@@ -97,9 +97,9 @@ mod tests {
             // expect a peer declaration 
             let mut buffer = [0; get_declaration_length(Versions::V1V4) as usize];
             stream.read_exact(&mut buffer).await.unwrap();
-            let message: Message = deserialize_no_compress(&buffer).unwrap();
+            let message: Message = PillarSerialize::deserialize_pillar(&buffer).unwrap();
             let expected_request = Message::PeerRequest;
-            let serialized = serialize(&expected_request).unwrap();
+            let serialized = expected_request.serialize_pillar().unwrap();
             match message {
                 Message::Declaration(peer, size) => {
                     assert_eq!(peer.public_key, [1; 32]);
@@ -109,14 +109,14 @@ mod tests {
             }
             let mut buffer = vec![0; serialized.len() as usize];
             stream.read_exact(&mut buffer).await.unwrap();
-            let message: Message = deserialize(&buffer).unwrap();
+            let message: Message = PillarSerialize::deserialize_pillar(&buffer).unwrap();
             match message {
                 Message::PeerRequest=>{},
                 _ => panic!("Expected a peer request message"),
             }
             // reply with a peer
             // first n bytes
-            let serialized = serialize(&mock_response).unwrap();
+            let serialized = mock_response.serialize_pillar().unwrap();
             let size = serialized.len() as usize;
             stream.write_all(&size.to_le_bytes()[0..4]).await.unwrap();
             let _ = stream.write_all(&serialized).await;

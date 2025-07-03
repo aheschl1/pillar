@@ -1,11 +1,11 @@
 use std::{net::IpAddr, time::Duration};
 
+use pillar_crypto::serialization::PillarSerialize;
 use serde::{Serialize, Deserialize};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream, time::timeout};
 use tracing::instrument;
 
 use crate::{primitives::messages::Message};
-use pillar_crypto::serialization::{deserialize, serialize, serialize_no_compress};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash)]
 pub struct Peer{
@@ -42,11 +42,11 @@ impl Peer{
     #[instrument(skip(self, message, initializing_peer))]
     async fn send_initial(&mut self, message: &Message, initializing_peer: &Peer) -> Result<TcpStream, std::io::Error> {
         let mut stream = tokio::net::TcpStream::connect(format!("{}:{}", self.ip_address, self.port)).await?;
-        let serialized_message = serialize(message);
+        let serialized_message = message.serialize_pillar();
         // always send a "peer" object of the initializing node first, and length of the message in bytes
         let declaration = Message::Declaration(initializing_peer.clone(), serialized_message.as_ref().unwrap().len() as u32);
         // serialize with bincode
-        let bytes = serialize_no_compress(&declaration).map_err(
+        let bytes = declaration.serialize_pillar().map_err(
             std::io::Error::other
         )?;
         stream.write_all(bytes.as_slice()).await?;
@@ -72,7 +72,7 @@ impl Peer{
         let mut buffer = vec![0; size as usize];
         let n = stream.read_exact(&mut buffer).await?;
         // deserialize with bincode
-        let message: Message = deserialize(&buffer[..n]).map_err(
+        let message: Message = PillarSerialize::deserialize_pillar(&buffer[..n]).map_err(
             std::io::Error::other
         )?;
         Ok(message)
@@ -91,10 +91,10 @@ mod tests{
     use core::panic;
     use std::net::{IpAddr, Ipv4Addr};
 
+    use pillar_crypto::serialization::PillarSerialize;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use crate::{nodes::peer::Peer, primitives::messages::{get_declaration_length, Message, Versions}};
-    use pillar_crypto::serialization::{deserialize, deserialize_no_compress, serialize};
 
     #[test]
     fn test_peer_new(){
@@ -119,7 +119,7 @@ mod tests{
             let mut buffer = [0; get_declaration_length(Versions::V1V4) as usize];
             let n = stream.read_exact(&mut buffer).await.unwrap();
             // deserialize with bincode
-            let message: Message = deserialize_no_compress(&buffer[..n]).unwrap();
+            let message: Message = PillarSerialize::deserialize_pillar(&buffer[..n]).unwrap();
             let size;
             match message{
                 Message::Declaration(peer, n) => {
@@ -133,7 +133,7 @@ mod tests{
             // read the next message
             let mut buffer = vec![0; size as usize];
             let n = stream.read_exact(&mut buffer).await.unwrap();
-            let message: Message = deserialize(&buffer[..n]).unwrap();
+            let message: Message = PillarSerialize::deserialize_pillar(&buffer[..n]).unwrap();
             match message{
                 Message::Ping => {},
                 _ => panic!("Expected a ping message")
@@ -162,7 +162,7 @@ mod tests{
             let mut buffer = [0; get_declaration_length(Versions::V1V4) as usize];
             let n = stream.read_exact(&mut buffer).await.unwrap();
             // deserialize with bincode
-            let message: Message = deserialize_no_compress(&buffer[..n]).unwrap();
+            let message: Message = PillarSerialize::deserialize_pillar(&buffer[..n]).unwrap();
             let size;
             match message{
                 Message::Declaration(peer, n) => {
@@ -176,7 +176,7 @@ mod tests{
             // read the next message
             let mut buffer = vec![0; size as usize];
             let _ = stream.read_exact(&mut buffer).await.unwrap();
-            let message: Message = deserialize(&buffer).unwrap();
+            let message: Message = PillarSerialize::deserialize_pillar(&buffer).unwrap();
             match message{
                 Message::Ping => {},
                 _ => panic!("Expected a ping message")
@@ -184,7 +184,7 @@ mod tests{
             // send a response
             let response = Message::Ping;
             // send n bytes of upcoming message
-            let serialized_response = serialize(&response).unwrap();
+            let serialized_response = response.serialize_pillar().unwrap();
             stream.write_all(&serialized_response.len().to_le_bytes()[..4]).await.unwrap();
             stream.write_all(serialized_response.as_slice()).await.unwrap();
         });
