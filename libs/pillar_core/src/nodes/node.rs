@@ -314,13 +314,13 @@ impl Node {
                 // add the block to the chain if we have downloaded it already - first it is verified TODO add to a queue to be added later
                 let mut block = block.clone();
                 if state.is_consume() && block.header.miner_address.is_none(){
-                    tracing::info!("Going to deal with this unmined block.");
                     self.settle_unmined_block(&mut block).await?;
                 }
                 
                 // send block to be settled, 
                 // and handle callback if mined
                 if (state.is_track() || state.is_consume()) && block.header.miner_address.is_some() {
+                    println!("Received block: {:?}", self.inner.public_key);
                     tracing::info!("Handling callbacks and settle for mined block.");
                     self.inner.late_settle_queue.enqueue(block.clone());
                     self.handle_callbacks(&block).await;

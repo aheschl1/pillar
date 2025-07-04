@@ -18,7 +18,7 @@ mod tests {
 
     use crate::{
         accounting::wallet::Wallet, nodes::{
-            miner::{Miner, MAX_TRANSACTION_WAIT_TIME}, node::NodeState, peer::Peer
+            miner::{Miner, MAX_TRANSACTION_WAIT_TIME}, node::{self, NodeState}, peer::Peer
         }, persistence::database::GenesisDatastore, primitives::{messages::Message, pool::MinerPool, transaction::Transaction}, protocol::{difficulty::get_reward_from_depth_and_stampers, peers::discover_peers, transactions::{get_transaction_proof, submit_transaction}}
     };
 
@@ -45,7 +45,7 @@ mod tests {
         let console_layer = fmt::layer()
             .with_ansi(true)
             .with_level(true)
-            .with_filter(LevelFilter::ERROR);
+            .with_filter(LevelFilter::INFO);
 
         let file_layer = fmt::layer()
             .with_writer(BoxMakeWriter::new(file))
@@ -1626,6 +1626,122 @@ mod tests {
         let already_a = node_a.inner.broadcasted_already.lock().await;
         assert_eq!(already_a.len(), 1);
         drop(already_a);
+    }
+
+    #[tokio::test]
+    async fn test_block_missed(){
+        // make two nodes
+        let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 16));
+        let port_a = 8006;
+        let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 17));
+        let port_b = 8007;
+        let ip_address_c = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 18));
+        let port_c = 8008;
+        let (mut node_c, wallet_c) = create_empty_node_genisis(
+            ip_address_c,
+            port_c,
+            vec![],
+            true,
+            Some(MinerPool::new()),
+        ).await;
+        // create node b with miner pool
+        let (node_b, mut wallet_b) = create_empty_node_genisis(
+            ip_address_b,
+            port_b,
+            vec![Peer::new(wallet_c.address, ip_address_c, port_c)],
+            true,
+            Some(MinerPool::new()),
+        )
+        .await;
+        let (mut node_a, mut wallet_a) = create_empty_node_genisis(
+            ip_address_a,
+            port_a,
+            vec![],
+            true,
+            None,
+        )
+        .await;
+        
+        let mut miner_b = Miner::new(node_b.clone()).unwrap();
+        node_c.serve().await;
+        miner_b.serve().await;
+        node_a.serve().await;
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        // make sure they do nti know each other
+        let peers_a = node_a.inner.peers.lock().await;
+        assert!(!peers_a.contains_key(&wallet_b.address));
+        drop(peers_a);
+        let peers_b = node_b.inner.peers.lock().await;
+        assert!(!peers_b.contains_key(&wallet_a.address));
+        drop(peers_b);
+        // let node b make a transaction and mine for itself.
+        let address_b = wallet_b.address;
+        let _ = submit_transaction(
+            &mut miner_b.node,
+            &mut wallet_b,
+            wallet_c.address,
+            0,
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+        // pause a sec, check htat there is a block with signatures
+        tokio::time::sleep(std::time::Duration::from_secs(MAX_TRANSACTION_WAIT_TIME+5)).await;
+        // check that there is a block in b but not in a
+        let chain_b = miner_b.node.inner.chain.lock().await;
+        assert!(chain_b.as_ref().unwrap().depth == 1); // 2 blocks
+        assert!(chain_b.as_ref().unwrap().blocks.len() == 2); //
+        drop(chain_b);
+        // check that a has no blocks
+        let chain_a = node_a.inner.chain.lock().await;
+        assert!(chain_a.as_ref().unwrap().depth == 0); // 1 blocks
+        assert!(chain_a.as_ref().unwrap().blocks.len() == 1); //
+        drop(chain_a);
+        // now, introduce peers to A
+        let peer = Peer::new(wallet_b.address, ip_address_b, port_b);
+        node_a.inner.peers.lock().await.insert(wallet_b.address, peer);
+        discover_peers(&mut node_a).await.unwrap();
+        discover_peers(&mut node_c).await.unwrap();
+        // make sure a is known
+        let peers_a = node_a.inner.peers.lock().await;
+        assert!(peers_a.contains_key(&wallet_b.address));
+        drop(peers_a);
+        // make sure b is known
+        let peers_b = node_b.inner.peers.lock().await;
+        assert!(peers_b.contains_key(&wallet_a.address));
+        drop(peers_b);
+        // now, node a should discover the chain of b
+        // submut another transaction from b
+        assert!(node_a.inner.state.lock().await.clone() == NodeState::Serving);
+        assert!(node_b.inner.state.lock().await.clone() == NodeState::Serving);
+        assert!(node_c.inner.state.lock().await.clone() == NodeState::Serving);
+        let _ = submit_transaction(
+            &mut miner_b.node,
+            &mut wallet_b,
+            wallet_c.address,
+            0,
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+        // pause a sec, check htat there is a block with signatures
+        tokio::time::sleep(std::time::Duration::from_secs(MAX_TRANSACTION_WAIT_TIME+5)).await;
+        // check that there is a block in b but not in a
+        let chain_c = node_c.inner.chain.lock().await;
+        assert!(chain_c.as_ref().unwrap().depth == 2); // 2 blocks
+        assert!(chain_c.as_ref().unwrap().blocks.len() == 3); // 3 blocks
+        drop(chain_c);
+        let chain_b = miner_b.node.inner.chain.lock().await;
+        assert_eq!(chain_b.as_ref().unwrap().depth, 2); // 3 blocks
+        assert_eq!(chain_b.as_ref().unwrap().blocks.len(), 3); //
+        drop(chain_b);
+        // check that a has all blocks 
+        let chain_a = node_a.inner.chain.lock().await;
+        assert_eq!(chain_a.as_ref().unwrap().depth, 2); // 3 blocks
+        assert_eq!(chain_a.as_ref().unwrap().blocks.len(), 3); //
+        drop(chain_a);
     }
 
 }

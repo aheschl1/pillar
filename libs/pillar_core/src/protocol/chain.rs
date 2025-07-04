@@ -1,10 +1,11 @@
+use core::sync;
 use std::{collections::{HashMap, HashSet}};
 
 use pillar_crypto::{hashing::{DefaultHash, Hashable}, merkle::generate_tree, types::StdByteArray};
 use rand::{rng, seq::{IteratorRandom}};
 use tracing::{instrument, warn};
 
-use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, nodes::{node::{Broadcaster, Node}, peer::Peer}, primitives::{block::{Block, BlockTail}, errors::{BlockValidationError, QueryError}, messages::Message, transaction::Transaction}};
+use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, nodes::{node::{Broadcaster, Node, NodeState}, peer::Peer}, primitives::{block::{Block, BlockTail}, errors::{BlockValidationError, QueryError}, messages::Message, transaction::Transaction}};
 
 use super::peers::discover_peers;
 
@@ -290,12 +291,33 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
         let state = node.inner.state.lock().await.clone();
         if !state.is_consume() {continue;}
         if let Some(block) = node.inner.late_settle_queue.dequeue(){
-            tracing::debug!("Settling block...");
+            tracing::debug!("Block poped from settle queue: {:?}", block.hash);
             let mut chain_lock = node.inner.chain.lock().await;
-            let chain = chain_lock.as_mut().unwrap();
+            let mut chain = chain_lock.as_mut().unwrap();
             if chain.get_block(&block.hash.unwrap()).is_some(){
-                warn!("Block already exists in chain, skippiNone,ng settlement: {:?}", block.hash.unwrap());
+                warn!("Block already exists in chain, skipping settlement: {:?}", block.hash.unwrap());
                 continue; // block already exists, skip
+            }
+            if chain.get_block(&block.header.previous_hash).is_none() {
+                warn!("Block previous hash not found in chain, triggering chain sync mode");
+                drop(chain_lock); // free the lock before we call sync
+                let initial_state = node.inner.state.lock().await.clone();
+                *node.inner.state.lock().await = NodeState::ChainSyncing;
+                let result = sync_chain(node.clone()).await.map_err(|e| {
+                    warn!("Failed to sync chain: {:?}. Skipping block settlement.", e);
+                    e
+                });
+                *node.inner.state.lock().await = initial_state; // restore state
+                if result.is_err() {continue;} // failed to sync chain, skip settlement
+
+                chain_lock = node.inner.chain.lock().await;
+                chain = chain_lock.as_mut().unwrap();
+                
+                if chain.get_block(&block.header.previous_hash).is_none(){
+                    warn!("Block previous hash still not found in chain after sync, skipping settlement: {:?}", block.header.previous_hash);
+                    continue; // still not found, skip
+                }
+
             }
             // then we settle the block
             tracing::info!("Settling mined block with miner address: {:?}", block.header.miner_address);
