@@ -329,7 +329,7 @@ impl Node {
                 if state.is_forward(){
                     // TODO handle is_track instead
                     // if we do not have the chain, just forward the block if there is room in the stamps
-                    if block.header.tail.n_stamps() < N_TRANSMISSION_SIGNATURES && !state.is_consume(){
+                    if block.header.tail.n_stamps() < N_TRANSMISSION_SIGNATURES && !state.is_consume() && block.header.miner_address.is_none() {
                         tracing::info!("Stamping and broadcasting only because not ");
                         let _ = self.stamp_block(&mut block.clone());
                     }

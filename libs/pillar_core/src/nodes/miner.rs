@@ -112,7 +112,6 @@ async fn monitor_block_pool(miner: Miner) {
     loop {
         // check if there is a block to mine
         if let Some(mut block) = miner.node.miner_pool.as_ref().unwrap().pop_mine_ready_block(){
-            println!("dwaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaMining block: {:?}", block.hash);
             block.header.miner_address = Some(miner.node.inner.public_key);
             block.header.tail.clean(&block.header.clone()); // removes broken signatures
             let mut chain_lock = miner.node.inner.chain.lock().await;

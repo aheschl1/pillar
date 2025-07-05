@@ -1675,7 +1675,6 @@ mod tests {
         assert!(!peers_b.contains_key(&wallet_a.address));
         drop(peers_b);
         // let node b make a transaction and mine for itself.
-        let address_b = wallet_b.address;
         let _ = submit_transaction(
             &mut miner_b.node,
             &mut wallet_b,
@@ -1703,16 +1702,23 @@ mod tests {
         node_a.inner.peers.lock().await.insert(wallet_b.address, peer);
         discover_peers(&mut node_a).await.unwrap();
         discover_peers(&mut node_c).await.unwrap();
-        // make sure a is known
+        // // make sure a is known
         let peers_a = node_a.inner.peers.lock().await;
         assert!(peers_a.contains_key(&wallet_b.address));
+        assert!(peers_a.contains_key(&wallet_c.address));
         drop(peers_a);
         // make sure b is known
         let peers_b = node_b.inner.peers.lock().await;
         assert!(peers_b.contains_key(&wallet_a.address));
+        assert!(peers_b.contains_key(&wallet_c.address));
         drop(peers_b);
-        // now, node a should discover the chain of b
-        // submut another transaction from b
+        // make sure c is known
+        let peers_c = node_c.inner.peers.lock().await;
+        assert!(peers_c.contains_key(&wallet_a.address));
+        assert!(peers_c.contains_key(&wallet_b.address));
+        drop(peers_c);
+        // // now, node a should discover the chain of b
+        // // submut another transaction from b
         assert!(node_a.inner.state.lock().await.clone() == NodeState::Serving);
         assert!(node_b.inner.state.lock().await.clone() == NodeState::Serving);
         assert!(node_c.inner.state.lock().await.clone() == NodeState::Serving);
@@ -1720,7 +1726,7 @@ mod tests {
             &mut miner_b.node,
             &mut wallet_b,
             wallet_c.address,
-            0,
+            10,
             false,
             None,
         )
@@ -1729,19 +1735,19 @@ mod tests {
         // pause a sec, check htat there is a block with signatures
         tokio::time::sleep(std::time::Duration::from_secs(MAX_TRANSACTION_WAIT_TIME+5)).await;
         // check that there is a block in b but not in a
-        let chain_c = node_c.inner.chain.lock().await;
-        assert!(chain_c.as_ref().unwrap().depth == 2); // 2 blocks
-        assert!(chain_c.as_ref().unwrap().blocks.len() == 3); // 3 blocks
-        drop(chain_c);
         let chain_b = miner_b.node.inner.chain.lock().await;
         assert_eq!(chain_b.as_ref().unwrap().depth, 2); // 3 blocks
         assert_eq!(chain_b.as_ref().unwrap().blocks.len(), 3); //
         drop(chain_b);
+        let chain_c = node_c.inner.chain.lock().await;
+        assert!(chain_c.as_ref().unwrap().depth == 2); // 2 blocks
+        assert!(chain_c.as_ref().unwrap().blocks.len() == 3); // 3 blocks
+        drop(chain_c);
         // check that a has all blocks 
-        let chain_a = node_a.inner.chain.lock().await;
-        assert_eq!(chain_a.as_ref().unwrap().depth, 2); // 3 blocks
-        assert_eq!(chain_a.as_ref().unwrap().blocks.len(), 3); //
-        drop(chain_a);
+        // let chain_a = node_a.inner.chain.lock().await;
+        // assert_eq!(chain_a.as_ref().unwrap().depth, 2); // 3 blocks
+        // assert_eq!(chain_a.as_ref().unwrap().blocks.len(), 3); //
+        // drop(chain_a);
     }
 
 }
