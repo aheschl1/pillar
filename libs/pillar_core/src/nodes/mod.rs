@@ -45,7 +45,7 @@ mod tests {
         let console_layer = fmt::layer()
             .with_ansi(true)
             .with_level(true)
-            .with_filter(LevelFilter::INFO);
+            .with_filter(LevelFilter::WARN);
 
         let file_layer = fmt::layer()
             .with_writer(BoxMakeWriter::new(file))
@@ -1642,7 +1642,7 @@ mod tests {
             port_c,
             vec![],
             true,
-            Some(MinerPool::new()),
+            None,
         ).await;
         // create node b with miner pool
         let (node_b, mut wallet_b) = create_empty_node_genisis(
