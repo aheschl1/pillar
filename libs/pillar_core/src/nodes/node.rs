@@ -275,7 +275,7 @@ impl Node {
     #[instrument(name = "Node::serve_request", skip(self, message, _declared_peer), fields(
         public_key = ?self.inner.public_key,
         peer = ?_declared_peer.public_key,
-        message = ?message.type_id()
+        message = ?message.name()
     ))]
     pub async fn serve_request(&mut self, message: &Message, _declared_peer: Peer) -> Result<Message, std::io::Error> {
         let state = self.inner.state.lock().await.clone();
@@ -311,7 +311,7 @@ impl Node {
                 Ok(Message::TransactionAck)
             }
             Message::BlockTransmission(block) => {
-                // add the block to the chain if we have downloaded it already - first it is verified TODO add to a queue to be added later
+                // add the block to the chain if we have downloaded it already - first it is verified
                 let mut block = block.clone();
                 if state.is_consume() && block.header.miner_address.is_none(){
                     self.settle_unmined_block(&mut block).await?;
@@ -325,6 +325,8 @@ impl Node {
                     self.inner.late_settle_queue.enqueue(block.clone());
                     self.handle_callbacks(&block).await;
                 }
+                
+                println!("Here!");
 
                 if state.is_forward(){
                     // TODO handle is_track instead
@@ -444,17 +446,19 @@ impl Node {
                 .unwrap()
         );
         tracing::debug!("Block has {} stamps, our stamp: {}, already broadcasted: {}", n_stamps, has_our_stamp, already_broadcasted);
-
+        
         if n_stamps < N_TRANSMISSION_SIGNATURES && !has_our_stamp {
             assert!(!already_broadcasted, "Block already broadcasted, but not stamped by us. This should not happen.");
             tracing::info!("Stamping block with our signature.");
             let _ = self.stamp_block(block);
             n_stamps += 1; // we have stamped the block
         }
-
+        
+        println!("Block has {} stamps, our stamp: {}, already broadcasted: {}", n_stamps, has_our_stamp, already_broadcasted);
         if (already_broadcasted || n_stamps == N_TRANSMISSION_SIGNATURES) && self.miner_pool.is_some(){
             // add the block to the pool
             tracing::info!("Adding block to miner pool.");
+            println!("Adding to pool");
             self.miner_pool.as_ref().unwrap().add_mine_ready_block(block.clone());
         }
         Ok(())
@@ -549,7 +553,7 @@ pub trait Broadcaster {
 impl Broadcaster for Node {
     #[instrument(name = "Node::broadcast", skip(self, message), fields(
         public_key = ?self.inner.public_key,
-        message = ?message.type_id()
+        message = ?message.name()
     ))]
     async fn broadcast(&self, message: &Message) -> Result<Vec<Message>, std::io::Error> {
         // send a message to all peers

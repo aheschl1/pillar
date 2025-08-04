@@ -45,7 +45,9 @@ pub async fn broadcast_knowledge(node: Node, stop_signal: Option<flume::Receiver
             if broadcasted_already.contains(&hash) {
                 continue;
             }
+            println!("started bcast ");
             node.broadcast(&broadcast).await?;
+            println!("finished bcast");
             broadcasted_already.insert(hash);
             // add the message to the broadcasted list
             i += 1; // We want to make sure we check back at the mining pool
