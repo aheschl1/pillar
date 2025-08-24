@@ -108,7 +108,7 @@ mod tests {
         assert_eq!(node.inner.private_key, wallet.get_private_key());
         assert_eq!(node.ip_address, ip_address);
         assert_eq!(node.port, port);
-        assert_eq!(node.inner.peers.lock().await.len(), peers.len());
+        assert_eq!(node.inner.peers.read().await.len(), peers.len());
         assert_eq!(node.inner.chain.lock().await.is_some(), genesis_store);
         assert_eq!(node.miner_pool.is_some(), miner_pool.is_some());
         assert!(node.inner.transaction_filters.lock().await.is_empty());
@@ -211,12 +211,12 @@ mod tests {
         let result = discover_peers(&mut node2).await;
         result.unwrap(); // should be successful
         // make sure that node2 is in the list of peers for node 1
-        let peers = node1.inner.peers.lock().await;
+        let peers = node1.inner.peers.read().await;
         assert!(peers.contains_key(&wallet2.address));
         drop(peers);
 
         // make sure the [9u8; 32] is in the list of peers for node 2
-        let peers = node2.inner.peers.lock().await;
+        let peers = node2.inner.peers.read().await;
         assert!(peers.contains_key(&wallet1.address));
         assert!(peers.contains_key(&[8u8; 32])); // the peer we added
         drop(peers);
@@ -276,7 +276,7 @@ mod tests {
         .await;
 
         // nned to ammend b into a
-        node_a.inner.peers.lock().await.insert(
+        node_a.inner.peers.write().await.insert(
             wallet_b.address,
             Peer::new(wallet_b.address, ip_address_b, port_b),
         );
@@ -290,25 +290,25 @@ mod tests {
         discover_peers(&mut node_a).await.unwrap(); // 
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-        let peers_a = node_a.inner.peers.lock().await;
+        let peers_a = node_a.inner.peers.read().await;
         assert!(peers_a.contains_key(&wallet_b.address));
         assert!(peers_a.contains_key(&wallet_c.address));
         assert!(!peers_a.contains_key(&wallet_d.address)); // node A does not know about D yet
         drop(peers_a);
 
-        let peers_b = node_b.inner.peers.lock().await;
+        let peers_b = node_b.inner.peers.read().await;
         assert!(peers_b.contains_key(&wallet_a.address));
         assert!(peers_b.contains_key(&wallet_c.address));
         assert!(!peers_b.contains_key(&wallet_d.address));
         drop(peers_b);
 
-        let peers_c = node_c.inner.peers.lock().await;
+        let peers_c = node_c.inner.peers.read().await;
         assert!(!peers_c.contains_key(&wallet_a.address));
         assert!(peers_c.contains_key(&wallet_b.address));
         assert!(peers_c.contains_key(&wallet_d.address));
         drop(peers_c);
 
-        let peers_d = node_d.inner.peers.lock().await;
+        let peers_d = node_d.inner.peers.read().await;
         assert!(peers_d.contains_key(&wallet_a.address));
         assert!(!peers_d.contains_key(&wallet_b.address));
         assert!(peers_d.contains_key(&wallet_c.address));
@@ -322,26 +322,26 @@ mod tests {
         discover_peers(&mut node_d).await.unwrap(); // 
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-        let peers_a = node_a.inner.peers.lock().await;
+        let peers_a = node_a.inner.peers.read().await;
         assert!(peers_a.contains_key(&wallet_b.address));
         assert!(peers_a.contains_key(&wallet_c.address));
         assert!(!peers_a.contains_key(&wallet_a.address));
         assert!(peers_a.contains_key(&wallet_d.address)); // node A does not know about D yet
         drop(peers_a);
 
-        let peers_b = node_b.inner.peers.lock().await;
+        let peers_b = node_b.inner.peers.read().await;
         assert!(peers_b.contains_key(&wallet_a.address));
         assert!(peers_b.contains_key(&wallet_c.address));
         assert!(!peers_b.contains_key(&wallet_d.address));
         drop(peers_b);
 
-        let peers_c = node_c.inner.peers.lock().await;
+        let peers_c = node_c.inner.peers.read().await;
         assert!(!peers_c.contains_key(&wallet_a.address));
         assert!(peers_c.contains_key(&wallet_b.address));
         assert!(peers_c.contains_key(&wallet_d.address));
         drop(peers_c);
 
-        let peers_d = node_d.inner.peers.lock().await;
+        let peers_d = node_d.inner.peers.read().await;
         assert!(peers_d.contains_key(&wallet_a.address));
         assert!(peers_d.contains_key(&wallet_b.address));
         assert!(peers_d.contains_key(&wallet_c.address));
@@ -388,12 +388,12 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
         // Verify that Node B knows Node A
-        let peers_b = node_b.inner.peers.lock().await;
+        let peers_b = node_b.inner.peers.read().await;
         assert!(peers_b.contains_key(&wallet_a.address));
 
         drop(peers_b);
 
-        let peers_a = node_a.inner.peers.lock().await;
+        let peers_a = node_a.inner.peers.read().await;
         assert!(peers_a.contains_key(&wallet_b.address));
         assert!(!peers_a.contains_key(&wallet_a.address)); // Node A does not know itself
         drop(peers_a);
@@ -438,10 +438,10 @@ mod tests {
         // also, node b should be forward by now
         assert!(node_b.inner.state.lock().await.is_forward());
 
-        let already_b = node_a.inner.broadcasted_already.lock().await;
+        let already_b = node_a.inner.broadcasted_already.read().await;
         assert!(already_b.contains(&message_to_hash.hash(&mut DefaultHash::new()).unwrap()));
         drop(already_b);
-        let already_b = node_b.inner.broadcasted_already.lock().await;
+        let already_b = node_b.inner.broadcasted_already.read().await;
         assert!(already_b.contains(&message_to_hash.hash(&mut DefaultHash::new()).unwrap()));
 
         // at this point, everything is broadcasted - and recorded. this means we had no loop, we are happy.
@@ -503,12 +503,12 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
         // Verify that Node B knows Node A
-        let peers_b = node_b.inner.peers.lock().await;
+        let peers_b = node_b.inner.peers.read().await;
         assert!(peers_b.contains_key(&wallet_a.address));
 
         drop(peers_b);
 
-        let peers_a = node_a.inner.peers.lock().await;
+        let peers_a = node_a.inner.peers.read().await;
         assert!(peers_a.contains_key(&public_key_b));
         assert!(!peers_a.contains_key(&wallet_a.address)); // Node A does not know itself
         drop(peers_a);
@@ -551,11 +551,11 @@ mod tests {
 
         assert!(node_b.inner.state.lock().await.is_forward());
 
-        let already_b = node_a.inner.broadcasted_already.lock().await;
+        let already_b = node_a.inner.broadcasted_already.read().await;
         assert!(already_b.contains(&message_to_hash.hash(&mut DefaultHash::new()).unwrap()));
         assert_eq!(already_b.len(), 1);
         drop(already_b);
-        let already_b = node_b.inner.broadcasted_already.lock().await;
+        let already_b = node_b.inner.broadcasted_already.read().await;
         assert!(already_b.contains(&message_to_hash.hash(&mut DefaultHash::new()).unwrap()));
         assert_eq!(already_b.len(), 1);
         drop(already_b);
@@ -603,10 +603,10 @@ mod tests {
         // this block proposition will be sent out from node_b to node_a.
         // we will check the already broadcasted messages first.
         // we cannot know the exact hash, but check that 2 are in there
-        let already_b = node_b.inner.broadcasted_already.lock().await;
+        let already_b = node_b.inner.broadcasted_already.read().await;
         assert_eq!(already_b.len(), 4); // at least the transaction and the block. also the mined block
         drop(already_b);
-        let already_b = node_a.inner.broadcasted_already.lock().await;
+        let already_b = node_a.inner.broadcasted_already.read().await;
         assert_eq!(already_b.len(), 4); // at least the transaction and the block
         drop(already_b);
 
@@ -782,10 +782,10 @@ mod tests {
             MAX_TRANSACTION_WAIT_TIME + 5,
         ))
         .await;
-        let already_b = node_b.inner.broadcasted_already.lock().await;
+        let already_b = node_b.inner.broadcasted_already.read().await;
         assert!(already_b.len() == 8);
         drop(already_b);
-        let already_b = node_a.inner.broadcasted_already.lock().await;
+        let already_b = node_a.inner.broadcasted_already.read().await;
         assert!(already_b.len() == 8);
         drop(already_b);
 
@@ -861,7 +861,7 @@ mod tests {
         // wait for a bit
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         // check if node c knows about node a and b
-        let peers_c = node_c.inner.peers.lock().await;
+        let peers_c = node_c.inner.peers.read().await;
         assert!(peers_c.contains_key(&wallet_a.address));
         assert!(peers_c.contains_key(&wallet_b.address));
         assert!(!peers_c.contains_key(&wallet_c.address)); // node c does not know about itself
@@ -1044,7 +1044,7 @@ mod tests {
         // wait for a bit
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         // check if node a knows about node b and c
-        let peers_a = node_a.inner.peers.lock().await;
+        let peers_a = node_a.inner.peers.read().await;
         assert!(peers_a.contains_key(&wallet_b.address));
         assert!(peers_a.contains_key(&wallet_c.address));
         drop(peers_a);
@@ -1162,7 +1162,7 @@ mod tests {
         // wait for a bit
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         // check if node a knows about node b and c
-        let peers_a = node_a.inner.peers.lock().await;
+        let peers_a = node_a.inner.peers.read().await;
         assert!(peers_a.contains_key(&wallet_b.address));
         assert!(peers_a.contains_key(&wallet_c.address));
         drop(peers_a);
@@ -1247,7 +1247,7 @@ mod tests {
         .await; // wait for the transactions to be processed
         println!("transactions processed, checking the chain");
         // now, lets check that a is in bs peer list
-        let peers_b = node_b.inner.peers.lock().await;
+        let peers_b = node_b.inner.peers.read().await;
         assert!(peers_b.contains_key(&wallet_a.address));
         drop(peers_b);
         // now, grab the chains - check depth
@@ -1323,7 +1323,7 @@ mod tests {
         // IF TEST CASE FAILS< CHECK IF THE N TRANSACTIONS TO MINE COMPLETION CHANGED
         tokio::time::sleep(std::time::Duration::from_secs(2)).await; // wait for the transactions to be processed
         // now, lets check that a is in bs peer list
-        let peers_b = node_b.inner.peers.lock().await;
+        let peers_b = node_b.inner.peers.read().await;
         assert!(peers_b.contains_key(&wallet_a.address));
         drop(peers_b);
         // now, grab the chains - check depth
@@ -1621,10 +1621,10 @@ mod tests {
         assert!(chain_a.as_ref().unwrap().depth == 0); // 1 blocks
         assert!(chain_a.as_ref().unwrap().blocks.len() == 1); // 1 blocks
         // make sure the broadcasts are greater than 2
-        let already_b = node_b.inner.broadcasted_already.lock().await;
+        let already_b = node_b.inner.broadcasted_already.read().await;
         assert_eq!(already_b.len(), 1);
         drop(already_b);
-        let already_a = node_a.inner.broadcasted_already.lock().await;
+        let already_a = node_a.inner.broadcasted_already.read().await;
         assert_eq!(already_a.len(), 1);
         drop(already_a);
     }
@@ -1674,17 +1674,17 @@ mod tests {
         discover_peers(&mut miner_a.node).await.unwrap();
         discover_peers(&mut node_c).await.unwrap();
 
-        let peers_a = miner_a.node.inner.peers.lock().await;
+        let peers_a = miner_a.node.inner.peers.read().await;
         assert!(peers_a.contains_key(&wallet_b.address));
         assert!(peers_a.contains_key(&wallet_c.address));
         drop(peers_a);
         
-        let peers_b = node_b.inner.peers.lock().await;
+        let peers_b = node_b.inner.peers.read().await;
         assert!(peers_b.contains_key(&wallet_a.address));
         assert!(peers_b.contains_key(&wallet_c.address));
         drop(peers_b);
         
-        let peers_c = node_c.inner.peers.lock().await;
+        let peers_c = node_c.inner.peers.read().await;
         assert!(peers_c.contains_key(&wallet_a.address));
         assert!(peers_c.contains_key(&wallet_b.address));
         drop(peers_c);
@@ -1760,10 +1760,10 @@ mod tests {
         node_a.serve().await;
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         // make sure they do nti know each other
-        let peers_a = node_a.inner.peers.lock().await;
+        let peers_a = node_a.inner.peers.read().await;
         assert!(!peers_a.contains_key(&wallet_b.address));
         drop(peers_a);
-        let peers_b = miner_b.node.inner.peers.lock().await;
+        let peers_b = miner_b.node.inner.peers.read().await;
         assert!(!peers_b.contains_key(&wallet_a.address));
         drop(peers_b);
         // let node b make a transaction and mine for itself.
@@ -1791,21 +1791,21 @@ mod tests {
         drop(chain_a);
         // now, introduce peers to A
         let peer = Peer::new(wallet_b.address, ip_address_b, port_b);
-        node_a.inner.peers.lock().await.insert(wallet_b.address, peer);
+        node_a.inner.peers.write().await.insert(wallet_b.address, peer);
         discover_peers(&mut node_a).await.unwrap();
         discover_peers(&mut node_c).await.unwrap();
         // // make sure a is known
-        let peers_a = node_a.inner.peers.lock().await;
+        let peers_a = node_a.inner.peers.read().await;
         assert!(peers_a.contains_key(&wallet_b.address));
         assert!(peers_a.contains_key(&wallet_c.address));
         drop(peers_a);
         // make sure b is known
-        let peers_b = miner_b.node.inner.peers.lock().await;
+        let peers_b = miner_b.node.inner.peers.read().await;
         assert!(peers_b.contains_key(&wallet_a.address));
         assert!(peers_b.contains_key(&wallet_c.address));
         drop(peers_b);
         // make sure c is known
-        let peers_c = node_c.inner.peers.lock().await;
+        let peers_c = node_c.inner.peers.read().await;
         assert!(peers_c.contains_key(&wallet_a.address));
         assert!(peers_c.contains_key(&wallet_b.address));
         drop(peers_c);

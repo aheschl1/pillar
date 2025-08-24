@@ -52,7 +52,7 @@ pub async fn submit_transaction(
     // broadcast and wait for peer responses
     let message = Message::TransactionBroadcast(transaction);
     // we do not want this to wait in broadcast queue, so we will lock it out immediately
-    node.inner.broadcasted_already.lock().await.insert(message.hash(&mut DefaultHash::new()).unwrap());
+    node.inner.broadcasted_already.write().await.insert(message.hash(&mut DefaultHash::new()).unwrap());
     let results = node.broadcast(&message).await.map_err(|e| {
         tracing::error!("Failed to broadcast transaction: {}", e);
         QueryError::NoReply

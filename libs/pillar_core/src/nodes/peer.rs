@@ -40,7 +40,7 @@ impl Peer{
     /// Send a message to the peer
     /// Initializaes a new connection to the peer
     #[instrument(skip(self, message, initializing_peer))]
-    async fn send_initial(&mut self, message: &Message, initializing_peer: &Peer) -> Result<TcpStream, std::io::Error> {
+    async fn send_initial(&self, message: &Message, initializing_peer: &Peer) -> Result<TcpStream, std::io::Error> {
         let mut stream = tokio::net::TcpStream::connect(format!("{}:{}", self.ip_address, self.port)).await?;
         let serialized_message = message.serialize_pillar();
         // always send a "peer" object of the initializing node first, and length of the message in bytes
@@ -78,7 +78,7 @@ impl Peer{
         Ok(message)
     }
 
-    pub async fn communicate(&mut self, message: &Message, initializing_peer: &Peer) -> Result<Message, std::io::Error> {
+    pub async fn communicate(&self, message: &Message, initializing_peer: &Peer) -> Result<Message, std::io::Error> {
         
         let stream = timeout(Duration::from_secs(1), self.send_initial(message, initializing_peer)).await??;
         let response = self.read_response(stream).await?;

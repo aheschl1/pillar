@@ -55,7 +55,7 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, Que
         let nodeclone = node.clone();
         let handle = tokio::spawn(async move{
             loop{ // keep asking for the node until we pass
-                let mut peer = nodeclone.clone().inner.peers.lock().await.values().choose(&mut rng()).unwrap().clone(); // random peer
+                let mut peer = nodeclone.clone().inner.peers.read().await.values().choose(&mut rng()).unwrap().clone(); // random peer
                 let block = query_block_from_peer(&mut peer, &nodeclone.clone().into(), hash).await;
                 if let Ok(block) = block {
                     // we got the block, send it to the channel
@@ -81,7 +81,7 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, Que
         loop{ // we need to keep going until it passes full validation
             match chain.add_new_block(block){
                 Err(_) => { // failed validation
-                    let mut peer = node.inner.peers.lock().await.values().choose(&mut rng()).unwrap().clone(); // random peer
+                    let mut peer = node.inner.peers.read().await.values().choose(&mut rng()).unwrap().clone(); // random peer
                     block = query_block_from_peer(&mut peer, &node.clone().into(), hash).await?; // one more attempt, then fail.
                 }
                 _ => {
@@ -101,9 +101,9 @@ pub async fn dicover_chain(mut node: Node) -> Result<(), QueryError> {
         QueryError::IOError
     )?;
     // broadcast the chain shard request to all peers
-    let mut peers = node.inner.peers.lock().await;
+    let peers = node.inner.peers.read().await;
     let mut chain_shards = Vec::new();
-    for (_, peer) in peers.iter_mut() {
+    for (_, peer) in peers.iter() {
         // send the chain shard request to the peer
         let response = peer.communicate(&Message::ChainShardRequest, &(node.clone().into())).await
             .map_err(QueryError::IOError)?;
@@ -161,7 +161,7 @@ pub fn get_genesis_block(state_root: Option<StdByteArray>) -> Block{
 /// TODO this may try to duplicate if there are forks in extensions - fix the final portion of the sync
 #[instrument(fields(node = ?node.inner.public_key))]
 pub async fn sync_chain(node: Node) -> Result<(), QueryError> {
-    if node.inner.peers.lock().await.is_empty(){
+    if node.inner.peers.read().await.is_empty(){
         tracing::info!("No peers to sync with, skipping chain sync");
         return Ok(());
     }

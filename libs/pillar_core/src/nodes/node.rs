@@ -3,7 +3,7 @@ use flume::{Receiver, Sender};
 use pillar_crypto::{hashing::{DefaultHash, Hashable}, signing::{DefaultSigner, SigFunction, Signable}, types::StdByteArray};
 use tracing::instrument;
 use std::{any::Any, collections::{HashMap, HashSet}, net::IpAddr, sync::Arc};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::{
     blockchain::chain::Chain,
@@ -83,13 +83,13 @@ pub struct NodeInner {
     /// The private key of the node
     pub private_key: StdByteArray,
     // known peers
-    pub peers: Mutex<HashMap<StdByteArray, Peer>>,
+    pub peers: RwLock<HashMap<StdByteArray, Peer>>,
     // the blockchain
     pub chain: Mutex<Option<Chain>>,
     /// transactions to be broadcasted
     pub broadcast_queue: lfqueue::UnboundedQueue<Message>,
     // a collection of things already broadcasted
-    pub broadcasted_already: Mutex<HashSet<StdByteArray>>,
+    pub broadcasted_already: RwLock<HashSet<StdByteArray>>,
     // transaction filter queue
     pub transaction_filters: Mutex<Vec<(TransactionFilter, Peer)>>,
     /// the datastore
@@ -146,7 +146,7 @@ impl Node {
         let broadcast_queue = lfqueue::UnboundedQueue::new();
         let late_settle_queue = lfqueue::UnboundedQueue::new();
         let transaction_filters = Mutex::new(Vec::new());
-        let broadcasted_already = Mutex::new(HashSet::new());
+        let broadcasted_already = RwLock::new(HashSet::new());
         let peer_map = peers
             .iter()
             .map(|peer| (peer.public_key, peer.clone()))
@@ -158,7 +158,7 @@ impl Node {
             inner: NodeInner {
             public_key,
             private_key,
-            peers: Mutex::new(peer_map),
+            peers: RwLock::new(peer_map),
             chain: Mutex::new(maybe_chain),
             broadcasted_already,
             transaction_filters,
@@ -282,7 +282,7 @@ impl Node {
         match message {
             Message::PeerRequest => {
                 // send all peers
-                let response = Message::PeerResponse(self.inner.peers.lock().await.values().cloned().collect());
+                let response = Message::PeerResponse(self.inner.peers.read().await.values().cloned().collect());
                 tracing::debug!("Sending {:?}", response);
                 Ok(response)
             }
@@ -402,7 +402,7 @@ impl Node {
                     let _chain = self.inner.chain.lock().await;
                     let chain = _chain.as_ref().unwrap();
                     let peers = nth_percentile_peer(*lower_n, *upper_n, chain);
-                    let peers_map = self.inner.peers.lock().await.clone();
+                    let peers_map = self.inner.peers.read().await.clone();
                     // find the peer objects in the address list 
                     let filtered_peers = peers.iter().filter_map(|peer| {
                         peers_map.get(peer).cloned()
@@ -437,7 +437,7 @@ impl Node {
         tracing::info!("Block is not mined, stamping and transmitting.");
         let mut n_stamps = block.header.tail.n_stamps();
         let has_our_stamp = block.header.tail.stamps.iter().any(|stamp| stamp.address == self.inner.public_key);
-        let already_broadcasted = self.inner.broadcasted_already.lock().await.contains(
+        let already_broadcasted = self.inner.broadcasted_already.read().await.contains(
             &Message::BlockTransmission(block
                 .clone())
                 .hash(&mut DefaultHash::new())
@@ -515,7 +515,7 @@ impl Node {
 
     pub async fn maybe_update_peer(&self, peer: Peer) -> Result<(), std::io::Error> {
         // check if the peer is already in the list
-        let mut peers: tokio::sync::MutexGuard<'_, HashMap<StdByteArray, Peer>> = self.inner.peers.lock().await;
+        let mut peers = self.inner.peers.write().await;
         if (peer.public_key != self.inner.public_key) && !peers.iter().any(|(public_key, _)| public_key == &peer.public_key) {
             // add the peer to the list
             peers.insert(peer.public_key, peer);
@@ -556,8 +556,8 @@ impl Broadcaster for Node {
     async fn broadcast(&self, message: &Message) -> Result<Vec<Message>, std::io::Error> {
         // send a message to all peers
         let mut responses = Vec::new();
-        let mut peers = self.inner.peers.lock().await.clone(); // do not hold lock
-        for (_, peer) in peers.iter_mut(){
+        let peers = self.inner.peers.read().await.clone();
+        for (_, peer) in peers.iter(){
             let response = peer.communicate(message, &self.into()).await;
             if let Err(e) = response {
                 tracing::error!("Failed to communicate with peer {:?}: {:?}", peer.public_key, e);

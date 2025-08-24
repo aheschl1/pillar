@@ -25,19 +25,20 @@ pub async fn broadcast_knowledge(node: Node, stop_signal: Option<flume::Receiver
             while let Some(proposed_block) = pool.pop_block_proposition(){
                 let m: Message = Message::BlockTransmission(proposed_block);
                 let hash = m.hash(&mut hasher).unwrap();
-                let mut broadcased = node.inner.broadcasted_already.lock().await;
+                let mut broadcased = node.inner.broadcasted_already.write().await;
                 // do not broadcast if already broadcasted
                 if broadcased.contains(&hash) {
                     continue;
                 }
                 // add the message to the broadcasted list
                 broadcased.insert(hash);
+                // drop(broadcased);
                 // broadcast the message
                 node.broadcast(&m).await?;
             }
         }
         let mut i = 0;
-        let mut broadcasted_already = node.inner.broadcasted_already.lock().await;
+        let mut broadcasted_already = node.inner.broadcasted_already.write().await;
         while i < 10 && let Some(broadcast) = node.inner.broadcast_queue.dequeue() {
             // receive the transaction from the sender
             let hash = broadcast.hash(&mut hasher).unwrap();
@@ -223,7 +224,7 @@ mod tests {
 
         // Verify the peer was added
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await; // Allow time for processing
-        let peers = node.inner.peers.lock().await;
+        let peers = node.inner.peers.read().await;
         assert!(peers.contains_key(&peer.public_key));
     }
 
@@ -294,7 +295,7 @@ mod tests {
         peer_stream.write_all(&nbytes.to_le_bytes()).await.unwrap();
         peer_stream.write_all(&response_serialized).await.unwrap();
         
-        let broadcasted = node.inner.broadcasted_already.lock().await;
+        let broadcasted = node.inner.broadcasted_already.read().await;
         let mut hasher = DefaultHash::new();
         let message_hash = message.hash(&mut hasher).unwrap();
         assert!(broadcasted.contains(&message_hash));
