@@ -326,16 +326,14 @@ impl Node {
                     self.handle_callbacks(&block).await;
                 }
                 
-                println!("Here!");
-
                 if state.is_forward(){
                     // TODO handle is_track instead
                     // if we do not have the chain, just forward the block if there is room in the stamps
                     if block.header.tail.n_stamps() < N_TRANSMISSION_SIGNATURES && !state.is_consume() && block.header.miner_address.is_none() {
                         tracing::info!("Stamping and broadcasting only because not ");
-                        let _ = self.stamp_block(&mut block.clone());
+                        let _ = self.stamp_block(&mut block);
                     }
-                    self.inner.broadcast_queue.enqueue(Message::BlockTransmission(block.clone())); // forward
+                    self.inner.broadcast_queue.enqueue(Message::BlockTransmission(block)); // forward
                 }
                 Ok(Message::BlockAck)
             },
@@ -455,7 +453,7 @@ impl Node {
         }
         
         println!("Block has {} stamps, our stamp: {}, already broadcasted: {}", n_stamps, has_our_stamp, already_broadcasted);
-        if (already_broadcasted || n_stamps == N_TRANSMISSION_SIGNATURES) && self.miner_pool.is_some(){
+        if ((already_broadcasted || n_stamps == N_TRANSMISSION_SIGNATURES)) && self.miner_pool.is_some(){
             // add the block to the pool
             tracing::info!("Adding block to miner pool.");
             println!("Adding to pool");
