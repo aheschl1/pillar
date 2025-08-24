@@ -3,7 +3,7 @@ use flume::{Receiver, Sender};
 use pillar_crypto::{hashing::{DefaultHash, Hashable}, signing::{DefaultSigner, SigFunction, Signable}, types::StdByteArray};
 use tracing::instrument;
 use std::{any::Any, collections::{HashMap, HashSet}, net::IpAddr, sync::Arc};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::{
     blockchain::chain::Chain,
@@ -83,13 +83,13 @@ pub struct NodeInner {
     /// The private key of the node
     pub private_key: StdByteArray,
     // known peers
-    pub peers: Mutex<HashMap<StdByteArray, Peer>>,
+    pub peers: RwLock<HashMap<StdByteArray, Peer>>,
     // the blockchain
     pub chain: Mutex<Option<Chain>>,
     /// transactions to be broadcasted
     pub broadcast_queue: lfqueue::UnboundedQueue<Message>,
     // a collection of things already broadcasted
-    pub broadcasted_already: Mutex<HashSet<StdByteArray>>,
+    pub broadcasted_already: RwLock<HashSet<StdByteArray>>,
     // transaction filter queue
     pub transaction_filters: Mutex<Vec<(TransactionFilter, Peer)>>,
     /// the datastore
@@ -97,7 +97,7 @@ pub struct NodeInner {
     /// A queue of blocks which are to be settled to the chain
     pub late_settle_queue: lfqueue::UnboundedQueue<Block>,
     /// the state represents the nodes ability to communicate with other nodes
-    pub state: Mutex<NodeState>,
+    pub state: RwLock<NodeState>,
     /// registered filters for the local node - producer will be this node, and consumer will be some backgroung thread that polls
     pub filter_callbacks: Mutex<HashMap<TransactionFilter, Sender<BlockHeader>>>,
 }
@@ -146,7 +146,7 @@ impl Node {
         let broadcast_queue = lfqueue::UnboundedQueue::new();
         let late_settle_queue = lfqueue::UnboundedQueue::new();
         let transaction_filters = Mutex::new(Vec::new());
-        let broadcasted_already = Mutex::new(HashSet::new());
+        let broadcasted_already = RwLock::new(HashSet::new());
         let peer_map = peers
             .iter()
             .map(|peer| (peer.public_key, peer.clone()))
@@ -158,13 +158,13 @@ impl Node {
             inner: NodeInner {
             public_key,
             private_key,
-            peers: Mutex::new(peer_map),
+            peers: RwLock::new(peer_map),
             chain: Mutex::new(maybe_chain),
             broadcasted_already,
             transaction_filters,
             broadcast_queue,
             filter_callbacks: Mutex::new(HashMap::new()), // initially no callbacks
-            state: Mutex::new(state), // initially in discovery mode
+            state: RwLock::new(state), // initially in discovery mode
             late_settle_queue,
             datastore: database,
             }.into(),
@@ -191,17 +191,17 @@ impl Node {
         let serve_killer = flume::bounded(1);
         let settle_killer = flume::bounded(1);
     
-        let state = self.inner.state.lock().await.clone();
+        let state = self.inner.state.read().await.clone();
         let handle = match state {
             NodeState::ICD => {
                 tracing::info!("Starting ICD.");
-                *self.inner.state.lock().await = NodeState::ChainLoading; // update state to chain loading
+                *self.inner.state.write().await = NodeState::ChainLoading; // update state to chain loading
                 let handle = tokio::spawn(dicover_chain(self.clone()));
                 Some(handle)
             },
             NodeState::ChainOutdated => {
                 tracing::info!("Node has an outdated chain. Starting sync.");
-                *self.inner.state.lock().await = NodeState::ChainSyncing; // update state to chain syncing
+                *self.inner.state.write().await = NodeState::ChainSyncing; // update state to chain syncing
                 let handle = tokio::spawn(sync_chain(self.clone()));
                 Some(handle)
             },
@@ -216,7 +216,7 @@ impl Node {
                 match result {
                     Ok(Ok(_)) => {
                         tracing::info!(target: "node_serve", "Node setup successfully.");
-                        let mut state = self_clone.inner.state.lock().await;
+                        let mut state = self_clone.inner.state.write().await;
                         // update to serving
                         *state = NodeState::Serving;
                     },
@@ -226,7 +226,7 @@ impl Node {
 
             });
         }
-        tracing::trace!("Node is now in state: {:?}", self.inner.state.lock().await);
+        tracing::trace!("Node is now in state: {:?}", self.inner.state.read().await);
         let _ = tokio::spawn(serve_peers(self.clone(), Some(serve_killer.1.clone())));
         let _ = tokio::spawn(broadcast_knowledge(self.clone(), Some(broadcast_killer.1.clone())));
         let _ = tokio::spawn(block_settle_consumer(self.clone(), Some(settle_killer.1.clone())));
@@ -247,7 +247,7 @@ impl Node {
         let _ = self.kill_serve.as_ref().unwrap().send(());
         let _ = self.kill_settle.as_ref().unwrap().send(());
         tracing::debug!("Kill signals sent.");
-        *self.inner.state.lock().await = NodeState::ChainOutdated;
+        *self.inner.state.write().await = NodeState::ChainOutdated;
         tracing::info!("Node stopping.");
     }
 
@@ -275,14 +275,14 @@ impl Node {
     #[instrument(name = "Node::serve_request", skip(self, message, _declared_peer), fields(
         public_key = ?self.inner.public_key,
         peer = ?_declared_peer.public_key,
-        message = ?message.type_id()
+        message = ?message.name()
     ))]
     pub async fn serve_request(&mut self, message: &Message, _declared_peer: Peer) -> Result<Message, std::io::Error> {
-        let state = self.inner.state.lock().await.clone();
+        let state = self.inner.state.read().await.clone();
         match message {
             Message::PeerRequest => {
                 // send all peers
-                let response = Message::PeerResponse(self.inner.peers.lock().await.values().cloned().collect());
+                let response = Message::PeerResponse(self.inner.peers.read().await.values().cloned().collect());
                 tracing::debug!("Sending {:?}", response);
                 Ok(response)
             }
@@ -311,10 +311,9 @@ impl Node {
                 Ok(Message::TransactionAck)
             }
             Message::BlockTransmission(block) => {
-                // add the block to the chain if we have downloaded it already - first it is verified TODO add to a queue to be added later
+                // add the block to the chain if we have downloaded it already - first it is verified
                 let mut block = block.clone();
                 if state.is_consume() && block.header.miner_address.is_none(){
-                    tracing::info!("Going to deal with this unmined block.");
                     self.settle_unmined_block(&mut block).await?;
                 }
                 
@@ -325,15 +324,15 @@ impl Node {
                     self.inner.late_settle_queue.enqueue(block.clone());
                     self.handle_callbacks(&block).await;
                 }
-
+                
                 if state.is_forward(){
                     // TODO handle is_track instead
                     // if we do not have the chain, just forward the block if there is room in the stamps
-                    if block.header.tail.n_stamps() < N_TRANSMISSION_SIGNATURES && !state.is_consume(){
+                    if block.header.tail.n_stamps() < N_TRANSMISSION_SIGNATURES && !state.is_consume() && block.header.miner_address.is_none() {
                         tracing::info!("Stamping and broadcasting only because not ");
-                        let _ = self.stamp_block(&mut block.clone());
+                        let _ = self.stamp_block(&mut block);
                     }
-                    self.inner.broadcast_queue.enqueue(Message::BlockTransmission(block.clone())); // forward
+                    self.inner.broadcast_queue.enqueue(Message::BlockTransmission(block)); // forward
                 }
                 Ok(Message::BlockAck)
             },
@@ -402,7 +401,7 @@ impl Node {
                     let _chain = self.inner.chain.lock().await;
                     let chain = _chain.as_ref().unwrap();
                     let peers = nth_percentile_peer(*lower_n, *upper_n, chain);
-                    let peers_map = self.inner.peers.lock().await.clone();
+                    let peers_map = self.inner.peers.read().await.clone();
                     // find the peer objects in the address list 
                     let filtered_peers = peers.iter().filter_map(|peer| {
                         peers_map.get(peer).cloned()
@@ -437,22 +436,22 @@ impl Node {
         tracing::info!("Block is not mined, stamping and transmitting.");
         let mut n_stamps = block.header.tail.n_stamps();
         let has_our_stamp = block.header.tail.stamps.iter().any(|stamp| stamp.address == self.inner.public_key);
-        let already_broadcasted = self.inner.broadcasted_already.lock().await.contains(
+        let already_broadcasted = self.inner.broadcasted_already.read().await.contains(
             &Message::BlockTransmission(block
                 .clone())
                 .hash(&mut DefaultHash::new())
                 .unwrap()
-        );
+            );
         tracing::debug!("Block has {} stamps, our stamp: {}, already broadcasted: {}", n_stamps, has_our_stamp, already_broadcasted);
-
+        
         if n_stamps < N_TRANSMISSION_SIGNATURES && !has_our_stamp {
             assert!(!already_broadcasted, "Block already broadcasted, but not stamped by us. This should not happen.");
             tracing::info!("Stamping block with our signature.");
             let _ = self.stamp_block(block);
             n_stamps += 1; // we have stamped the block
         }
-
-        if (already_broadcasted || n_stamps == N_TRANSMISSION_SIGNATURES) && self.miner_pool.is_some(){
+        
+        if ((already_broadcasted || n_stamps == N_TRANSMISSION_SIGNATURES)) && self.miner_pool.is_some(){
             // add the block to the pool
             tracing::info!("Adding block to miner pool.");
             self.miner_pool.as_ref().unwrap().add_mine_ready_block(block.clone());
@@ -513,7 +512,7 @@ impl Node {
 
     pub async fn maybe_update_peer(&self, peer: Peer) -> Result<(), std::io::Error> {
         // check if the peer is already in the list
-        let mut peers: tokio::sync::MutexGuard<'_, HashMap<StdByteArray, Peer>> = self.inner.peers.lock().await;
+        let mut peers = self.inner.peers.write().await;
         if (peer.public_key != self.inner.public_key) && !peers.iter().any(|(public_key, _)| public_key == &peer.public_key) {
             // add the peer to the list
             peers.insert(peer.public_key, peer);
@@ -549,13 +548,13 @@ pub trait Broadcaster {
 impl Broadcaster for Node {
     #[instrument(name = "Node::broadcast", skip(self, message), fields(
         public_key = ?self.inner.public_key,
-        message = ?message.type_id()
+        message = ?message.name()
     ))]
     async fn broadcast(&self, message: &Message) -> Result<Vec<Message>, std::io::Error> {
         // send a message to all peers
         let mut responses = Vec::new();
-        let mut peers = self.inner.peers.lock().await.clone(); // do not hold lock
-        for (_, peer) in peers.iter_mut(){
+        let peers = self.inner.peers.read().await.clone();
+        for (_, peer) in peers.iter(){
             let response = peer.communicate(message, &self.into()).await;
             if let Err(e) = response {
                 tracing::error!("Failed to communicate with peer {:?}: {:?}", peer.public_key, e);

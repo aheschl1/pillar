@@ -86,6 +86,36 @@ impl PillarSerialize for Message {
     }
 }
 
+impl Message{
+    pub fn name(&self) -> String {
+        match self{
+            Message::Ping => "Ping".to_string(),
+            Message::ChainRequest => "ChainRequest".to_string(),
+            Message::ChainResponse(_) => "ChainResponse".to_string(),
+            Message::PeerRequest => "PeerRequest".to_string(),
+            Message::PeerResponse(_) => "PeerResponse".to_string(),
+            Message::Declaration(_, _) => "Declaration".to_string(),
+            Message::TransactionBroadcast(_) => "TransactionBroadcast".to_string(),
+            Message::TransactionAck => "TransactionAck".to_string(),
+            Message::BlockTransmission(_) => "BlockTransmission".to_string(),
+            Message::BlockAck => "BlockAck".to_string(),
+            Message::BlockRequest(_) => "BlockRequest".to_string(),
+            Message::BlockResponse(_) => "BlockResponse".to_string(),
+            Message::ChainShardRequest => "ChainShardRequest".to_string(),
+            Message::ChainShardResponse(_) => "ChainShardResponse".to_string(),
+            Message::TransactionProofRequest(_) => "TransactionProofRequest".to_string(),
+            Message::TransactionProofResponse(_) => "TransactionProofResponse".to_string(),
+            Message::TransactionFilterRequest(_, _) => "TransactionFilterRequest".to_string(),
+            Message::TransactionFilterAck => "TransactionFilterAck".to_string(),
+            Message::TransactionFilterResponse(_, _) => "TransactionFilterResponse".to_string(),
+            Message::ChainSyncRequest(_) => "ChainSyncRequest".to_string(),
+            Message::ChainSyncResponse(_) => "ChainSyncResponse".to_string(),
+            Message::PercentileFilteredPeerRequest(_, _) => "PercentileFilteredPeerRequest".to_string(),
+            Message::PercentileFilteredPeerResponse(_) => "PercentileFilteredPeerResponse".to_string(),
+            Message::Error(_) => "Error".to_string(),
+        }
+    }
+}
 
 impl Hashable for Message{
     fn hash(&self, hasher: &mut impl HashFunction) -> Result<StdByteArray, std::io::Error> {

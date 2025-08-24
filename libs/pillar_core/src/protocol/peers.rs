@@ -11,14 +11,14 @@ pub async fn discover_peers(node: &mut Node) -> Result<(), std::io::Error> {
     let mut existing_peers = node
         .inner
         .peers
-        .lock()
+        .read()
         .await
         .keys()
         .cloned()
         .collect::<HashSet<_>>();
     let mut new_peers: Vec<Peer> = vec![];
     // send a message to the peers
-    for (_, peer) in node.inner.peers.lock().await.iter_mut() {
+    for (_, peer) in node.inner.peers.read().await.iter() {
         let peers = peer
             .communicate(&Message::PeerRequest, &node.clone().into())
             .await?;
@@ -125,7 +125,7 @@ mod tests {
         // Discover peers
         discover_peers(&mut node).await.unwrap();
         // Verify new peer was added
-        let peers = node.inner.peers.lock().await;
+        let peers = node.inner.peers.read().await;
         assert!(peers.contains_key(&new_peer.public_key));
         assert!(peers.contains_key(&new_peer2.public_key));
         assert_eq!(peers.len(), 3); // Existing + new peer

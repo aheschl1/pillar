@@ -1,10 +1,11 @@
+use core::sync;
 use std::{collections::{HashMap, HashSet}};
 
 use pillar_crypto::{hashing::{DefaultHash, Hashable}, merkle::generate_tree, types::StdByteArray};
 use rand::{rng, seq::{IteratorRandom}};
 use tracing::{instrument, warn};
 
-use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, nodes::{node::{Broadcaster, Node}, peer::Peer}, primitives::{block::{Block, BlockTail}, errors::{BlockValidationError, QueryError}, messages::Message, transaction::Transaction}};
+use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, nodes::{node::{Broadcaster, Node, NodeState}, peer::Peer}, primitives::{block::{Block, BlockTail}, errors::{BlockValidationError, QueryError}, messages::Message, transaction::Transaction}};
 
 use super::peers::discover_peers;
 
@@ -54,7 +55,7 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, Que
         let nodeclone = node.clone();
         let handle = tokio::spawn(async move{
             loop{ // keep asking for the node until we pass
-                let mut peer = nodeclone.clone().inner.peers.lock().await.values().choose(&mut rng()).unwrap().clone(); // random peer
+                let mut peer = nodeclone.clone().inner.peers.read().await.values().choose(&mut rng()).unwrap().clone(); // random peer
                 let block = query_block_from_peer(&mut peer, &nodeclone.clone().into(), hash).await;
                 if let Ok(block) = block {
                     // we got the block, send it to the channel
@@ -80,7 +81,7 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, Que
         loop{ // we need to keep going until it passes full validation
             match chain.add_new_block(block){
                 Err(_) => { // failed validation
-                    let mut peer = node.inner.peers.lock().await.values().choose(&mut rng()).unwrap().clone(); // random peer
+                    let mut peer = node.inner.peers.read().await.values().choose(&mut rng()).unwrap().clone(); // random peer
                     block = query_block_from_peer(&mut peer, &node.clone().into(), hash).await?; // one more attempt, then fail.
                 }
                 _ => {
@@ -100,9 +101,9 @@ pub async fn dicover_chain(mut node: Node) -> Result<(), QueryError> {
         QueryError::IOError
     )?;
     // broadcast the chain shard request to all peers
-    let mut peers = node.inner.peers.lock().await;
+    let peers = node.inner.peers.read().await;
     let mut chain_shards = Vec::new();
-    for (_, peer) in peers.iter_mut() {
+    for (_, peer) in peers.iter() {
         // send the chain shard request to the peer
         let response = peer.communicate(&Message::ChainShardRequest, &(node.clone().into())).await
             .map_err(QueryError::IOError)?;
@@ -160,7 +161,7 @@ pub fn get_genesis_block(state_root: Option<StdByteArray>) -> Block{
 /// TODO this may try to duplicate if there are forks in extensions - fix the final portion of the sync
 #[instrument(fields(node = ?node.inner.public_key))]
 pub async fn sync_chain(node: Node) -> Result<(), QueryError> {
-    if node.inner.peers.lock().await.is_empty(){
+    if node.inner.peers.read().await.is_empty(){
         tracing::info!("No peers to sync with, skipping chain sync");
         return Ok(());
     }
@@ -287,15 +288,36 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
         if let Some(signal) = &stop_signal {
             if signal.try_recv().is_ok() {break;}
         }
-        let state = node.inner.state.lock().await.clone();
+        let state = node.inner.state.read().await.clone();
         if !state.is_consume() {continue;}
         if let Some(block) = node.inner.late_settle_queue.dequeue(){
-            tracing::debug!("Settling block...");
+            tracing::debug!("Block poped from settle queue: {:?}", block.hash);
             let mut chain_lock = node.inner.chain.lock().await;
-            let chain = chain_lock.as_mut().unwrap();
+            let mut chain = chain_lock.as_mut().unwrap();
             if chain.get_block(&block.hash.unwrap()).is_some(){
-                warn!("Block already exists in chain, skippiNone,ng settlement: {:?}", block.hash.unwrap());
+                warn!("Block already exists in chain, skipping settlement: {:?}", block.hash.unwrap());
                 continue; // block already exists, skip
+            }
+            if chain.get_block(&block.header.previous_hash).is_none() {
+                warn!("Block previous hash not found in chain, triggering chain sync mode");
+                drop(chain_lock); // free the lock before we call sync
+                let initial_state = node.inner.state.read().await.clone();
+                *node.inner.state.write().await = NodeState::ChainSyncing;
+                let result = sync_chain(node.clone()).await.map_err(|e| {
+                    warn!("Failed to sync chain: {:?}. Skipping block settlement.", e);
+                    e
+                });
+                *node.inner.state.write().await = initial_state; // restore state
+                if result.is_err() {continue;} // failed to sync chain, skip settlement
+
+                chain_lock = node.inner.chain.lock().await;
+                chain = chain_lock.as_mut().unwrap();
+                
+                if chain.get_block(&block.header.previous_hash).is_none(){
+                    warn!("Block previous hash still not found in chain after sync, skipping settlement: {:?}", block.header.previous_hash);
+                    continue; // still not found, skip
+                }
+
             }
             // then we settle the block
             tracing::info!("Settling mined block with miner address: {:?}", block.header.miner_address);
