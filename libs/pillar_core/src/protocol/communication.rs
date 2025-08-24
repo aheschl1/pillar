@@ -38,21 +38,22 @@ pub async fn broadcast_knowledge(node: Node, stop_signal: Option<flume::Receiver
             }
         }
         let mut i = 0;
-        let mut broadcasted_already = node.inner.broadcasted_already.write().await;
         while i < 10 && let Some(broadcast) = node.inner.broadcast_queue.dequeue() {
             // receive the transaction from the sender
             let hash = broadcast.hash(&mut hasher).unwrap();
             // do not broadcast if already broadcasted
-            if broadcasted_already.contains(&hash) {
-                continue;
+            {
+                let mut broadcasted_already = node.inner.broadcasted_already.write().await;
+                if broadcasted_already.contains(&hash) {
+                    continue;
+                }
+                broadcasted_already.insert(hash);
             }
-            println!("started bcast ");
             node.broadcast(&broadcast).await?;
-            println!("finished bcast");
-            broadcasted_already.insert(hash);
             // add the message to the broadcasted list
             i += 1; // We want to make sure we check back at the mining pool
         }
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
 

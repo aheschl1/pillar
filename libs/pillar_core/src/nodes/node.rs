@@ -97,7 +97,7 @@ pub struct NodeInner {
     /// A queue of blocks which are to be settled to the chain
     pub late_settle_queue: lfqueue::UnboundedQueue<Block>,
     /// the state represents the nodes ability to communicate with other nodes
-    pub state: Mutex<NodeState>,
+    pub state: RwLock<NodeState>,
     /// registered filters for the local node - producer will be this node, and consumer will be some backgroung thread that polls
     pub filter_callbacks: Mutex<HashMap<TransactionFilter, Sender<BlockHeader>>>,
 }
@@ -164,7 +164,7 @@ impl Node {
             transaction_filters,
             broadcast_queue,
             filter_callbacks: Mutex::new(HashMap::new()), // initially no callbacks
-            state: Mutex::new(state), // initially in discovery mode
+            state: RwLock::new(state), // initially in discovery mode
             late_settle_queue,
             datastore: database,
             }.into(),
@@ -191,17 +191,17 @@ impl Node {
         let serve_killer = flume::bounded(1);
         let settle_killer = flume::bounded(1);
     
-        let state = self.inner.state.lock().await.clone();
+        let state = self.inner.state.read().await.clone();
         let handle = match state {
             NodeState::ICD => {
                 tracing::info!("Starting ICD.");
-                *self.inner.state.lock().await = NodeState::ChainLoading; // update state to chain loading
+                *self.inner.state.write().await = NodeState::ChainLoading; // update state to chain loading
                 let handle = tokio::spawn(dicover_chain(self.clone()));
                 Some(handle)
             },
             NodeState::ChainOutdated => {
                 tracing::info!("Node has an outdated chain. Starting sync.");
-                *self.inner.state.lock().await = NodeState::ChainSyncing; // update state to chain syncing
+                *self.inner.state.write().await = NodeState::ChainSyncing; // update state to chain syncing
                 let handle = tokio::spawn(sync_chain(self.clone()));
                 Some(handle)
             },
@@ -216,7 +216,7 @@ impl Node {
                 match result {
                     Ok(Ok(_)) => {
                         tracing::info!(target: "node_serve", "Node setup successfully.");
-                        let mut state = self_clone.inner.state.lock().await;
+                        let mut state = self_clone.inner.state.write().await;
                         // update to serving
                         *state = NodeState::Serving;
                     },
@@ -226,7 +226,7 @@ impl Node {
 
             });
         }
-        tracing::trace!("Node is now in state: {:?}", self.inner.state.lock().await);
+        tracing::trace!("Node is now in state: {:?}", self.inner.state.read().await);
         let _ = tokio::spawn(serve_peers(self.clone(), Some(serve_killer.1.clone())));
         let _ = tokio::spawn(broadcast_knowledge(self.clone(), Some(broadcast_killer.1.clone())));
         let _ = tokio::spawn(block_settle_consumer(self.clone(), Some(settle_killer.1.clone())));
@@ -247,7 +247,7 @@ impl Node {
         let _ = self.kill_serve.as_ref().unwrap().send(());
         let _ = self.kill_settle.as_ref().unwrap().send(());
         tracing::debug!("Kill signals sent.");
-        *self.inner.state.lock().await = NodeState::ChainOutdated;
+        *self.inner.state.write().await = NodeState::ChainOutdated;
         tracing::info!("Node stopping.");
     }
 
@@ -278,7 +278,7 @@ impl Node {
         message = ?message.name()
     ))]
     pub async fn serve_request(&mut self, message: &Message, _declared_peer: Peer) -> Result<Message, std::io::Error> {
-        let state = self.inner.state.lock().await.clone();
+        let state = self.inner.state.read().await.clone();
         match message {
             Message::PeerRequest => {
                 // send all peers
@@ -320,7 +320,6 @@ impl Node {
                 // send block to be settled, 
                 // and handle callback if mined
                 if (state.is_track() || state.is_consume()) && block.header.miner_address.is_some() {
-                    println!("Received block: {:?}", self.inner.public_key);
                     tracing::info!("Handling callbacks and settle for mined block.");
                     self.inner.late_settle_queue.enqueue(block.clone());
                     self.handle_callbacks(&block).await;
@@ -442,7 +441,7 @@ impl Node {
                 .clone())
                 .hash(&mut DefaultHash::new())
                 .unwrap()
-        );
+            );
         tracing::debug!("Block has {} stamps, our stamp: {}, already broadcasted: {}", n_stamps, has_our_stamp, already_broadcasted);
         
         if n_stamps < N_TRANSMISSION_SIGNATURES && !has_our_stamp {
@@ -452,7 +451,6 @@ impl Node {
             n_stamps += 1; // we have stamped the block
         }
         
-        println!("Block has {} stamps, our stamp: {}, already broadcasted: {}", n_stamps, has_our_stamp, already_broadcasted);
         if ((already_broadcasted || n_stamps == N_TRANSMISSION_SIGNATURES)) && self.miner_pool.is_some(){
             // add the block to the pool
             tracing::info!("Adding block to miner pool.");

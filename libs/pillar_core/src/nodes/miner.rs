@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use pillar_crypto::hashing::DefaultHash;
 use tracing::instrument;
 
@@ -50,7 +52,7 @@ impl Miner{
 #[instrument(skip_all, name="Miner::monitor_transaction_pool")]
 async fn monitor_transaction_pool(miner: Miner) {
     // monitor the pool for transactions
-    let mut transactions = vec![];
+    let mut transactions = HashSet::new();
     let mut last_polled_at: Option<u64> = None;
     loop {
         tracing::trace!("waiting for transactions to mine...");
@@ -68,7 +70,7 @@ async fn monitor_transaction_pool(miner: Miner) {
                 continue; // skip if chain is not initialized
             }
             drop(chain); // cause i feel like it
-            transactions.push(transaction);
+            transactions.insert(transaction);
             // grab unix timestamp
             last_polled_at = Some(std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -88,7 +90,7 @@ async fn monitor_transaction_pool(miner: Miner) {
                 chain.get_top_block().unwrap().hash.unwrap(), // if it crahses, there is bug
                 0, // undefined nonce
                 now,
-                transactions,
+                transactions.iter().copied().collect(),
                 None, // because this is a proposition on an unmined node
                 BlockTail::default().stamps,
                 chain.depth + 1,
@@ -102,7 +104,7 @@ async fn monitor_transaction_pool(miner: Miner) {
             pool.as_ref().unwrap().add_block_proposition(block);
             // reset for next mine
             last_polled_at = None;
-            transactions = vec![];
+            transactions = HashSet::new();
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }

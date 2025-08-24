@@ -288,7 +288,7 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
         if let Some(signal) = &stop_signal {
             if signal.try_recv().is_ok() {break;}
         }
-        let state = node.inner.state.lock().await.clone();
+        let state = node.inner.state.read().await.clone();
         if !state.is_consume() {continue;}
         if let Some(block) = node.inner.late_settle_queue.dequeue(){
             tracing::debug!("Block poped from settle queue: {:?}", block.hash);
@@ -301,13 +301,13 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
             if chain.get_block(&block.header.previous_hash).is_none() {
                 warn!("Block previous hash not found in chain, triggering chain sync mode");
                 drop(chain_lock); // free the lock before we call sync
-                let initial_state = node.inner.state.lock().await.clone();
-                *node.inner.state.lock().await = NodeState::ChainSyncing;
+                let initial_state = node.inner.state.read().await.clone();
+                *node.inner.state.write().await = NodeState::ChainSyncing;
                 let result = sync_chain(node.clone()).await.map_err(|e| {
                     warn!("Failed to sync chain: {:?}. Skipping block settlement.", e);
                     e
                 });
-                *node.inner.state.lock().await = initial_state; // restore state
+                *node.inner.state.write().await = initial_state; // restore state
                 if result.is_err() {continue;} // failed to sync chain, skip settlement
 
                 chain_lock = node.inner.chain.lock().await;
