@@ -200,7 +200,6 @@ impl Chain {
             // nonces need tto be contiguous
             nonces.sort();
             for i in 0..nonces.len() - 1 {
-                println!("{}", nonces[i]);
                 if nonces[i] + 1 != nonces[i + 1] {
                     tracing::info!("Nonces are not contiguous for user {:?} - Failing", user);
                     return Err(BlockValidationError::TransactionNonceMismatch(

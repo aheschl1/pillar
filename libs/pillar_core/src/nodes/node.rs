@@ -454,7 +454,6 @@ impl Node {
         if ((already_broadcasted || n_stamps == N_TRANSMISSION_SIGNATURES)) && self.miner_pool.is_some(){
             // add the block to the pool
             tracing::info!("Adding block to miner pool.");
-            println!("Adding to pool");
             self.miner_pool.as_ref().unwrap().add_mine_ready_block(block.clone());
         }
         Ok(())
