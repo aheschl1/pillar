@@ -53,7 +53,8 @@ pub async fn broadcast_knowledge(node: Node, stop_signal: Option<flume::Receiver
             // add the message to the broadcasted list
             i += 1; // We want to make sure we check back at the mining pool
         }
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        // this is a hack to simply yield to the runtime
+        tokio::time::sleep(Duration::from_millis(1)).await;
     }
 }
 
