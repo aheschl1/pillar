@@ -2,7 +2,7 @@ use super::peer::Peer;
 use flume::{Receiver, Sender};
 use pillar_crypto::{hashing::{DefaultHash, Hashable}, signing::{DefaultSigner, SigFunction, Signable}, types::StdByteArray};
 use tracing::instrument;
-use std::{any::Any, collections::{HashMap, HashSet}, net::IpAddr, sync::Arc};
+use std::{collections::{HashMap, HashSet}, net::IpAddr, sync::Arc};
 use tokio::sync::{Mutex, RwLock};
 
 use crate::{

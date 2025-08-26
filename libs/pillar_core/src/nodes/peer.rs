@@ -79,7 +79,6 @@ impl Peer{
     }
 
     pub async fn communicate(&self, message: &Message, initializing_peer: &Peer) -> Result<Message, std::io::Error> {
-        
         let stream = timeout(Duration::from_secs(1), self.send_initial(message, initializing_peer)).await??;
         let response = self.read_response(stream).await?;
         Ok(response)

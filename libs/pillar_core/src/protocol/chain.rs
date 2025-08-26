@@ -1,4 +1,3 @@
-use core::sync;
 use std::{collections::{HashMap, HashSet}};
 
 use pillar_crypto::{hashing::{DefaultHash, Hashable}, merkle::generate_tree, types::StdByteArray};
