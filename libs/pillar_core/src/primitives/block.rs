@@ -172,16 +172,16 @@ pub struct BlockHeader{
     pub previous_hash: StdByteArray,
     // merkle_root is the root hash of the transactions in this block
     pub merkle_root: StdByteArray,
-    // state_root is the root hash of the global state after this block
-    pub state_root: Option<StdByteArray>,
     // nonce is a random number used to find a valid hash
     pub nonce: u64,
     // timestamp is the time the block was created
     pub timestamp: u64,
-    // the address of the miner is the sha3_256 hash of the miner address
-    pub miner_address: Option<StdByteArray>,
     // the depth is a depth of the block in the chain
     pub depth: u64,
+    // state_root is the root hash of the global state after this block
+    pub state_root: Option<StdByteArray>,
+    // the address of the miner is the sha3_256 hash of the miner address
+    pub miner_address: Option<StdByteArray>,
     // difficulty target of the block
     pub difficulty_target: Option<u64>,
     // tail is the tail of the block which can contain stamps
