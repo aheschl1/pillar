@@ -8,7 +8,7 @@ use tokio::time::{timeout, Duration};
 use tracing::instrument;
 
 use crate::{
-    nodes::node::{Broadcaster, Node}, primitives::messages::{get_declaration_length, Message, Versions}
+    nodes::node::{Broadcaster, Node}, primitives::messages::Message, protocol::{versions::{get_declaration_length, Versions}, PROTOCOL_VERSION}
 };
 
 /// Background process that consumes mined blocks, and transactions which must be forwarded
@@ -89,7 +89,7 @@ pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
         let mut self_clone = node.clone();
         tokio::spawn(async move {
             // first read the peer declaration
-            let mut buffer = [0; get_declaration_length(Versions::V1V4) as usize];
+            let mut buffer = [0; get_declaration_length(PROTOCOL_VERSION) as usize];
             let result = timeout(Duration::from_secs(1), stream.read_exact(&mut buffer)).await;
             let status = match &result {
                 Ok(Ok(_)) => 0,
@@ -272,7 +272,7 @@ mod tests {
         
         // receive peer declaration from node
 
-        let mut b = [0; get_declaration_length(Versions::V1V4) as usize];
+        let mut b = [0; get_declaration_length(PROTOCOL_VERSION) as usize];
         let _ = peer_stream.read_exact(&mut b).await.unwrap();
         let declaration: Message = PillarSerialize::deserialize_pillar(&b).unwrap();
         match declaration {

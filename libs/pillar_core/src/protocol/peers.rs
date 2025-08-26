@@ -51,7 +51,8 @@ mod tests {
 
     use super::*;
     use crate::nodes::{node::Node, peer::Peer};
-    use crate::primitives::messages::{get_declaration_length, Versions};
+    use crate::protocol::versions::{get_declaration_length, Versions};
+    use crate::protocol::PROTOCOL_VERSION;
     use std::net::{IpAddr, Ipv4Addr};
     use std::str::FromStr;
 
@@ -95,7 +96,7 @@ mod tests {
         tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             // expect a peer declaration 
-            let mut buffer = [0; get_declaration_length(Versions::V1V4) as usize];
+            let mut buffer = [0; get_declaration_length(PROTOCOL_VERSION) as usize];
             stream.read_exact(&mut buffer).await.unwrap();
             let message: Message = PillarSerialize::deserialize_pillar(&buffer).unwrap();
             let expected_request = Message::PeerRequest;

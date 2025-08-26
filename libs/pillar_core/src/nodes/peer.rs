@@ -93,7 +93,7 @@ mod tests{
     use pillar_crypto::serialization::PillarSerialize;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    use crate::{nodes::peer::Peer, primitives::messages::{get_declaration_length, Message, Versions}};
+    use crate::{nodes::peer::Peer, primitives::messages::Message, protocol::{versions::{get_declaration_length, Versions}, PROTOCOL_VERSION}};
 
     #[test]
     fn test_peer_new(){
@@ -115,7 +115,7 @@ mod tests{
             // wait for a connection
             let (mut stream, _) = listener.accept().await.unwrap();
             // read the message - expect a declaration and then a ping
-            let mut buffer = [0; get_declaration_length(Versions::V1V4) as usize];
+            let mut buffer = [0; get_declaration_length(PROTOCOL_VERSION) as usize];
             let n = stream.read_exact(&mut buffer).await.unwrap();
             // deserialize with bincode
             let message: Message = PillarSerialize::deserialize_pillar(&buffer[..n]).unwrap();
@@ -158,7 +158,7 @@ mod tests{
             // wait for a connection
             let (mut stream, _) = listener.accept().await.unwrap();
             // read the message - expect a declaration and then a ping
-            let mut buffer = [0; get_declaration_length(Versions::V1V4) as usize];
+            let mut buffer = [0; get_declaration_length(PROTOCOL_VERSION) as usize];
             let n = stream.read_exact(&mut buffer).await.unwrap();
             // deserialize with bincode
             let message: Message = PillarSerialize::deserialize_pillar(&buffer[..n]).unwrap();

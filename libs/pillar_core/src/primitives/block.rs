@@ -11,6 +11,7 @@ use serde_with::{serde_as, Bytes};
 use crate::primitives::errors::BlockValidationError;
 use crate::protocol::pow::is_valid_hash;
 use crate::protocol::reputation::N_TRANSMISSION_SIGNATURES;
+use crate::protocol::versions::Versions;
 use super::transaction::Transaction;
 
 #[derive(Debug, Serialize, Clone, PartialEq, Eq)]
@@ -178,6 +179,8 @@ pub struct BlockHeader{
     pub timestamp: u64,
     // the depth is a depth of the block in the chain
     pub depth: u64,
+    // version of the protocol used in this block
+    pub version: Versions,
     // state_root is the root hash of the global state after this block
     pub state_root: Option<StdByteArray>,
     // the address of the miner is the sha3_256 hash of the miner address
@@ -199,6 +202,26 @@ impl BlockHeader {
         depth: u64,
         difficulty_target: Option<u64>,
     ) -> Self {
+        Self::new_with_version(
+            previous_hash, 
+            merkle_root, 
+            state_root, 
+            nonce, 
+            timestamp, 
+            miner_address, tail, depth, difficulty_target, Versions::default())
+    }
+
+    fn new_with_version(
+        previous_hash: StdByteArray, 
+        merkle_root: StdByteArray, 
+        state_root: Option<StdByteArray>,
+        nonce: u64, timestamp: u64,
+        miner_address: Option<StdByteArray>,
+        tail: BlockTail,
+        depth: u64,
+        difficulty_target: Option<u64>,
+        version: Versions
+    ) -> Self {
         BlockHeader {
             previous_hash,
             merkle_root,
@@ -209,6 +232,7 @@ impl BlockHeader {
             depth,
             tail,
             difficulty_target,
+            version
         }
     }
 
@@ -275,6 +299,7 @@ impl BlockHeader {
         hasher.update(self.merkle_root);
         hasher.update(self.timestamp.to_le_bytes());
         hasher.update(self.depth.to_le_bytes());
+        hasher.update(self.version.to_le_bytes());
         Ok(hasher.digest().unwrap())
     }
 }
@@ -312,6 +337,7 @@ impl Hashable for BlockHeader {
         hash_function.update(self.timestamp.to_le_bytes());
         hash_function.update(self.depth.to_le_bytes());
         hash_function.update(self.difficulty_target.unwrap().to_le_bytes());
+        hash_function.update(self.version.to_le_bytes());
 
         for i in 0..N_TRANSMISSION_SIGNATURES {
             hash_function.update(self.tail.stamps[i].signature);
