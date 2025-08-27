@@ -1,4 +1,4 @@
-use pillar_crypto::{hashing::{DefaultHash, Hashable}, serialization::PillarSerialize};
+use pillar_crypto::{hashing::{DefaultHash, Hashable}};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -8,7 +8,7 @@ use tokio::time::{timeout, Duration};
 use tracing::instrument;
 
 use crate::{
-    nodes::node::{Broadcaster, Node}, primitives::messages::Message, protocol::{versions::{get_declaration_length, Versions}, PROTOCOL_VERSION}
+    nodes::node::{Broadcaster, Node}, primitives::messages::Message, protocol::{serialization::PillarSerialize, versions::{get_declaration_length, Versions}, PROTOCOL_VERSION}
 };
 
 /// Background process that consumes mined blocks, and transactions which must be forwarded
@@ -193,6 +193,7 @@ mod tests {
     use super::*;
     use tokio::net::TcpStream;
     use crate::nodes::peer::Peer;
+    use crate::protocol::serialization::PillarSerialize;
     use crate::{
         primitives::transaction::Transaction
     };

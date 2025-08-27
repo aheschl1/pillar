@@ -1,9 +1,9 @@
 use std::{net::IpAddr, time::Duration};
 
-use pillar_crypto::serialization::PillarSerialize;
 use serde::{Serialize, Deserialize};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream, time::timeout};
 use tracing::instrument;
+use crate::protocol::serialization::PillarSerialize;
 
 use crate::{primitives::messages::Message};
 
@@ -90,10 +90,9 @@ mod tests{
     use core::panic;
     use std::net::{IpAddr, Ipv4Addr};
 
-    use pillar_crypto::serialization::PillarSerialize;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    use crate::{nodes::peer::Peer, primitives::messages::Message, protocol::{versions::{get_declaration_length, Versions}, PROTOCOL_VERSION}};
+    use crate::{nodes::peer::Peer, primitives::messages::Message, protocol::{serialization::PillarSerialize, versions::{get_declaration_length, Versions}, PROTOCOL_VERSION}};
 
     #[test]
     fn test_peer_new(){

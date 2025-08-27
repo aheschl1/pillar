@@ -8,5 +8,6 @@ pub mod transactions;
 pub mod communication;
 pub mod reputation;
 pub mod versions;
+pub mod serialization;
 
 pub const PROTOCOL_VERSION: Versions = Versions::V1V4;

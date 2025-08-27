@@ -46,12 +46,12 @@ pub async fn discover_peers(node: &mut Node) -> Result<(), std::io::Error> {
 
 #[cfg(test)]
 mod tests {
-    use pillar_crypto::serialization::PillarSerialize;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::*;
     use crate::nodes::{node::Node, peer::Peer};
-    use crate::protocol::versions::{get_declaration_length, Versions};
+    use crate::protocol::serialization::PillarSerialize;
+    use crate::protocol::versions::{get_declaration_length};
     use crate::protocol::PROTOCOL_VERSION;
     use std::net::{IpAddr, Ipv4Addr};
     use std::str::FromStr;

@@ -42,9 +42,7 @@ pub const fn get_declaration_length(version: Versions) -> u64 {
 
 mod tests{
 
-    use pillar_crypto::serialization::PillarSerialize;
-
-    use crate::{nodes::peer::Peer, primitives::messages::Message, protocol::versions::{get_declaration_length, Versions}};
+    use crate::{nodes::peer::Peer, primitives::messages::Message, protocol::{serialization::PillarSerialize, versions::{get_declaration_length, Versions}}};
 
 
     #[test]

@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
-use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, nodes::peer::Peer, primitives::{block::{Block, BlockHeader}, transaction::{Transaction, TransactionFilter}}};
-use pillar_crypto::{hashing::{HashFunction, Hashable}, proofs::MerkleProof, serialization::PillarSerialize, types::StdByteArray};
+use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, nodes::peer::Peer, primitives::{block::{Block, BlockHeader}, transaction::{Transaction, TransactionFilter}}, protocol::serialization::PillarSerialize};
+use pillar_crypto::{hashing::{HashFunction, Hashable}, proofs::MerkleProof, types::StdByteArray};
 use serde::{Serialize, Deserialize};
 
 
@@ -55,35 +55,6 @@ pub enum Message {
     PercentileFilteredPeerResponse(Vec<Peer>),
     // error message
     Error(String)
-}
-
-impl PillarSerialize for Message {
-    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
-        match self {
-            Message::Declaration(_, _) => {
-                bincode::serialize(&self).map_err(std::io::Error::other)
-            },
-            _ => {
-                let encoded = bincode::serialize(&self).map_err(std::io::Error::other)?;
-                let compressed = lz4_flex::compress_prepend_size(&encoded);
-                Ok(compressed)
-            }
-        }
-    }
-
-    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
-        // bincode::deserialize::<Self>(data).map_err(std::io::Error::other)
-        let decompressed = lz4_flex::decompress_size_prepended(data).map_err(std::io::Error::other);
-        match decompressed {
-            Ok(decompressed) => {
-                bincode::deserialize::<Self>(&decompressed).map_err(std::io::Error::other)
-            },
-            Err(_) => {
-                // if the decompression fails, try to deserialize without decompression
-                bincode::deserialize::<Self>(data).map_err(std::io::Error::other)
-            }
-        }
-    }
 }
 
 impl Message{

@@ -4,4 +4,3 @@ pub mod signing;
 pub mod merkle_trie;
 pub mod proofs;
 pub mod types;
-pub mod serialization;
