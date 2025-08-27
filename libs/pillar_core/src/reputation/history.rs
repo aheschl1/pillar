@@ -69,7 +69,7 @@ impl NodeHistory{
                     break;
                 }
                 blocks_seen.insert(hash);
-                if current_block.miner_address.expect("no miner address on header") == miner{
+                if current_block.completion.expect("Block should be complete").miner_address == miner{
                     blocks_mined.push(current_block.into());
                 }
                 curr = shard.get_block(&current_block.previous_hash); // recurse
@@ -86,9 +86,6 @@ impl NodeHistory{
     /// Settle a new block into the history of the node
     /// This is used when the node is a miner and has mined a new block
     pub fn settle_miner(&mut self, block: BlockHeader){
-        if block.miner_address.is_none() || block.miner_address.unwrap() != self.public_key{
-            panic!("Block does not belong to this miner");
-        }
         self.blocks_mined.push(block.into());
     }
 

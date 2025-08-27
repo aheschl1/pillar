@@ -319,7 +319,7 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
 
             }
             // then we settle the block
-            tracing::info!("Settling mined block with miner address: {:?}", block.header.miner_address);
+            tracing::info!("Settling mined block with miner address: {:?}", block.header.completion.as_ref().map(|c| c.miner_address));
             if chain.add_new_block(block.clone()).is_err() {continue;} // failed to add the block
             tracing::info!("Valid block added to chain.");
             drop(chain_lock); // free lock cause why not

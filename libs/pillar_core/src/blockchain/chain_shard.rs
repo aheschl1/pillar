@@ -139,7 +139,7 @@ mod tests {
                 0,
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth,
                 vec![transaction],
-                Some(sender),
+                None,
                 BlockTail::default().stamps,
                 depth,
                 None,
@@ -147,7 +147,7 @@ mod tests {
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&parent_hash).expect("Parent hash must exist");
-            let state_root = chain.state_manager.branch_from_block(&block, prev_header);
+            let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
             mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
             parent_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
@@ -163,7 +163,7 @@ mod tests {
             0,
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()+30,
             vec![trans],
-            Some(sender),
+            None,
             BlockTail::default().stamps,
             1,
             None,
@@ -171,7 +171,7 @@ mod tests {
             &mut DefaultHash::new(),
         );
         let prev_header = chain.headers.get(&genesis_hash).expect("Genesis hash must exist");
-        let state_root = chain.state_manager.branch_from_block(&fork_block, prev_header);
+        let state_root = chain.state_manager.branch_from_block_internal(&fork_block, prev_header, &sender);
         mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
         chain.add_new_block(fork_block.clone()).unwrap();
 
@@ -205,7 +205,7 @@ mod tests {
                 0,
                 time,
                 vec![transaction],
-                Some(sender),
+                None,
                 BlockTail::default().stamps,
                 depth,
                 None,
@@ -213,7 +213,7 @@ mod tests {
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&parent_hash).expect("Parent hash must exist");
-            let state_root = chain.state_manager.branch_from_block(&block, prev_header);
+            let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
             mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
             parent_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
@@ -227,7 +227,7 @@ mod tests {
             0,
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 50,
             vec![trans],
-            Some(sender),
+            None,
             BlockTail::default().stamps,
             1,
             None,
@@ -235,7 +235,7 @@ mod tests {
             &mut DefaultHash::new(),
         );
         let prev_header = chain.headers.get(&genesis_hash).expect("Genesis hash must exist");
-        let state_root = chain.state_manager.branch_from_block(&fork_block, prev_header);
+        let state_root = chain.state_manager.branch_from_block_internal(&fork_block, prev_header, &sender);
         mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
         let fork_hash = fork_block.hash.unwrap();
         chain.add_new_block(fork_block).unwrap();
@@ -265,7 +265,7 @@ mod tests {
                 0,
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth,
                 vec![transaction],
-                Some(sender),
+                None,
                 BlockTail::default().stamps,
                 depth,
                 None,
@@ -273,7 +273,7 @@ mod tests {
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&main_hash).expect("Parent hash must exist");
-            let state_root = chain.state_manager.branch_from_block(&block, prev_header);
+            let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
             mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
@@ -289,7 +289,7 @@ mod tests {
                 0,
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 20,
                 vec![transaction],
-                Some(sender),
+                None,
                 BlockTail::default().stamps,
                 1,
                 None,
@@ -297,7 +297,7 @@ mod tests {
                 &mut DefaultHash::new(),
             );
             let prev_header = chain.headers.get(&genesis_hash).expect("Genesis hash must exist");
-            let state_root = chain.state_manager.branch_from_block(&fork_block, prev_header);
+            let state_root = chain.state_manager.branch_from_block_internal(&fork_block, prev_header, &sender);
             mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
             let hash = fork_block.hash.unwrap();
             fork_hashes.push(hash);

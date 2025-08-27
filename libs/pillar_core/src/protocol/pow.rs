@@ -4,7 +4,7 @@ use flume::Receiver;
 use pillar_crypto::{hashing::{HashFunction, Hashable}, types::StdByteArray};
 
 
-use crate::primitives::block::{Block, BlockHeader};
+use crate::primitives::block::{Block, BlockHeader, HeaderCompletion};
 
 use super::difficulty::_get_base_difficulty_from_depth;
 
@@ -62,9 +62,11 @@ pub async fn mine(
     let (difficulty, _) = get_difficulty_for_block(&block.header, &reputations);
 
     block.header.nonce = 0;
-    block.header.miner_address = Some(address);
-    block.header.state_root = Some(state_root);
-    block.header.difficulty_target = Some(difficulty);
+    block.header.completion = Some(HeaderCompletion{
+        miner_address: address,
+        difficulty_target: difficulty,
+        state_root: state_root,
+    });
     loop {
         match block.header.hash(&mut hash_function){
             Ok(hash) => {

@@ -23,6 +23,12 @@ impl Versions{
             _ => None,
         }
     }
+    pub fn to_u16(&self) -> u16 {
+        match self {
+            Versions::V1V4 => 1,
+            Versions::V1V6 => 2,
+        }
+    }
     pub fn to_le_bytes(&self) -> [u8; 2] {
         match self {
             Versions::V1V4 => 1u16.to_le_bytes(),
