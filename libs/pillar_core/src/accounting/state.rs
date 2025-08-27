@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Debug, sync::{Arc, Mutex}};
 
 use pillar_crypto::{merkle_trie::MerkleTrie, types::StdByteArray};
 
-use crate::{accounting::account::Account, primitives::block::{Block, BlockHeader}, protocol::{difficulty::get_reward_from_depth_and_stampers, pow::{get_difficulty_for_block, POR_INCLUSION_MINIMUM, POR_MINER_SHARE_DIVISOR}, reputation::get_current_reputations_for_stampers_from_state}, reputation::history::NodeHistory};
+use crate::{accounting::account::Account, nodes::miner, primitives::block::{Block, BlockHeader}, protocol::{difficulty::get_reward_from_depth_and_stampers, pow::{get_difficulty_for_block, POR_INCLUSION_MINIMUM, POR_MINER_SHARE_DIVISOR}, reputation::get_current_reputations_for_stampers_from_state}, reputation::history::NodeHistory};
 
 pub type ReputationMap = HashMap<StdByteArray, NodeHistory>;
 
@@ -60,7 +60,21 @@ impl StateManager{
     /// This is called when a new block is added to the chain
     /// This does NOT verify the block - VERIFY THE BLOCK FIRST
     /// This is called when a new block is added to the chain
-    pub fn branch_from_block(&mut self, block: &Block, prev_header: &BlockHeader) -> StdByteArray{
+    pub fn branch_from_block(
+        &mut self,
+        block: &Block,
+        prev_header: &BlockHeader,
+    ) -> StdByteArray {
+        let miner_address = block.header.completion.expect("Block should be complete").miner_address;
+        self.branch_from_block_internal(block, prev_header, &miner_address)
+    }
+
+    pub fn branch_from_block_internal(
+        &mut self, 
+        block: &Block, 
+        prev_header: &BlockHeader,
+        miner_address: &StdByteArray,
+    ) -> StdByteArray{
         // grab info on the stampers from the previous block
         let previous_reputations = get_current_reputations_for_stampers_from_state(
             self,
@@ -73,7 +87,7 @@ impl StateManager{
         );
         // Update the accounts from the block
         let mut state_updates: HashMap<StdByteArray, Account> = HashMap::new();
-        let state_root = prev_header.state_root.expect("Previous block must have a state root");
+        let state_root = prev_header.completion.expect("Previous block should be complete").state_root;
         let mut state_trie = self.state_trie.lock().expect("Failed to lock state trie");
         for transaction in &block.transactions {
             let mut sender = match state_updates.get(&transaction.header.sender){
@@ -109,17 +123,16 @@ impl StateManager{
         // add the miner reward. this reward will be based upon the blocks difficulty, and the number of stamps.
         let reward = get_reward_from_depth_and_stampers(block.header.depth, block.header.tail.n_stamps());
         // settle the transaction with the miner
-        let miner_address = block.header.miner_address.expect("Block must have a miner address");
-        let mut miner_account = match state_updates.get(&miner_address){
+        let mut miner_account = match state_updates.get(miner_address){
             Some(account) => account.clone(),
             None => {
                 // if the miner account does not exist, we create a new account with 0 balance
-                state_trie.get(&miner_address, state_root).unwrap_or(Account::new(miner_address, 0))
+                state_trie.get(&miner_address, state_root).unwrap_or(Account::new(*miner_address, 0))
             }
         };
         miner_account.balance += if !por_enabled {reward} else {div_up(reward, POR_MINER_SHARE_DIVISOR)};
         if miner_account.history.is_none(){
-            miner_account.history = Some(NodeHistory::new(miner_address));
+            miner_account.history = Some(NodeHistory::new(*miner_address));
         }
         // distribute POR shares if PoR is enabled
         if por_enabled {
@@ -152,7 +165,7 @@ impl StateManager{
             // do not upgrade the trust for mining in PoR mode
             let history = miner_account.history.as_mut().unwrap();
             history.settle_miner(block.header);
-            state_updates.insert(miner_address, miner_account);
+            state_updates.insert(*miner_address, miner_account);
         }
 
         for stamper in block.header.tail.get_stampers().iter(){

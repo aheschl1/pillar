@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use pillar_crypto::hashing::DefaultHash;
 use tracing::instrument;
 
-use crate::{primitives::{block::{Block, BlockTail}, messages::Message}, protocol::{pow::mine, reputation::get_current_reputations_for_stampers}};
+use crate::{primitives::{block::{Block, BlockTail, HeaderCompletion}, messages::Message}, protocol::{pow::{get_difficulty_for_block, mine}, reputation::get_current_reputations_for_stampers}};
 
 use super::{node::{Broadcaster, Node}};
 
@@ -114,7 +114,6 @@ async fn monitor_block_pool(miner: Miner) {
     loop {
         // check if there is a block to mine
         if let Some(mut block) = miner.node.miner_pool.as_ref().unwrap().pop_mine_ready_block(){
-            block.header.miner_address = Some(miner.node.inner.public_key);
             block.header.tail.clean(&block.header.clone()); // removes broken signatures
             let mut chain_lock = miner.node.inner.chain.lock().await;
             let chain = chain_lock.as_mut().unwrap();
@@ -125,12 +124,13 @@ async fn monitor_block_pool(miner: Miner) {
             
             let state_root = chain
                 .state_manager
-                .branch_from_block(&block, prev_block);
+                .branch_from_block_internal(&block, prev_block, &miner.node.inner.public_key);
             let reputations = get_current_reputations_for_stampers(
                 chain, 
                 &block.header
             ).values().cloned().collect::<Vec<f64>>();
             drop(chain_lock); // drop the lock before mining
+            // the block is already pupulated
             mine(
                 &mut block, 
                 miner.node.inner.public_key,
@@ -197,10 +197,10 @@ mod test{
         mine(&mut block, miner.node.inner.public_key, [8; 32], vec![], None, hasher).await;
         
         assert!(block.header.nonce > 0);
-        assert!(block.header.miner_address.is_some());
+        assert!(block.header.completion.is_some());
         assert_eq!(block.header.previous_hash, previous_hash);
         assert_eq!(block.header.timestamp, timestamp);
-        assert_eq!(block.header.difficulty_target, Some(MIN_DIFFICULTY)); // assuming initial difficulty is 4
+        assert_eq!(block.header.completion.unwrap().difficulty_target, MIN_DIFFICULTY); // assuming initial difficulty is 4
         assert!(block.hash.is_some());
     }
 }

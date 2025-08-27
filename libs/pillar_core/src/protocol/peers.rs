@@ -50,9 +50,7 @@ mod tests {
 
     use super::*;
     use crate::nodes::{node::Node, peer::Peer};
-    use crate::protocol::serialization::PillarSerialize;
-    use crate::protocol::versions::{get_declaration_length};
-    use crate::protocol::PROTOCOL_VERSION;
+    use crate::protocol::serialization::{package_standard_message, read_standard_message};
     use std::net::{IpAddr, Ipv4Addr};
     use std::str::FromStr;
 
@@ -96,30 +94,21 @@ mod tests {
         tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             // expect a peer declaration 
-            let mut buffer = [0; get_declaration_length(PROTOCOL_VERSION) as usize];
-            stream.read_exact(&mut buffer).await.unwrap();
-            let message: Message = PillarSerialize::deserialize_pillar(&buffer).unwrap();
-            let expected_request = Message::PeerRequest;
-            let serialized = expected_request.serialize_pillar().unwrap();
+            let message: Message = read_standard_message(&mut stream).await.unwrap();
             match message {
-                Message::Declaration(peer, size) => {
+                Message::Declaration(peer) => {
                     assert_eq!(peer.public_key, [1; 32]);
-                    assert_eq!(size, serialized.len() as u32);
                 }
                 _ => panic!("Expected a declaration message"),
             }
-            let mut buffer = vec![0; serialized.len() as usize];
-            stream.read_exact(&mut buffer).await.unwrap();
-            let message: Message = PillarSerialize::deserialize_pillar(&buffer).unwrap();
+            let message: Message = read_standard_message(&mut stream).await.unwrap();
             match message {
-                Message::PeerRequest=>{},
+                Message::PeerRequest => {},
                 _ => panic!("Expected a peer request message"),
             }
             // reply with a peer
             // first n bytes
-            let serialized = mock_response.serialize_pillar().unwrap();
-            let size = serialized.len() as usize;
-            stream.write_all(&size.to_le_bytes()[0..4]).await.unwrap();
+            let serialized = package_standard_message(&mock_response).unwrap();
             let _ = stream.write_all(&serialized).await;
             // done
         });

@@ -41,24 +41,13 @@ impl<'de> Deserialize<'de> for Block {
         }
 
         let helper = PartialBlock::deserialize(deserializer)?;
-
-        Ok(Block::new(
-            helper.header.previous_hash,
-            helper.header.nonce,
-            helper.header.timestamp,
-            helper.transactions,
-            helper.header.miner_address,
-            helper.header.tail.stamps,
-            helper.header.depth,
-            helper.header.difficulty_target,
-            helper.header.state_root,
-            &mut DefaultHash::new()
-        ))
+        Ok(Block::new_from_header_and_transactions(helper.header, helper.transactions, &mut DefaultHash::new()))
     }
 }
 
 #[serde_as]
 #[derive(Debug, PartialEq, Clone, Copy, Eq, Hash, Serialize, Deserialize)]
+#[repr(C)]
 pub struct Stamp{
     // the signature of the person who broadcasted the block
     #[serde_as(as = "Bytes")]
@@ -167,7 +156,20 @@ impl BlockTail {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq)]
+#[repr(C)]
+/// Header completion exists so that the alignment of the fields uses minimal padding
+pub struct HeaderCompletion {
+    // the root hash of the global state after this block
+    pub state_root: StdByteArray,
+    // the address of the miner is the sha3_256 hash of the miner address
+    pub miner_address: StdByteArray,
+    // difficulty target of the block
+    pub difficulty_target: u64,
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq, Default)]
+#[repr(C)]
 pub struct BlockHeader{
     // previous_hash is the sha3_356 hash of the previous block in the chain
     pub previous_hash: StdByteArray,
@@ -180,13 +182,9 @@ pub struct BlockHeader{
     // the depth is a depth of the block in the chain
     pub depth: u64,
     // version of the protocol used in this block
-    pub version: Versions,
+    pub version: u16, // note 4 bytes padding after this
     // state_root is the root hash of the global state after this block
-    pub state_root: Option<StdByteArray>,
-    // the address of the miner is the sha3_256 hash of the miner address
-    pub miner_address: Option<StdByteArray>,
-    // difficulty target of the block
-    pub difficulty_target: Option<u64>,
+    pub completion: Option<HeaderCompletion>, 
     // tail is the tail of the block which can contain stamps
     pub tail: BlockTail,
 }
@@ -222,17 +220,26 @@ impl BlockHeader {
         difficulty_target: Option<u64>,
         version: Versions
     ) -> Self {
+        match (&state_root, &miner_address, &difficulty_target) {
+            (Some(_), Some(_), Some(_)) | (None, None, None) => {},
+            _ => panic!("state_root, miner_address, and difficulty_target must all be Some or all be None"),
+        }
+        let completion = if state_root.is_some() {Some(HeaderCompletion {
+            state_root: state_root.unwrap_or([0; 32]),
+            miner_address: miner_address.unwrap_or([0; 32]),
+            difficulty_target: difficulty_target.unwrap_or(0),
+        })} else{
+            None
+        };
         BlockHeader {
             previous_hash,
             merkle_root,
-            state_root,
             nonce,
             timestamp,
-            miner_address,
             depth,
             tail,
-            difficulty_target,
-            version
+            completion,
+            version: version.to_u16()
         }
     }
 
@@ -253,17 +260,14 @@ impl BlockHeader {
         hasher: &mut impl HashFunction
     ) -> Result<(), BlockValidationError> {
         // check the miner is declared
-        if self.miner_address.is_none() {
+        if self.completion.is_none() {
             return Err(BlockValidationError::NoMinerAddress(*self));
-        }
-        if self.state_root.is_none() {
-            return Err(BlockValidationError::NoStateRoot(*self));
         }
         if expected_hash != self.hash(hasher).unwrap() {
             return Err(BlockValidationError::HashMismatch(expected_hash, self.hash(hasher).unwrap()));
         }
-        if !is_valid_hash(self.difficulty_target.unwrap(), &self.hash(hasher).unwrap()) {
-            return Err(BlockValidationError::DifficultyMismatch(self.difficulty_target.unwrap(), *self));
+        if !is_valid_hash(self.completion.unwrap().difficulty_target, &self.hash(hasher).unwrap()) {
+            return Err(BlockValidationError::DifficultyMismatch(self.completion.unwrap().difficulty_target, *self));
         }
         // check that all the signatures work in the tail
         let tail = &mut self.tail.clone();
@@ -311,32 +315,20 @@ impl Hashable for BlockHeader {
     /// 
     /// * The SHA3-256 hash of the block header
     fn hash(&self, hash_function: &mut impl HashFunction) -> Result<StdByteArray, std::io::Error>{
-        if self.miner_address.is_none() {
+        if self.completion.is_none() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "Miner address is not set"
             ));
         }
-        if self.state_root.is_none() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "State root is not set"
-            ));
-        }
-        if self.difficulty_target.is_none() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "Difficulty target is not set"
-            ));
-        }
         hash_function.update(self.previous_hash);
         hash_function.update(self.merkle_root);
-        hash_function.update(self.miner_address.unwrap());
-        hash_function.update(self.state_root.expect("Must have a state root to hash"));
+        hash_function.update(self.completion.unwrap().miner_address);
+        hash_function.update(self.completion.unwrap().state_root);
         hash_function.update(self.nonce.to_le_bytes());
         hash_function.update(self.timestamp.to_le_bytes());
         hash_function.update(self.depth.to_le_bytes());
-        hash_function.update(self.difficulty_target.unwrap().to_le_bytes());
+        hash_function.update(self.completion.unwrap().difficulty_target.to_le_bytes());
         hash_function.update(self.version.to_le_bytes());
 
         for i in 0..N_TRANSMISSION_SIGNATURES {
@@ -377,6 +369,15 @@ impl Block {
             depth,
             difficulty_target
         );
+        Self::new_from_header_and_transactions(header, transactions, hasher)
+    }
+
+    pub fn new_from_header_and_transactions(
+        header: BlockHeader, 
+        transactions: Vec<Transaction>,
+        hasher: &mut impl HashFunction
+    ) -> Self {
+        let merkle_tree = generate_tree(transactions.iter().collect(), hasher).unwrap();
         let hash = header.hash(hasher);
         Block {
             header,

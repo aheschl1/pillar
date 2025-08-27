@@ -8,7 +8,7 @@ use tokio::time::{timeout, Duration};
 use tracing::instrument;
 
 use crate::{
-    nodes::node::{Broadcaster, Node}, primitives::messages::Message, protocol::{serialization::PillarSerialize, versions::{get_declaration_length, Versions}, PROTOCOL_VERSION}
+    nodes::node::{Broadcaster, Node}, primitives::messages::Message, protocol::serialization::{package_standard_message, read_standard_message}
 };
 
 /// Background process that consumes mined blocks, and transactions which must be forwarded
@@ -89,16 +89,13 @@ pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
         let mut self_clone = node.clone();
         tokio::spawn(async move {
             // first read the peer declaration
-            let mut buffer = [0; get_declaration_length(PROTOCOL_VERSION) as usize];
-            let result = timeout(Duration::from_secs(1), stream.read_exact(&mut buffer)).await;
+            let result = timeout(Duration::from_secs(1), read_standard_message(&mut stream)).await;
             let status = match &result {
                 Ok(Ok(_)) => 0,
                 Ok(Err(_)) => 1,
                 Err(_) => 2
             };
-            let n: usize = if status == 0{
-                result.unwrap().unwrap()
-            } else {
+            if status != 0 {
                 // halt communication
                 send_error_message(
                     &mut stream,
@@ -109,23 +106,9 @@ pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
                 ).await;
                 return;
             };
-            let declaration: Result<Message, std::io::Error> = PillarSerialize::deserialize_pillar(&buffer[..n]);
-            if declaration.is_err() {
-                // halt communication
-                send_error_message(
-                    &mut stream,
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        "Invalid peer delaration",
-                    ),
-                ).await;
-                return;
-            }
-            let declaration = declaration.unwrap();
-            let message_length;
+            let declaration = result.unwrap().unwrap();
             let declaring_peer = match declaration {
-                Message::Declaration(peer, n) => {
-                    message_length = n;
+                Message::Declaration(peer) => {
                     // add the peer to the list if and only if it is not already in the list
                     self_clone.maybe_update_peer(peer.clone()).await.unwrap();
                     // send a response
@@ -144,9 +127,7 @@ pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
                 }
             };
             // read actual the message
-            let mut buffer = vec![0; message_length as usize];
-            let _ = stream.read_exact(&mut buffer).await.unwrap();
-            let message: Result<Message, std::io::Error> = PillarSerialize::deserialize_pillar(&buffer);
+            let message: Result<Message, std::io::Error> = read_standard_message(&mut stream).await;
             if message.is_err() {
                 // halt
                 send_error_message(&mut stream, message.unwrap_err()).await;
@@ -157,15 +138,13 @@ pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
             match response {
                 Err(e) => send_error_message(&mut stream, e).await,
                 Ok(message) => {
-                    let serialized = message.serialize_pillar().unwrap();
-                    let nbytes = serialized.len() as u32;
+                    let bytes = package_standard_message(&message).unwrap();
                     // write the size of the message as 4 bytes - 4 bytes because we are using u32
-                    stream.write_all(&nbytes.to_le_bytes()[..4]).await.unwrap();
                     stream
-                        .write_all(&serialized)
+                        .write_all(&bytes)
                         .await
                         .unwrap();
-                    tracing::debug!("Sent {} bytes to peer", nbytes);
+                    tracing::debug!("Sent {} bytes to peer", bytes.len());
                 }
             };
         });
@@ -175,17 +154,13 @@ pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
 /// sends an error response when given a string description
 #[instrument(skip_all)]
 async fn send_error_message(stream: &mut TcpStream, e: impl std::error::Error) {
-    // writye message size
-    let serialized = Message::Error(e.to_string()).serialize_pillar().unwrap();
-    let nbytes = serialized.len() as u32;
-    // write the size of the message as 4 bytes - 4 bytes because we are using u32
-    stream.write_all(&nbytes.to_le_bytes()[..4]).await.unwrap();
-    // write the error message to the stream
+    // write message size
+    let serialized = package_standard_message(&Message::Error(e.to_string())).unwrap();
     stream
         .write_all(&serialized)
         .await
         .unwrap();
-    tracing::debug!("Sent {} bytes to peer", nbytes);
+    tracing::debug!("Sent {} bytes to peer", serialized.len());
 }
 
 #[cfg(test)]
@@ -193,7 +168,7 @@ mod tests {
     use super::*;
     use tokio::net::TcpStream;
     use crate::nodes::peer::Peer;
-    use crate::protocol::serialization::PillarSerialize;
+    use crate::protocol::serialization::{package_standard_message, PillarSerialize};
     use crate::{
         primitives::transaction::Transaction
     };
@@ -221,8 +196,8 @@ mod tests {
             port: 8085,
         };
 
-        let declaration = Message::Declaration(peer.clone(), 0);
-        let serialized = declaration.serialize_pillar().unwrap();
+        let declaration = Message::Declaration(peer.clone());
+        let serialized = package_standard_message(&declaration).unwrap();
         stream.write_all(&serialized).await.unwrap();
 
         // Verify the peer was added
@@ -257,35 +232,26 @@ mod tests {
             .await
             .unwrap();
 
+
+        let declaration = Message::Declaration(peer.clone());
+        stream.write_all(&package_standard_message(&declaration).unwrap()).await.unwrap();
+
         let t = Transaction::new([0; 32], [0; 32], 0, 0, 0, &mut DefaultHash::new());
         let message = Message::TransactionBroadcast(t);
-        let serialized_message = message.serialize_pillar().unwrap();
-
-        let declaration = Message::Declaration(peer.clone(), serialized_message.len() as u32);
-        let serialized = declaration.serialize_pillar().unwrap();
-        stream.write_all(&serialized).await.unwrap();
-
-        stream.write_all(&serialized_message).await.unwrap();
+        stream.write_all(&package_standard_message(&message).unwrap()).await.unwrap();
 
         // Verify the message was broadcasted back
 
         let (mut peer_stream, _) = listener.accept().await.unwrap();
         
         // receive peer declaration from node
-
-        let mut b = [0; get_declaration_length(PROTOCOL_VERSION) as usize];
-        let _ = peer_stream.read_exact(&mut b).await.unwrap();
-        let declaration: Message = PillarSerialize::deserialize_pillar(&b).unwrap();
+        let declaration: Message = read_standard_message(&mut peer_stream).await.unwrap();
         match declaration {
-            Message::Declaration(_, size) => {
-                assert_eq!(size, serialized_message.len() as u32);
-            }
+            Message::Declaration(_) => {},
             _ => panic!("Expected a Declaration message"),
         }
 
-        let mut buffer = vec![0; serialized_message.len() as usize];
-        let n = peer_stream.read_exact(&mut buffer).await.unwrap();
-        let message: Message = PillarSerialize::deserialize_pillar(&buffer[..n]).unwrap();
+        let message: Message = read_standard_message(&mut peer_stream).await.unwrap();
         match message {
             Message::TransactionBroadcast(_) => {},
             _ => panic!("Expected a TransactionRequest message"),
@@ -293,9 +259,7 @@ mod tests {
         // respond with ack
         let response = Message::TransactionAck;
         // send bytes then message
-        let response_serialized = response.serialize_pillar().unwrap();
-        let nbytes = response_serialized.len() as u32;
-        peer_stream.write_all(&nbytes.to_le_bytes()).await.unwrap();
+        let response_serialized = package_standard_message(&response).unwrap();
         peer_stream.write_all(&response_serialized).await.unwrap();
         
         let broadcasted = node.inner.broadcasted_already.read().await;
@@ -319,18 +283,26 @@ mod tests {
             .await
             .unwrap();
 
-        // let invalid_message = vec![0; 10]; // Invalid message
-        let message = Message::Ping;
-        let serialized_message = message.serialize_pillar().unwrap();
-        stream.write_all(&serialized_message).await.unwrap();
+        let invalid_message = vec![0; 10]; // Invalid message
+        stream.write_all(&invalid_message).await.unwrap();
 
-        let mut b = [0; 4];
-        let _ = stream.read_exact(&mut b).await;
-        let size = u32::from_le_bytes(b);
+        let response: Message = read_standard_message(&mut stream).await.unwrap();
 
-        let mut buffer = vec![0; size as usize];
-        let n = stream.read_exact(&mut buffer).await.unwrap();
-        let response: Message = PillarSerialize::deserialize_pillar(&buffer[..n]).unwrap();
+        match response {
+            Message::Error(_) => {},
+            _ => panic!("Expected an error message"),
+        }
+
+        // send valid ping, but raw serialized
+        stream = TcpStream::connect(format!("{ip_address}:{port}"))
+            .await
+            .unwrap();
+        let ping = Message::Ping;
+        let serialized = ping.serialize_pillar().unwrap();
+        stream.write_all(&serialized).await.unwrap();
+        // expect error
+
+        let response: Message = read_standard_message(&mut stream).await.unwrap();
 
         match response {
             Message::Error(_) => {},

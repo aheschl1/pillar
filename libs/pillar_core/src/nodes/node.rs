@@ -313,13 +313,13 @@ impl Node {
             Message::BlockTransmission(block) => {
                 // add the block to the chain if we have downloaded it already - first it is verified
                 let mut block = block.clone();
-                if state.is_consume() && block.header.miner_address.is_none(){
+                if state.is_consume() && block.header.completion.is_none(){
                     self.settle_unmined_block(&mut block).await?;
                 }
                 
                 // send block to be settled, 
                 // and handle callback if mined
-                if (state.is_track() || state.is_consume()) && block.header.miner_address.is_some() {
+                if (state.is_track() || state.is_consume()) && block.header.completion.is_some() {
                     tracing::info!("Handling callbacks and settle for mined block.");
                     self.inner.late_settle_queue.enqueue(block.clone());
                     self.handle_callbacks(&block).await;
@@ -328,7 +328,7 @@ impl Node {
                 if state.is_forward(){
                     // TODO handle is_track instead
                     // if we do not have the chain, just forward the block if there is room in the stamps
-                    if block.header.tail.n_stamps() < N_TRANSMISSION_SIGNATURES && !state.is_consume() && block.header.miner_address.is_none() {
+                    if block.header.tail.n_stamps() < N_TRANSMISSION_SIGNATURES && !state.is_consume() && block.header.completion.is_none() {
                         tracing::info!("Stamping and broadcasting only because not ");
                         let _ = self.stamp_block(&mut block);
                     }
@@ -427,11 +427,8 @@ impl Node {
     }
 
     /// After receiving a block - settle it to the chain
-    /// Includes the tracking of reputation, braodcasting, and responding to callbacks 
-    #[instrument(name = "Node::settle_unmined_block", skip(self, block), fields(
-        block_hash = ?block.hash,
-        miner_address = ?block.header.miner_address
-    ))]
+    /// Includes the tracking of reputation, braodcasting, and responding to callbacks
+    #[instrument(name = "Node::settle_unmined_block", skip(self, block))]
     async fn settle_unmined_block(&self, block: &mut Block) -> Result<(), std::io::Error> {
         tracing::info!("Block is not mined, stamping and transmitting.");
         let mut n_stamps = block.header.tail.n_stamps();

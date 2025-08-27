@@ -117,7 +117,7 @@ impl Chain {
 
         let (expected_target, is_por) = get_difficulty_for_block(&block.header, &reputations);
 
-        if block.header.difficulty_target.is_none() || expected_target != block.header.difficulty_target.unwrap() {
+        if block.header.completion.is_none() || expected_target != block.header.completion.unwrap().difficulty_target {
             tracing::info!("Block difficulty target is invalid - Failing");
             return Err(BlockValidationError::MalformedBlock("Difficulty target does not match".into()));
         }
@@ -230,7 +230,7 @@ impl Chain {
     }
 
     pub fn get_state_root(&self) -> Option<StdByteArray> {
-        self.get_top_block().and_then(|block| block.header.state_root)
+        self.get_top_block().and_then(|block| block.header.completion.as_ref().map(|c| c.state_root))
     }
 
     pub fn get_block(&self, hash: &StdByteArray) -> Option<&Block> {
@@ -290,7 +290,7 @@ impl Chain {
         self.validate_block(block)?;
         self.validate_transaction_set(
             &block.transactions, 
-            self.blocks.get(&block.header.previous_hash).unwrap().header.state_root.unwrap()
+            self.blocks.get(&block.header.previous_hash).unwrap().header.completion.expect("Expected completed block").state_root
         )?;
         Ok(())
     }
@@ -305,7 +305,7 @@ impl Chain {
         let prev_header = self.headers.get(&block.header.previous_hash).expect("Previous block header must exist");
         let new_root = self.state_manager.branch_from_block(&block, prev_header);
         // last check - is the root the same as the one in the block?
-        if block.header.state_root.unwrap() != new_root {
+        if block.header.completion.as_ref().unwrap().state_root != new_root {
             tracing::error!("Block state root does not match the computed state root - Failing");
             self.state_manager.remove_branch(new_root);
             return Err(BlockValidationError::MalformedBlock("State root does not match".into()));
@@ -356,7 +356,7 @@ impl TrimmableChain for Chain {
     }
 
     fn remove_header(&mut self, hash: &StdByteArray) {
-        self.state_manager.remove_branch(self.headers.get(hash).unwrap().state_root.unwrap());
+        self.state_manager.remove_branch(self.headers.get(hash).unwrap().completion.as_ref().unwrap().state_root);
         self.blocks.remove(hash);
     }
 }
@@ -396,7 +396,7 @@ mod tests {
                 .unwrap()
                 .as_secs(),
             vec![trans],
-            Some(sender),
+            None,
             BlockTail::default().stamps,
             1,
             None,
@@ -404,7 +404,7 @@ mod tests {
             &mut DefaultHash::new()
         );
         let prev_header = chain.headers.get(&block.header.previous_hash).expect("Previous block header not found");
-        let state_root = chain.state_manager.branch_from_block(&block, prev_header);
+        let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
         mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
         let result = chain.add_new_block(block);
         assert!(result.is_ok());
@@ -427,7 +427,7 @@ mod tests {
             vec![
                trans
             ], 
-            Some([0; 32]),
+            None,
             BlockTail::default().stamps,
             0,
             None,
@@ -456,7 +456,7 @@ mod tests {
                 0,
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth,
                 vec![transaction],
-                Some(sender),
+                None,
                 BlockTail::default().stamps,
                 depth,
                 None,
@@ -465,7 +465,7 @@ mod tests {
             );
             let prev_header = chain.headers.get(&block.header.previous_hash)
                 .expect("Previous block header not found");
-            let state_root = chain.state_manager.branch_from_block(&block, prev_header);
+            let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
             mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
             parent_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
@@ -481,7 +481,7 @@ mod tests {
             0,
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()+30,
             vec![trans],
-            Some(sender),
+            None,
             BlockTail::default().stamps,
             1,
             None,
@@ -490,7 +490,7 @@ mod tests {
         );
         let prev_header = chain.headers.get(&fork_block.header.previous_hash)
             .expect("Previous block header not found");
-        let state_root = chain.state_manager.branch_from_block(&fork_block, prev_header);
+        let state_root = chain.state_manager.branch_from_block_internal(&fork_block, prev_header, &sender);
         mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
         chain.add_new_block(fork_block.clone()).unwrap();
 
@@ -523,7 +523,7 @@ mod tests {
                 0,
                 time,
                 vec![transaction],
-                Some(sender),
+                None,
                 BlockTail::default().stamps,
                 depth,
                 None,
@@ -532,7 +532,7 @@ mod tests {
             );
             let prev_header = chain.headers.get(&block.header.previous_hash)
                 .expect("Previous block header not found");
-            let state_root = chain.state_manager.branch_from_block(&block, prev_header);
+            let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
             mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
             parent_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
@@ -546,7 +546,7 @@ mod tests {
             0,
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 50,
             vec![trans],
-            Some(sender),
+            None,
             BlockTail::default().stamps,
             1,
             None,
@@ -555,7 +555,7 @@ mod tests {
         );
         let prev_header = chain.headers.get(&fork_block.header.previous_hash)
             .expect("Previous block header not found");
-        let state_root = chain.state_manager.branch_from_block(&fork_block, prev_header);
+        let state_root = chain.state_manager.branch_from_block_internal(&fork_block, prev_header, &sender);
         mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
         let fork_hash = fork_block.hash.unwrap();
         chain.add_new_block(fork_block).unwrap();
@@ -584,7 +584,7 @@ mod tests {
                 0,
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth,
                 vec![transaction],
-                Some(sender),
+                None,
                 BlockTail::default().stamps,
                 depth,
                 None,
@@ -593,7 +593,7 @@ mod tests {
             );
             let prev_header = chain.headers.get(&block.header.previous_hash)
                 .expect("Previous block header not found");
-            let state_root = chain.state_manager.branch_from_block(&block, prev_header);
+            let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
             mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
@@ -609,7 +609,7 @@ mod tests {
                 0,
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 20,
                 vec![transaction],
-                Some(sender),
+                None,
                 BlockTail::default().stamps,
                 1,
                 None,
@@ -618,7 +618,7 @@ mod tests {
             );
             let prev_header = chain.headers.get(&fork_block.header.previous_hash)
                 .expect("Previous block header not found");
-            let state_root = chain.state_manager.branch_from_block(&fork_block, prev_header);   
+            let state_root = chain.state_manager.branch_from_block_internal(&fork_block, prev_header, &sender);
             mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
             let hash = fork_block.hash.unwrap();
             fork_hashes.push(hash);
@@ -671,7 +671,7 @@ mod tests {
                 0,
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()+depth,
                 vec![transaction],
-                Some(sender),
+                None,
                 BlockTail::default().stamps,
                 depth,
                 None,
@@ -680,7 +680,7 @@ mod tests {
             );
             let prev_header = chain.headers.get(&block.header.previous_hash)
                 .expect("Previous block header not found");
-            let state_root = chain.state_manager.branch_from_block(&block, prev_header);
+            let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
             mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
@@ -698,7 +698,7 @@ mod tests {
                     0,
                     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth + fork_length,
                     vec![transaction],
-                    Some(sender),
+                    None,
                     BlockTail::default().stamps,
                     depth,
                     None,
@@ -707,7 +707,7 @@ mod tests {
                 );
                 let prev_header = chain.headers.get(&fork_block.header.previous_hash)
                     .expect("Previous block header not found");
-                let state_root = chain.state_manager.branch_from_block(&fork_block, prev_header);
+                let state_root = chain.state_manager.branch_from_block_internal(&fork_block, prev_header, &sender);
                 mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
                 parent_hash = fork_block.hash.unwrap();
                 if depth == fork_length {
@@ -755,7 +755,7 @@ mod tests {
                 0,
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth,
                 vec![transaction],
-                Some(sender),
+                None,
                 BlockTail::default().stamps,
                 depth,
                 None,
@@ -764,7 +764,7 @@ mod tests {
             );
             let prev_header = chain.headers.get(&block.header.previous_hash)
                 .expect("Previous block header not found");
-            let state_root = chain.state_manager.branch_from_block(&block, prev_header);
+            let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
             mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
@@ -780,7 +780,7 @@ mod tests {
                 0,
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth + 20,
                 vec![transaction],
-                Some(sender),
+                None,
                 BlockTail::default().stamps,
                 depth,
                 None,
@@ -789,7 +789,7 @@ mod tests {
             );
             let prev_header = chain.headers.get(&fork_block.header.previous_hash)
                 .expect("Previous block header not found");
-            let state_root = chain.state_manager.branch_from_block(&fork_block, prev_header);
+            let state_root = chain.state_manager.branch_from_block_internal(&fork_block, prev_header, &sender);
             mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
             fork_hash = fork_block.hash.unwrap();
             chain.add_new_block(fork_block).unwrap();
@@ -825,7 +825,7 @@ mod tests {
                 0,
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth,
                 vec![transaction],
-                Some(sender),
+                None,
                 BlockTail::default().stamps,
                 depth,
                 None,
@@ -834,7 +834,7 @@ mod tests {
             );
             let prev_header = chain.headers.get(&block.header.previous_hash)
                 .expect("Previous block header not found");
-            let state_root = chain.state_manager.branch_from_block(&block, prev_header);
+            let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
             mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
             main_hash = block.hash.unwrap();
             chain.add_new_block(block).unwrap();
@@ -850,7 +850,7 @@ mod tests {
                 0,
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth + 15,
                 vec![transaction],
-                Some(sender),
+                None,
                 BlockTail::default().stamps,
                 depth,
                 None,
@@ -859,7 +859,7 @@ mod tests {
             );
             let prev_header = chain.headers.get(&fork_block.header.previous_hash)
                 .expect("Previous block header not found");
-            let state_root = chain.state_manager.branch_from_block(&fork_block, prev_header);
+            let state_root = chain.state_manager.branch_from_block_internal(&fork_block, prev_header, &sender);
             mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
             fork_hash = fork_block.hash.unwrap();
             chain.add_new_block(fork_block).unwrap();

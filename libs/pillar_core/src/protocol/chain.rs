@@ -172,7 +172,7 @@ pub async fn sync_chain(node: Node) -> Result<(), QueryError> {
     let chain = chain.as_mut().unwrap();
     let leaves = chain.leaves.clone();
     
-    let request = Message::ChainSyncRequest(leaves.clone());
+    let request = Message::ChainSyncRequest(leaves.iter().copied().collect());
     // broadcast the request
     let responses = node.broadcast(&request).await.map_err(
         QueryError::IOError
@@ -254,7 +254,7 @@ pub async fn sync_chain(node: Node) -> Result<(), QueryError> {
 
 
 /// given a set of leaves, we need to provide chains that come after them: i.e. "missing chains"
-pub async fn service_sync(node: Node, leaves: &HashSet<StdByteArray>) -> Result<Vec<Chain>, std::io::Error> {
+pub async fn service_sync(node: Node, leaves: &Vec<StdByteArray>) -> Result<Vec<Chain>, std::io::Error> {
     let my_leaves = node.inner.chain.lock().await.as_ref().unwrap().leaves.clone();
     let missing_leaves = my_leaves.iter().filter(|x| !leaves.contains(*x)).cloned().collect::<Vec<_>>();
     // for each of these, we need to work our way backwards from the nodes chain off the leaf
@@ -319,7 +319,7 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
 
             }
             // then we settle the block
-            tracing::info!("Settling mined block with miner address: {:?}", block.header.miner_address);
+            tracing::info!("Settling mined block with miner address: {:?}", block.header.completion.as_ref().map(|c| c.miner_address));
             if chain.add_new_block(block.clone()).is_err() {continue;} // failed to add the block
             tracing::info!("Valid block added to chain.");
             drop(chain_lock); // free lock cause why not
