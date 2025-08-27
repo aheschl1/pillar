@@ -17,8 +17,8 @@ pub enum Message {
     PeerRequest,
     // response with all peers
     PeerResponse(Vec<Peer>),
-    // inform of who you are and message length following - always the first message
-    Declaration(Peer, u32),
+    // inform of who you are
+    Declaration(Peer),
     // request for a transaction
     TransactionBroadcast(Transaction),
     // acknowledge a transaction has been received
@@ -46,7 +46,7 @@ pub enum Message {
     /// A response to a hit on the transaction filter - with the block header that contains the transaction
     TransactionFilterResponse(TransactionFilter, BlockHeader),
     // chain syncing request - the current leaf hashes of the chain
-    ChainSyncRequest(HashSet<StdByteArray>),
+    ChainSyncRequest(Vec<StdByteArray>),
     // chain syncing response - the blocks that are missing. each chain is the child of leaves that shoudle be kept
     ChainSyncResponse(Vec<Chain>),
     // request for peers filtered between a lower percentile and an upper percentile based on reputation
@@ -65,7 +65,7 @@ impl Message{
             Message::ChainResponse(_) => "ChainResponse".to_string(),
             Message::PeerRequest => "PeerRequest".to_string(),
             Message::PeerResponse(_) => "PeerResponse".to_string(),
-            Message::Declaration(_, _) => "Declaration".to_string(),
+            Message::Declaration(_) => "Declaration".to_string(),
             Message::TransactionBroadcast(_) => "TransactionBroadcast".to_string(),
             Message::TransactionAck => "TransactionAck".to_string(),
             Message::BlockTransmission(_) => "BlockTransmission".to_string(),
@@ -84,6 +84,35 @@ impl Message{
             Message::PercentileFilteredPeerRequest(_, _) => "PercentileFilteredPeerRequest".to_string(),
             Message::PercentileFilteredPeerResponse(_) => "PercentileFilteredPeerResponse".to_string(),
             Message::Error(_) => "Error".to_string(),
+        }
+    }
+
+    pub fn code(&self) -> u8 {
+        match self{
+            Message::Ping => 0,
+            Message::ChainRequest => 1,
+            Message::ChainResponse(_) => 2,
+            Message::PeerRequest => 3,
+            Message::PeerResponse(_) => 4,
+            Message::Declaration(_) => 5,
+            Message::TransactionBroadcast(_) => 6,
+            Message::TransactionAck => 7,
+            Message::BlockTransmission(_) => 8,
+            Message::BlockAck => 9,
+            Message::BlockRequest(_) => 10,
+            Message::BlockResponse(_) => 11,
+            Message::ChainShardRequest => 12,
+            Message::ChainShardResponse(_) => 13,
+            Message::TransactionProofRequest(_) => 14,
+            Message::TransactionProofResponse(_) => 15,
+            Message::TransactionFilterRequest(_, _) => 16,
+            Message::TransactionFilterAck => 17,
+            Message::TransactionFilterResponse(_, _) => 18,
+            Message::ChainSyncRequest(_) => 19,
+            Message::ChainSyncResponse(_) => 20,
+            Message::PercentileFilteredPeerRequest(_, _) => 21,
+            Message::PercentileFilteredPeerResponse(_) => 22,
+            Message::Error(_) => 23,
         }
     }
 }
