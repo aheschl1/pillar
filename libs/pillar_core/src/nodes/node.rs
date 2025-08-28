@@ -149,7 +149,7 @@ impl Node {
         let broadcasted_already = RwLock::new(HashSet::new());
         let peer_map = peers
             .iter()
-            .map(|peer| (peer.public_key, peer.clone()))
+            .map(|peer| (peer.public_key, *peer))
             .collect::<HashMap<_, _>>();
         tracing::info!("Node created with {} initial peers", peer_map.len());
         let (state, maybe_chain) = get_initial_state(&**database.as_ref().unwrap());
@@ -297,12 +297,11 @@ impl Node {
             },
             Message::TransactionBroadcast(transaction) => {
                 // add the transaction to the pool
-                if let Some(ref pool) = self.miner_pool{
-                    if state.is_consume() {
+                if let Some(ref pool) = self.miner_pool
+                    && state.is_consume() {
                         tracing::info!("Adding transaction to mining pool.");
                         pool.add_transaction(*transaction);
                     }
-                }
                 // to be broadcasted
                 if state.is_forward(){
                     tracing::info!("Broadcasting transaction");
@@ -457,9 +456,7 @@ impl Node {
     }
 
     /// spawn a new thread to match transaction callback requests against the bock
-    #[instrument(name = "Node::handle_callbacks", skip(self, block), fields(
-        block_hash = ?block.hash
-    ))]
+    #[instrument(name = "Node::handle_callbacks", skip(self, block))]
     async fn handle_callbacks(&self, block: &Block){
         let block_clone = block.clone();
         let initpeer: Peer = self.clone().into();

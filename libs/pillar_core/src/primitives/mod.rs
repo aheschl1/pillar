@@ -3,9 +3,12 @@ pub mod block;
 pub mod pool;
 pub mod messages;
 pub mod errors;
+pub mod implementations;
 
 #[cfg(test)]
 mod tests{
+    use std::num::NonZeroU64;
+
     use pillar_crypto::{hashing::{DefaultHash, Hashable}, signing::{DefaultSigner, SigFunction, SigVerFunction, Signable}};
     
 
@@ -22,6 +25,7 @@ mod tests{
         let state_root = [3u8; 32];
 
         let block_header = BlockHeader::new(
+            None,
             previous_hash, 
             merkle_root, 
             Some(state_root), 
@@ -61,16 +65,15 @@ mod tests{
         let mut hash_function = DefaultHash::new();
 
         let mut transaction = Transaction::new(sender, receiver, amount, timestamp, nonce, &mut hash_function);
-        assert!(transaction.signature.is_none());
-        
+        assert_eq!(transaction.signature, [0; 64]);
+
         let mut signing_key = DefaultSigner::generate_random();
 
         transaction.sign(&mut signing_key);
-        assert!(transaction.signature.is_some());
         // Verify the signature
-        signing_key.get_verifying_function().verify(&transaction.signature.unwrap(), &transaction);
+        signing_key.get_verifying_function().verify(&transaction.signature, &transaction);
 
         let transaction2 = Transaction::new(sender, receiver, amount, timestamp, nonce+1, &mut hash_function);
-        assert!(!signing_key.get_verifying_function().verify(&transaction.signature.unwrap(), &transaction2));
+        assert!(!signing_key.get_verifying_function().verify(&transaction.signature, &transaction2));
     }
 }

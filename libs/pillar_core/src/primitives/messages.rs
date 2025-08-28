@@ -1,11 +1,10 @@
-use std::collections::HashSet;
 
-use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, nodes::peer::Peer, primitives::{block::{Block, BlockHeader}, transaction::{Transaction, TransactionFilter}}, protocol::serialization::PillarSerialize};
+use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, nodes::peer::Peer, primitives::{block::{Block, BlockHeader}, transaction::{Transaction, TransactionFilter}}};
 use pillar_crypto::{hashing::{HashFunction, Hashable}, proofs::MerkleProof, types::StdByteArray};
-use serde::{Serialize, Deserialize};
+use pillar_serialize::PillarSerialize;
 
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive( Debug, Clone)]
 pub enum Message {
     // dummy ping
     Ping,

@@ -1,3 +1,4 @@
+
 use crate::protocol::reputation::N_TRANSMISSION_SIGNATURES;
 
 const INITIAL_BLOCK_REWARD: u64 = 10_000;
@@ -7,9 +8,9 @@ pub const MIN_DIFFICULTY: u64 = 4; // minimum difficulty for the first 500 block
 /// the schedule is 4 + 2*(depth // 500)
 pub fn _get_base_difficulty_from_depth(depth: u64) -> u64{
     if depth == 0{
-        return 0; // genesis block
+        return MIN_DIFFICULTY; // genesis block
     }
-    MIN_DIFFICULTY+2*(depth/500)
+    MIN_DIFFICULTY + 2*(depth/500)
 }
 
 /// Get the reward to pay to the miner

@@ -1,8 +1,6 @@
-use serde::{Serialize, Deserialize};
-
 use crate::protocol::PROTOCOL_VERSION;
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive( Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Versions{
     V1V4 = 1,
     #[allow(dead_code)]
@@ -33,6 +31,12 @@ impl Versions{
         match self {
             Versions::V1V4 => 1u16.to_le_bytes(),
             Versions::V1V6 => 2u16.to_le_bytes(),
+        }
+    }
+    pub fn to_ne_bytes(&self) -> [u8; 2] {
+        match self {
+            Versions::V1V4 => 1u16.to_ne_bytes(),
+            Versions::V1V6 => 2u16.to_ne_bytes(),
         }
     }
 }

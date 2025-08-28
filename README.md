@@ -17,6 +17,12 @@ Vision:
 
 Currently in heavy development.
 
+## Architecture Compatibility
+
+The serialization for this project relies on 64-bit architectures, though it is endian agnostic. This result is due to optimizations of memcpy for fixed size primitive types such as the Block, BlockHeader, Transaction, etc...
+
+Big-endian machines will have a less efficient serialization process due to the need for byte swapping.
+
 ## Testing
 
 Running `cargo test` will launch tests, saving logs to `./test_output/{timestamp}/output.log`.

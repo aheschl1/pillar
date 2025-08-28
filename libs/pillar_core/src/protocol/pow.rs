@@ -62,16 +62,17 @@ pub async fn mine(
     let (difficulty, _) = get_difficulty_for_block(&block.header, &reputations);
 
     block.header.nonce = 0;
-    block.header.completion = Some(HeaderCompletion{
-        miner_address: address,
-        difficulty_target: difficulty,
-        state_root: state_root,
-    });
+    block.header.completion = HeaderCompletion::new(
+        [255u8; 32],
+        address,
+        state_root,
+        difficulty,
+    );
     loop {
         match block.header.hash(&mut hash_function){
             Ok(hash) => {
                 if is_valid_hash(difficulty, &hash) {
-                    block.hash = Some(hash);
+                    block.header.completion.as_mut().unwrap().hash = hash;
                     break;
                 }
             },
@@ -79,12 +80,11 @@ pub async fn mine(
                 panic!("Hashing failed");
             }
         }
-        if let Some(ref signal) = abort_signal{
-            if let Ok(d) = signal.try_recv() {
+        if let Some(ref signal) = abort_signal
+            && let Ok(d) = signal.try_recv() {
                 // if we receive a signal to abort, we stop mining
                 if d == block.header.depth {return;}
             }
-        }
         block.header.nonce += 1;
     }
 }

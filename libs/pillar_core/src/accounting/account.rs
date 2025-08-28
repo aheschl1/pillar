@@ -1,11 +1,12 @@
 
+use bytemuck::{Pod, Zeroable};
 use pillar_crypto::types::StdByteArray;
-use serde::{Deserialize, Serialize};
 
 use crate::reputation::history::NodeHistory;
 
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Pod, Copy, Zeroable)]
+#[repr(C)]
 pub struct TransactionStub{
     // The block hash of the block that created this transaction
     pub block_hash: StdByteArray,
@@ -13,7 +14,7 @@ pub struct TransactionStub{
     pub transaction_hash: StdByteArray,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct Account{
     // The address of the account is the public key
     pub address: StdByteArray,

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use pillar_crypto::{hashing::DefaultHash, types::StdByteArray};
-use serde::{Deserialize, Serialize};
+
 
 use crate::{accounting::{account::Account, state::StateManager}, primitives::{block::BlockHeader, errors::BlockValidationError}, protocol::chain::get_genesis_block};
 
@@ -10,7 +10,7 @@ use super::{chain::Chain, TrimmableChain};
 /// chain shard is used to build up a chain given a list of block headers
 /// It is responsible for the validation and construction of the chain from a new node.
 /// // chain shard is just a chain of headers
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone,  PartialEq, Eq)]
 pub struct ChainShard {
     pub headers: HashMap<StdByteArray, BlockHeader>,
     pub leaves: HashSet<StdByteArray>
@@ -149,7 +149,7 @@ mod tests {
             let prev_header = chain.headers.get(&parent_hash).expect("Parent hash must exist");
             let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
             mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
-            parent_hash = block.hash.unwrap();
+            parent_hash = block.header.completion.as_ref().unwrap().hash;
             chain.add_new_block(block).unwrap();
         }
 
@@ -175,12 +175,12 @@ mod tests {
         mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
         chain.add_new_block(fork_block.clone()).unwrap();
 
-        assert!(chain.blocks.contains_key(&fork_block.hash.unwrap()));
+        assert!(chain.blocks.contains_key(&fork_block.header.completion.as_ref().unwrap().hash));
 
         // Trim should remove the short fork
         let mut shard: ChainShard = chain.into();
         shard.trim();
-        assert!(!shard.headers.contains_key(&fork_block.hash.unwrap()));
+        assert!(!shard.headers.contains_key(&fork_block.header.completion.as_ref().unwrap().hash));
         assert!(shard.headers.contains_key(&long_chain_leaf));
         assert!(shard.headers.contains_key(&shard.headers[&long_chain_leaf].previous_hash));
     }
@@ -215,7 +215,7 @@ mod tests {
             let prev_header = chain.headers.get(&parent_hash).expect("Parent hash must exist");
             let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
             mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
-            parent_hash = block.hash.unwrap();
+            parent_hash = block.header.completion.as_ref().unwrap().hash;
             chain.add_new_block(block).unwrap();
         }
 
@@ -237,7 +237,7 @@ mod tests {
         let prev_header = chain.headers.get(&genesis_hash).expect("Genesis hash must exist");
         let state_root = chain.state_manager.branch_from_block_internal(&fork_block, prev_header, &sender);
         mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
-        let fork_hash = fork_block.hash.unwrap();
+        let fork_hash = fork_block.header.completion.as_ref().unwrap().hash;
         chain.add_new_block(fork_block).unwrap();
 
         // This fork is <10 behind, so it should NOT be trimmed
@@ -275,7 +275,7 @@ mod tests {
             let prev_header = chain.headers.get(&main_hash).expect("Parent hash must exist");
             let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
             mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
-            main_hash = block.hash.unwrap();
+            main_hash = block.header.completion.as_ref().unwrap().hash;
             chain.add_new_block(block).unwrap();
         }
 
@@ -299,7 +299,7 @@ mod tests {
             let prev_header = chain.headers.get(&genesis_hash).expect("Genesis hash must exist");
             let state_root = chain.state_manager.branch_from_block_internal(&fork_block, prev_header, &sender);
             mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
-            let hash = fork_block.hash.unwrap();
+            let hash = fork_block.header.completion.as_ref().unwrap().hash;
             fork_hashes.push(hash);
             chain.add_new_block(fork_block).unwrap();
         }

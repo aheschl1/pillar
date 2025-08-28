@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "libs/pillar_crypto",
-    "libs/pillar_core"
+    "libs/pillar_core",
+    "libs/pillar_serialize"
 ]
 resolver="3"

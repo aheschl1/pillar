@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Debug, sync::{Arc, Mutex}};
 
 use pillar_crypto::{merkle_trie::MerkleTrie, types::StdByteArray};
 
-use crate::{accounting::account::Account, nodes::miner, primitives::block::{Block, BlockHeader}, protocol::{difficulty::get_reward_from_depth_and_stampers, pow::{get_difficulty_for_block, POR_INCLUSION_MINIMUM, POR_MINER_SHARE_DIVISOR}, reputation::get_current_reputations_for_stampers_from_state}, reputation::history::NodeHistory};
+use crate::{accounting::account::Account, primitives::block::{Block, BlockHeader}, protocol::{difficulty::get_reward_from_depth_and_stampers, pow::{get_difficulty_for_block, POR_INCLUSION_MINIMUM, POR_MINER_SHARE_DIVISOR}, reputation::get_current_reputations_for_stampers_from_state}, reputation::history::NodeHistory};
 
 pub type ReputationMap = HashMap<StdByteArray, NodeHistory>;
 
@@ -65,7 +65,7 @@ impl StateManager{
         block: &Block,
         prev_header: &BlockHeader,
     ) -> StdByteArray {
-        let miner_address = block.header.completion.expect("Block should be complete").miner_address;
+        let miner_address = block.header.completion.as_ref().expect("Block should be complete").miner_address;
         self.branch_from_block_internal(block, prev_header, &miner_address)
     }
 
@@ -87,7 +87,7 @@ impl StateManager{
         );
         // Update the accounts from the block
         let mut state_updates: HashMap<StdByteArray, Account> = HashMap::new();
-        let state_root = prev_header.completion.expect("Previous block should be complete").state_root;
+        let state_root = prev_header.completion.as_ref().expect("Previous block should be complete").state_root;
         let mut state_trie = self.state_trie.lock().expect("Failed to lock state trie");
         for transaction in &block.transactions {
             let mut sender = match state_updates.get(&transaction.header.sender){
@@ -127,7 +127,7 @@ impl StateManager{
             Some(account) => account.clone(),
             None => {
                 // if the miner account does not exist, we create a new account with 0 balance
-                state_trie.get(&miner_address, state_root).unwrap_or(Account::new(*miner_address, 0))
+                state_trie.get(miner_address, state_root).unwrap_or(Account::new(*miner_address, 0))
             }
         };
         miner_account.balance += if !por_enabled {reward} else {div_up(reward, POR_MINER_SHARE_DIVISOR)};

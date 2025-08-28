@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use pillar_crypto::hashing::DefaultHash;
 use tracing::instrument;
 
-use crate::{primitives::{block::{Block, BlockTail, HeaderCompletion}, messages::Message}, protocol::{pow::{get_difficulty_for_block, mine}, reputation::get_current_reputations_for_stampers}};
+use crate::{primitives::{block::{Block, BlockTail}, messages::Message}, protocol::{pow::mine, reputation::get_current_reputations_for_stampers}};
 
 use super::{node::{Broadcaster, Node}};
 
@@ -87,7 +87,7 @@ async fn monitor_transaction_pool(miner: Miner) {
             let chain_lock = miner.node.inner.chain.lock().await;
             let chain = chain_lock.as_ref().unwrap();
             let block = Block::new(
-                chain.get_top_block().unwrap().hash.unwrap(), // if it crahses, there is bug
+                chain.get_top_block().unwrap().header.completion.as_ref().expect("Expected complete block").hash,
                 0, // undefined nonce
                 now,
                 transactions.iter().copied().collect(),
@@ -153,7 +153,7 @@ async fn monitor_block_pool(miner: Miner) {
 
 #[cfg(test)]
 mod test{
-    use std::{net::{IpAddr, Ipv4Addr}, str::FromStr, sync::Arc};
+    use std::{net::{IpAddr, Ipv4Addr}, num::NonZeroU64, str::FromStr, sync::Arc};
 
     use pillar_crypto::hashing::DefaultHash;
 
@@ -200,7 +200,7 @@ mod test{
         assert!(block.header.completion.is_some());
         assert_eq!(block.header.previous_hash, previous_hash);
         assert_eq!(block.header.timestamp, timestamp);
-        assert_eq!(block.header.completion.unwrap().difficulty_target, MIN_DIFFICULTY); // assuming initial difficulty is 4
-        assert!(block.hash.is_some());
+        assert_eq!(block.header.completion.as_ref().unwrap().difficulty_target, MIN_DIFFICULTY); // assuming initial difficulty is 4
+        assert_ne!(block.header.completion.as_ref().unwrap().hash, [0; 32]);
     }
 }

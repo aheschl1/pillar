@@ -1,6 +1,6 @@
 use pillar_crypto::{hashing::{DefaultHash, Hashable}};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
 };
 
@@ -16,11 +16,10 @@ pub async fn broadcast_knowledge(node: Node, stop_signal: Option<flume::Receiver
     let mut hasher = DefaultHash::new();
     loop {
         // send a message to all peers
-        if let Some(signal) = &stop_signal {
-            if signal.try_recv().is_ok() {
+        if let Some(signal) = &stop_signal
+            && signal.try_recv().is_ok() {
                 return Ok(());
             }
-        }
         if let Some(pool) = &node.miner_pool {
             while let Some(proposed_block) = pool.pop_block_proposition(){
                 let m: Message = Message::BlockTransmission(proposed_block);
@@ -77,11 +76,10 @@ pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
             },
             Err(_) => {
                 // check if we should stop
-                if let Some(signal) = &stop_signal {
-                    if signal.try_recv().is_ok() {
+                if let Some(signal) = &stop_signal
+                    && signal.try_recv().is_ok() {
                         break;
                     }
-                }
                 continue; // timeout, try again
             }     
         };
@@ -110,7 +108,7 @@ pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
             let declaring_peer = match declaration {
                 Message::Declaration(peer) => {
                     // add the peer to the list if and only if it is not already in the list
-                    self_clone.maybe_update_peer(peer.clone()).await.unwrap();
+                    self_clone.maybe_update_peer(peer).await.unwrap();
                     // send a response
                     peer
                 }
@@ -152,7 +150,7 @@ pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
 }
 
 /// sends an error response when given a string description
-#[instrument(skip_all)]
+#[instrument(skip_all, fields(message=?e, text=e.to_string()))]
 async fn send_error_message(stream: &mut TcpStream, e: impl std::error::Error) {
     // write message size
     let serialized = package_standard_message(&Message::Error(e.to_string())).unwrap();
@@ -166,9 +164,10 @@ async fn send_error_message(stream: &mut TcpStream, e: impl std::error::Error) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pillar_serialize::PillarSerialize;
     use tokio::net::TcpStream;
     use crate::nodes::peer::Peer;
-    use crate::protocol::serialization::{package_standard_message, PillarSerialize};
+    use crate::protocol::serialization::{package_standard_message};
     use crate::{
         primitives::transaction::Transaction
     };
@@ -192,7 +191,7 @@ mod tests {
 
         let peer = Peer {
             public_key: [3; 32],
-            ip_address,
+            ip_address: ip_address.into(),
             port: 8085,
         };
 
@@ -223,7 +222,7 @@ mod tests {
 
         let peer = Peer {
             public_key: [3; 32],
-            ip_address,
+            ip_address: ip_address.into(),
             port: 8081,
         };
 
@@ -283,7 +282,7 @@ mod tests {
             .await
             .unwrap();
 
-        let invalid_message = vec![0; 10]; // Invalid message
+        let invalid_message = vec![0; 22]; // Invalid message
         stream.write_all(&invalid_message).await.unwrap();
 
         let response: Message = read_standard_message(&mut stream).await.unwrap();

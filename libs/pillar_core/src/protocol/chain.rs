@@ -1,10 +1,10 @@
-use std::{collections::{HashMap, HashSet}};
+use std::collections::HashMap;
 
-use pillar_crypto::{hashing::{DefaultHash, Hashable}, merkle::generate_tree, types::StdByteArray};
+use pillar_crypto::{hashing::{DefaultHash, Hashable}, types::StdByteArray};
 use rand::{rng, seq::{IteratorRandom}};
 use tracing::{instrument, warn};
 
-use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, nodes::{node::{Broadcaster, Node, NodeState}, peer::Peer}, primitives::{block::{Block, BlockTail}, errors::{BlockValidationError, QueryError}, messages::Message, transaction::Transaction}};
+use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, nodes::{node::{Broadcaster, Node, NodeState}, peer::Peer}, primitives::{block::{Block, BlockTail}, errors::{BlockValidationError, QueryError}, messages::Message, transaction::Transaction}, protocol::difficulty::MIN_DIFFICULTY};
 
 use super::peers::discover_peers;
 
@@ -27,10 +27,7 @@ async fn query_block_from_peer(
                 QueryError::BadBlock
             )?;
             // verify merkle root
-            let tree = generate_tree(
-                block.transactions.iter().collect(), 
-                &mut DefaultHash::new()
-            );
+            let tree = block.get_merkle_tree();
 
             if tree.is_err() || tree.as_ref().unwrap().get_root_hash().is_none(){
                 warn!("Merkle tree generation failed: {:?}", tree.err());
@@ -54,7 +51,7 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, Que
         let nodeclone = node.clone();
         let handle = tokio::spawn(async move{
             loop{ // keep asking for the node until we pass
-                let mut peer = nodeclone.clone().inner.peers.read().await.values().choose(&mut rng()).unwrap().clone(); // random peer
+                let mut peer = *nodeclone.clone().inner.peers.read().await.values().choose(&mut rng()).unwrap(); // random peer
                 let block = query_block_from_peer(&mut peer, &nodeclone.clone().into(), hash).await;
                 if let Ok(block) = block {
                     // we got the block, send it to the channel
@@ -76,11 +73,11 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, Que
     let mut chain = Chain::new_with_genesis();
     for block in &blocks[1..]{ // skip the first - genesis
         let mut block = block.to_owned();
-        let hash = block.hash.unwrap();
+        let hash = block.header.completion.as_ref().expect("Expected complete block").hash;
         loop{ // we need to keep going until it passes full validation
             match chain.add_new_block(block){
                 Err(_) => { // failed validation
-                    let mut peer = node.inner.peers.read().await.values().choose(&mut rng()).unwrap().clone(); // random peer
+                    let mut peer = *node.inner.peers.read().await.values().choose(&mut rng()).unwrap(); // random peer
                     block = query_block_from_peer(&mut peer, &node.clone().into(), hash).await?; // one more attempt, then fail.
                 }
                 _ => {
@@ -147,7 +144,7 @@ pub fn get_genesis_block(state_root: Option<StdByteArray>) -> Block{
         Some([0; 32]),
         BlockTail::default().stamps,
         0,
-        Some(0), // difficulty target
+        Some(MIN_DIFFICULTY), // difficulty target
         state_root,
         &mut DefaultHash::new()
     )
@@ -284,17 +281,16 @@ pub async fn service_sync(node: Node, leaves: &Vec<StdByteArray>) -> Result<Vec<
 #[instrument(fields(node = ?node.inner.public_key), skip_all)]
 pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiver<()>>){
     loop{
-        if let Some(signal) = &stop_signal {
-            if signal.try_recv().is_ok() {break;}
-        }
+        if let Some(signal) = &stop_signal
+            && signal.try_recv().is_ok() {break;}
         let state = node.inner.state.read().await.clone();
         if !state.is_consume() {continue;}
         if let Some(block) = node.inner.late_settle_queue.dequeue(){
-            tracing::debug!("Block poped from settle queue: {:?}", block.hash);
+            tracing::debug!("Block poped from settle queue");
             let mut chain_lock = node.inner.chain.lock().await;
             let mut chain = chain_lock.as_mut().unwrap();
-            if chain.get_block(&block.hash.unwrap()).is_some(){
-                warn!("Block already exists in chain, skipping settlement: {:?}", block.hash.unwrap());
+            if chain.get_block((&block.header.completion.as_ref().expect("Expected complete block").hash)).is_some(){
+                warn!("Block already exists in chain, skipping settlement: {:?}", block.header.completion.as_ref().unwrap().hash);
                 continue; // block already exists, skip
             }
             if chain.get_block(&block.header.previous_hash).is_none() {
@@ -330,5 +326,26 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
             // the stamping process is done. do, if there is a miner address, then stamping is done on this block.
             tracing::info!("Reputations recorded for new block.");
         }
+    }
+}
+
+
+// tests
+mod tests {
+    use pillar_crypto::hashing::{DefaultHash, Hashable};
+
+    use crate::{blockchain::chain::Chain, protocol::{difficulty::MIN_DIFFICULTY, pow::{get_difficulty_for_block, is_valid_hash}}};
+
+    
+
+    
+
+    #[test]
+    fn test_genesis_block(){
+        let chain = Chain::new_with_genesis();
+        let block = chain.get_top_block().unwrap();
+        let hash = Hashable::hash(&block.header, &mut DefaultHash::new()).unwrap();
+        assert!(get_difficulty_for_block(&block.header, &vec![]).0 == MIN_DIFFICULTY);
+        assert!(is_valid_hash(MIN_DIFFICULTY, &hash));
     }
 }

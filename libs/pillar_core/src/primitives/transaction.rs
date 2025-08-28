@@ -1,23 +1,22 @@
+use bytemuck::{Pod, Zeroable};
 use pillar_crypto::{hashing::{HashFunction, Hashable}, signing::{SigFunction, Signable}, types::StdByteArray};
-use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, Bytes};
 
 use super::block::Block;
 
 
-#[serde_as]
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Pod, Zeroable, Debug,  Clone, Copy, Hash, PartialEq, Eq)]
+#[repr(C, align(8))]
 pub struct Transaction{
     // header is the header of the transaction
     pub header: TransactionHeader,
     // hash is the sha3_256 hash of the transaction header
     pub hash: StdByteArray,
     // signature is the signature over the transaction header
-    #[serde_as(as = "Option<Bytes>")]
-    pub signature: Option<[u8; 64]>,
+    pub signature: [u8; 64],
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Pod, Zeroable, Debug,  Clone, Copy, Hash, PartialEq, Eq)]
+#[repr(C, align(8))]
 pub struct TransactionHeader{
     // sender is the ed25519 public key of the sender
     pub sender: StdByteArray,
@@ -28,10 +27,10 @@ pub struct TransactionHeader{
     // timestamp is the time the transaction was created
     pub timestamp: u64,
     // the nonce is a random number used to prevent replay attacks
-    pub nonce: u64
+    pub nonce: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug,  Clone, PartialEq, Eq, Hash)]
 /// TransactionFilter is sent from lightweight nodes to full nodes in order to register a callback to receive 
 /// a proof of a transaction when it is incorporated into a block.
 pub struct TransactionFilter {
@@ -68,21 +67,18 @@ pub trait FilterMatch<T>{
 /// match a transaction to a transaction filter
 impl FilterMatch<Transaction> for TransactionFilter {
     fn matches(&self, other: &Transaction) -> bool {
-        if let Some(sender) = self.sender {
-            if sender != other.header.sender {
+        if let Some(sender) = self.sender
+            && sender != other.header.sender {
                 return false;
             }
-        }
-        if let Some(receiver) = self.receiver {
-            if receiver != other.header.receiver {
+        if let Some(receiver) = self.receiver
+            && receiver != other.header.receiver {
                 return false;
             }
-        }
-        if let Some(amount) = self.amount {
-            if amount != other.header.amount {
+        if let Some(amount) = self.amount
+            && amount != other.header.amount {
                 return false;
             }
-        }
         true
     }
 }
@@ -168,7 +164,7 @@ impl Transaction {
         Transaction {
             header,
             hash,
-            signature: None,
+            signature: [0; 64],
         }
     }
 }
@@ -192,11 +188,8 @@ impl Signable<64> for Transaction {
     }
     
     fn sign<const K: usize, const P: usize>(&mut self, signing_function: &mut impl SigFunction<K, P, 64>) -> [u8; 64]{
-        if self.signature.is_some() {
-            panic!("Transaction already signed");
-        }
         let signature = signing_function.sign(self);
-        self.signature = Some(signature);
-        self.signature.unwrap()
+        self.signature = signature;
+        self.signature
     }
 }

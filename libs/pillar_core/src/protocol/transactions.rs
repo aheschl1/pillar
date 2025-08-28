@@ -84,8 +84,8 @@ pub async fn get_transaction_proof(node: &mut Node, transaction: &Transaction, h
 
     let results = node.broadcast(&message).await.unwrap();
     for (i, result) in results.iter().enumerate() {
-        if let Message::TransactionProofResponse(proof) = result {
-            if verify_proof_of_inclusion(
+        if let Message::TransactionProofResponse(proof) = result
+            && verify_proof_of_inclusion(
                 *transaction,
                 proof,
                 header.merkle_root,
@@ -94,7 +94,6 @@ pub async fn get_transaction_proof(node: &mut Node, transaction: &Transaction, h
                 tracing::info!("Transaction proof verified by peer {}", i);
                 return true;
             }
-        }
     }
     tracing::info!("No proof available, with {} responses.", results.len());
     return false;

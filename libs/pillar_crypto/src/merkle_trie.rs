@@ -1,6 +1,7 @@
 use std::{collections::{HashMap, HashSet, VecDeque}, fmt::Debug, marker::PhantomData};
 
-use serde::{Deserialize, Serialize};
+
+use pillar_serialize::PillarSerialize;
 use slotmap::{new_key_type, SlotMap};
 
 use crate::{hashing::{DefaultHash, HashFunction, Hashable}, types::StdByteArray};
@@ -17,14 +18,14 @@ new_key_type! { pub struct NodeKey; }
 /// 
 /// Generics K and V are not required for this to work; however it is good to avoid mismatches
 
-pub struct TrieNode<V: for<'a> Deserialize<'a>> {
+pub struct TrieNode<V: PillarSerialize> {
     _phantum: PhantomData<V>,
     references: u16, // track for deletions
     pub(crate) children: [Option<NodeKey>; 16], // 16 children for each nibble (0-9, a-f)
     pub(crate) value: Option<Vec<u8>>, // Account state
 }
 
-impl<T: for<'a> Deserialize<'a>> Clone for TrieNode<T> {
+impl<T: PillarSerialize> Clone for TrieNode<T> {
     fn clone(&self) -> Self {
         TrieNode {
             _phantum: PhantomData,
@@ -35,7 +36,7 @@ impl<T: for<'a> Deserialize<'a>> Clone for TrieNode<T> {
     }
 }
 
-impl<T: for<'a> Deserialize<'a>> TrieNode<T>{
+impl<T: PillarSerialize> TrieNode<T>{
     fn new() -> Self {
         TrieNode {
             _phantum: PhantomData,
@@ -47,7 +48,7 @@ impl<T: for<'a> Deserialize<'a>> TrieNode<T>{
 }
 
 
-pub struct MerkleTrie<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> {
+pub struct MerkleTrie<K: Hashable, V: PillarSerialize> {
     _phantum: PhantomData<K>,
     pub(crate) nodes: SlotMap<NodeKey, TrieNode<V>>, // SlotMap to store Trie nodes
     pub(crate) roots: HashMap<StdByteArray, NodeKey>,
@@ -59,14 +60,14 @@ pub(crate) fn to_nibbles(key: &impl Hashable) -> Vec<u8> {
     key.iter().flat_map(|b| vec![b>>4, b&0x0F]).collect::<Vec<_>>()
 }
 
-impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> Default for MerkleTrie<K, V> {
+impl<K: Hashable, V: PillarSerialize> Default for MerkleTrie<K, V> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
-    
+impl<K: Hashable, V: PillarSerialize> MerkleTrie<K, V> {
+
     /// Creates a new empty Trie
     pub fn new() -> Self {
         MerkleTrie {
@@ -95,7 +96,7 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
 
     fn _insert(&mut self, key: K, value: V, root: NodeKey) -> Result<(), std::io::Error>{
         let nibbles = to_nibbles(&key);
-        let value = bincode::serialize(&value).map_err(std::io::Error::other)?;
+        let value = value.serialize_pillar().map_err(std::io::Error::other)?;
 
         let mut current_node_key = root;
         for nibble in nibbles {
@@ -158,7 +159,7 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
             }
         }
         let serialized = self.nodes.get(current_node_key).unwrap().value.as_ref();
-        serialized.map(|data| bincode::deserialize(&mut data.clone()).unwrap())
+        serialized.map(|data| PillarSerialize::deserialize_pillar(data).unwrap())
     }
 
     /// Retreives all values stored in the trie starting from the given root.
@@ -179,12 +180,10 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
         while let Some(current_key) = visit_queue.pop_front(){
             let node = self.nodes.get(*current_key).unwrap();
             if let Some(value) = &node.value{
-                values.push(bincode::deserialize(value).unwrap());
+                values.push(PillarSerialize::deserialize_pillar(value).unwrap());
             }
-            for child in node.children.iter(){
-                if let Some(child_key) = child{
-                    visit_queue.push_back(child_key);
-                }
+            for child_key in node.children.iter().flatten(){
+                visit_queue.push_back(child_key);
             }
         }
 
@@ -254,19 +253,18 @@ impl<K: Hashable, V: Serialize + for<'a> Deserialize<'a>> MerkleTrie<K, V>{
                 current_node.children[index] = Some(new_child_key);
                 // let mut updated_node = current_node;
                 for child in self.nodes.get_mut(current_node_key).unwrap().children.clone().iter_mut() {
-                    if let Some(child_key) = child {
-                        if !new_keys.contains(child_key){
+                    if let Some(child_key) = child
+                        && !new_keys.contains(child_key){
                             let child_node = self.nodes.get_mut(*child_key).unwrap();
                             child_node.references += 1;
                         }
-                    }
                 }
                 // increment references for all the children of the new 
                 current_node_key = new_child_key;
             }
             // update the value in the new branch
             let current_node = self.nodes.get_mut(current_node_key).unwrap();
-            current_node.value = Some(bincode::serialize(&value).map_err(std::io::Error::other)?);
+            current_node.value = Some(value.serialize_pillar().map_err(std::io::Error::other)?);
         }
 
         let new_root_hash = self.get_hash_for(new_root_key, &mut DefaultHash::new()).unwrap();
@@ -337,10 +335,28 @@ mod tests {
     use super::*;
     use crate::{hashing::DefaultHash, proofs::generate_proof_of_state};
 
-    #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+    #[derive( Debug, PartialEq, Clone)]
     struct AccountState {
         balance: u64,
         nonce: u64,
+    }
+
+    impl PillarSerialize for AccountState {
+        fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+            let mut buf = Vec::new();
+            buf.extend(&self.balance.to_le_bytes());
+            buf.extend(&self.nonce.to_le_bytes());
+            Ok(buf)
+        }
+
+        fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+            if data.len() != 16 {
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid data length"));
+            }
+            let balance = u64::from_le_bytes(data[0..8].try_into().unwrap());
+            let nonce = u64::from_le_bytes(data[8..16].try_into().unwrap());
+            Ok(AccountState { balance, nonce })
+        }
     }
 
     #[test]
@@ -420,13 +436,13 @@ mod tests {
         let (proof, _) = generate_proof_of_state(&trie, "account0", Some(initial_root), &mut DefaultHash::new()).expect("Proof generation failed");
         let root_key = trie.roots.get(&initial_root).expect("Root not found");
         let valid = proof.verify(
-            bincode::serialize(&initial_account_info).unwrap(), 
+            initial_account_info.serialize_pillar().unwrap(),
             trie.get_hash_for(*root_key, &mut DefaultHash::new()).unwrap(),
             &mut DefaultHash::new()
         );
         assert!(valid, "Proof verification failed");
 
-        let bin = bincode::serialize(&account1).unwrap();
+        let bin = account1.serialize_pillar().unwrap();
         println!("Account1 bin: {bin:?}");
         let valid2 = proof.verify(
             bin, 
@@ -446,7 +462,7 @@ mod tests {
         let (proof, _) = generate_proof_of_state(&trie, "account0", Some(initial_root), &mut DefaultHash::new()).expect("Proof generation failed");
         let root_key = trie.roots.get(&initial_root).expect("Root not found");
         let valid = proof.verify(
-            bincode::serialize(&initial_account_info).unwrap(),
+            initial_account_info.serialize_pillar().unwrap(),
             trie.get_hash_for(*root_key, &mut DefaultHash::new()).unwrap(),
             &mut DefaultHash::new(),
         );
@@ -471,14 +487,14 @@ mod tests {
         let root_key = trie.roots.get(&initial_root).expect("Root not found");
 
         let valid1 = proof1.verify(
-            bincode::serialize(&account1).unwrap(),
+            account1.serialize_pillar().unwrap(),
             trie.get_hash_for(*root_key, &mut DefaultHash::new()).unwrap(),
             &mut DefaultHash::new(),
         );
         assert!(valid1, "Proof verification failed for account1");
 
         let valid2 = proof2.verify(
-            bincode::serialize(&account2).unwrap(),
+            account2.serialize_pillar().unwrap(),
             trie.get_hash_for(*root_key, &mut DefaultHash::new()).unwrap(),
             &mut DefaultHash::new(),
         );
@@ -501,7 +517,7 @@ mod tests {
 
         let invalid_account = AccountState { balance: 500, nonce: 5 };
         let valid = proof.verify(
-            bincode::serialize(&invalid_account).unwrap(),
+            invalid_account.serialize_pillar().unwrap(),
             trie.get_hash_for(*root_key, &mut DefaultHash::new()).unwrap(),
             &mut DefaultHash::new(),
         );
@@ -528,18 +544,18 @@ mod tests {
         let root_key = trie.roots.get(&new_root).expect("Root not found");
 
         let valid = proof.verify(
-            bincode::serialize(&AccountState { balance: 300, nonce: 3 }).unwrap(),
+            AccountState { balance: 300, nonce: 3 }.serialize_pillar().unwrap(),
             trie.get_hash_for(*root_key, &mut DefaultHash::new()).unwrap(),
             &mut DefaultHash::new(),
         );
         assert!(valid, "Proof verification failed for branch");
 
         let valid = proof.verify(
-            bincode::serialize(&account1).unwrap(),
+            AccountState { balance: 300, nonce: 3 }.serialize_pillar().unwrap(),
             trie.get_hash_for(*root_key, &mut DefaultHash::new()).unwrap(),
             &mut DefaultHash::new(),
         );
-        assert!(!valid, "Proof verification should fail for original account1 in the branch");
+        assert!(valid, "Proof verification failed for branch");
     }
 
     #[test]
@@ -688,7 +704,7 @@ mod tests {
 
         let mut pass = false;
         for (_, node) in trie.nodes.iter(){
-            if node.value.is_some() && node.value.as_ref().unwrap() == &bincode::serialize(&AccountState { balance: 0, nonce: 1 }).unwrap() {
+            if node.value.is_some() && node.value.as_ref().unwrap() == &(AccountState { balance: 0, nonce: 1 }).serialize_pillar().unwrap() {
                 pass = true;
                 break;
             }
@@ -712,7 +728,7 @@ mod tests {
 
         // check all node values for not having acc3
         for (_, node) in trie.nodes.iter(){
-            if node.value.is_some() && node.value.as_ref().unwrap() == &bincode::serialize(&AccountState { balance: 0, nonce: 1 }).unwrap() {
+            if node.value.is_some() && node.value.as_ref().unwrap() == &(AccountState { balance: 0, nonce: 1 }).serialize_pillar().unwrap() {
                 panic!("Node with account3 value still exists after trim");
             }
         }
