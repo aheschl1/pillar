@@ -206,7 +206,10 @@ impl BlockHeader {
         difficulty_target: Option<NonZeroU64>,
         version: Versions
     ) -> Self {
-        assert!((state_root.is_some() == miner_address.is_some()) && (miner_address.is_some() == difficulty_target.is_some()));
+        match (&state_root, &miner_address, &difficulty_target) {
+            (Some(_), Some(_), Some(_)) | (None, None, None) => {},
+            _ => panic!("state_root, miner_address, and difficulty_target must all be Some or all be None"),
+        }
         let completion = if state_root.is_some() {Some(HeaderCompletion {
             state_root: state_root.unwrap_or([0; 32]),
             miner_address: miner_address.unwrap_or([0; 32]),
