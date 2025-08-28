@@ -317,7 +317,6 @@ impl Hashable for BlockHeader {
         hash_function.update(self.completion.unwrap().difficulty_target.get().to_le_bytes());
         hash_function.update(self.merkle_root);
         hash_function.update(self.previous_hash);
-        
         for i in 0..N_TRANSMISSION_SIGNATURES {
             hash_function.update(self.tail.stamps[i].signature);
             hash_function.update(self.tail.stamps[i].address);

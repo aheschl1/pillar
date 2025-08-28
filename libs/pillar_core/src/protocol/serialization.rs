@@ -134,7 +134,6 @@ pub async fn read_standard_message(stream: &mut TcpStream) -> Result<Message, st
     let length = u32::from_le_bytes(buffer);
     let mut message_buffer = vec![0; length as usize];
     stream.read_exact(&mut message_buffer).await?;
-    // println!("{:?}", u8::from_le_bytes([message_buffer[0]]));
     let message = PillarSerialize::deserialize_pillar(&message_buffer)?;
     Ok(message)
 }
