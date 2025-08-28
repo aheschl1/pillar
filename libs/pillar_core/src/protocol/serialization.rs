@@ -120,7 +120,7 @@ impl PillarSerialize for crate::primitives::messages::Message {
     }
 }
 
-pub fn package_standard_message<T: PillarSerialize>(message: &T) -> Result<Vec<u8>, std::io::Error> {
+pub fn package_standard_message(message: &Message) -> Result<Vec<u8>, std::io::Error> {
     let mut buffer = vec![];
     let mbuff = message.serialize_pillar()?;
     buffer.extend((mbuff.len() as u32).to_le_bytes());
@@ -134,6 +134,7 @@ pub async fn read_standard_message(stream: &mut TcpStream) -> Result<Message, st
     let length = u32::from_le_bytes(buffer);
     let mut message_buffer = vec![0; length as usize];
     stream.read_exact(&mut message_buffer).await?;
+    // println!("{:?}", u8::from_le_bytes([message_buffer[0]]));
     let message = PillarSerialize::deserialize_pillar(&message_buffer)?;
     Ok(message)
 }

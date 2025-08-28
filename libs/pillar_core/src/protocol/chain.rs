@@ -27,10 +27,7 @@ async fn query_block_from_peer(
                 QueryError::BadBlock
             )?;
             // verify merkle root
-            let tree = generate_tree(
-                block.transactions.iter().collect(), 
-                &mut DefaultHash::new()
-            );
+            let tree = block.get_merkle_tree();
 
             if tree.is_err() || tree.as_ref().unwrap().get_root_hash().is_none(){
                 warn!("Merkle tree generation failed: {:?}", tree.err());
@@ -338,11 +335,12 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
 mod tests {
     use pillar_crypto::hashing::{DefaultHash, Hashable};
 
-    use crate::protocol::{chain::get_genesis_block, difficulty::MIN_DIFFICULTY, pow::{get_difficulty_for_block, is_valid_hash}};
+    use crate::{blockchain::chain::Chain, protocol::{chain::get_genesis_block, difficulty::MIN_DIFFICULTY, pow::{get_difficulty_for_block, is_valid_hash}}};
 
     #[test]
     fn test_genesis_block(){
-        let block = get_genesis_block(Some([0u8; 32]));
+        let chain = Chain::new_with_genesis();
+        let block = chain.get_top_block().unwrap();
         let hash = Hashable::hash(&block.header, &mut DefaultHash::new()).unwrap();
         assert!(get_difficulty_for_block(&block.header, &vec![]).0 == MIN_DIFFICULTY.get());
         assert!(is_valid_hash(MIN_DIFFICULTY.get(), &hash));

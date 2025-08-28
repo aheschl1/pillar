@@ -7,7 +7,7 @@ use pillar_crypto::merkle::{generate_tree, MerkleTree};
 use pillar_crypto::proofs::{generate_proof_of_inclusion, verify_proof_of_inclusion, MerkleProof};
 use pillar_crypto::signing::{DefaultVerifier, SigFunction, SigVerFunction, Signable};
 use pillar_crypto::types::StdByteArray;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, Bytes};
 
 use crate::primitives::errors::BlockValidationError;
@@ -17,7 +17,7 @@ use crate::protocol::reputation::N_TRANSMISSION_SIGNATURES;
 use crate::protocol::versions::Versions;
 use super::transaction::Transaction;
 
-#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[repr(C)]
 pub struct Block{
     // header is the header of the block
@@ -25,28 +25,7 @@ pub struct Block{
     // hash is the sha3_256 hash of the block header - is none if it hasnt been mined
     pub hash: Option<StdByteArray>,
     // transactions is a vector of transactions in this block
-    pub transactions: Vec<Transaction>,
-    // the merkle tree
-    #[serde(skip)]
-    pub merkle_tree: MerkleTree,
-}
-
-impl<'de> Deserialize<'de> for Block {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        struct PartialBlock {
-            // header is the header of the block
-            pub header: BlockHeader,
-            // transactions is a vector of transactions in this block
-            pub transactions: Vec<Transaction>,
-            // hash is the sha3_256 hash of the block header - is none if it hasnt been mined
-            pub _hash: Option<StdByteArray>,
-        }
-
-        let helper = PartialBlock::deserialize(deserializer)?;
-        Ok(Block::new_from_header_and_transactions(helper.header, helper.transactions, &mut DefaultHash::new()))
-    }
+    pub transactions: Vec<Transaction>
 }
 
 #[serde_as]
@@ -326,16 +305,16 @@ impl Hashable for BlockHeader {
                 "Miner address is not set"
             ));
         }
-        hash_function.update(self.previous_hash);
-        hash_function.update(self.merkle_root);
+        hash_function.update(self.version.to_le_bytes());
+        hash_function.update(self.nonce.to_le_bytes());
+        hash_function.update(self.depth.to_le_bytes());
+        hash_function.update(self.timestamp.to_le_bytes());
         hash_function.update(self.completion.unwrap().miner_address);
         hash_function.update(self.completion.unwrap().state_root);
-        hash_function.update(self.nonce.to_le_bytes());
-        hash_function.update(self.timestamp.to_le_bytes());
-        hash_function.update(self.depth.to_le_bytes());
         hash_function.update(self.completion.unwrap().difficulty_target.get().to_le_bytes());
-        hash_function.update(self.version.to_le_bytes());
-
+        hash_function.update(self.merkle_root);
+        hash_function.update(self.previous_hash);
+        
         for i in 0..N_TRANSMISSION_SIGNATURES {
             hash_function.update(self.tail.stamps[i].signature);
             hash_function.update(self.tail.stamps[i].address);
@@ -382,20 +361,22 @@ impl Block {
         transactions: Vec<Transaction>,
         hasher: &mut impl HashFunction
     ) -> Self {
-        let merkle_tree = generate_tree(transactions.iter().collect(), hasher).unwrap();
         let hash = header.hash(hasher);
         Block {
             header,
             transactions,
-            hash: hash.ok(),
-            merkle_tree
+            hash: hash.ok()
         }
+    }
+
+    pub fn get_merkle_tree(&self) -> Result<MerkleTree, std::io::Error>{
+        generate_tree(self.transactions.iter().collect(), &mut DefaultHash::new())
     }
 
     /// Creates the proof of inclusion for a transaction in the block
     pub fn get_proof_for_transaction<T: Into<StdByteArray>>(&self, transaction: T) -> Option<MerkleProof> {
         generate_proof_of_inclusion(
-            &self.merkle_tree,
+            &self.get_merkle_tree().ok()?,
             transaction.into(),
             &mut DefaultHash::new()
         )
