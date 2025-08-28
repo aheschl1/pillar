@@ -117,7 +117,7 @@ impl Chain {
 
         let (expected_target, is_por) = get_difficulty_for_block(&block.header, &reputations);
 
-        if block.header.completion.is_none() || expected_target != block.header.completion.unwrap().difficulty_target {
+        if block.header.completion.is_none() || expected_target != block.header.completion.unwrap().difficulty_target.get() {
             tracing::info!("Block difficulty target is invalid - Failing");
             return Err(BlockValidationError::MalformedBlock("Difficulty target does not match".into()));
         }

@@ -38,6 +38,8 @@ pub enum BlockValidationError {
     TransactionInsufficientBalance(u64),
     // invalid transaction signature
     TransactionInvalidSignature,
+    // merkle gen
+    MerkleGenerationFailed,
     // other
     Other(String),
 }
@@ -95,6 +97,9 @@ impl Display for BlockValidationError {
             }
             BlockValidationError::Other(reason) => {
                 write!(f, "Block validation error: {reason}")
+            },
+            BlockValidationError::MerkleGenerationFailed => {
+                write!(f, "Failed to generate Merkle tree")
             }
         }
     }

@@ -152,7 +152,7 @@ pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
 }
 
 /// sends an error response when given a string description
-#[instrument(skip_all)]
+#[instrument(skip_all, fields(message=?e, text=e.to_string()))]
 async fn send_error_message(stream: &mut TcpStream, e: impl std::error::Error) {
     // write message size
     let serialized = package_standard_message(&Message::Error(e.to_string())).unwrap();

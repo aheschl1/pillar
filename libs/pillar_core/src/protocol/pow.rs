@@ -1,4 +1,4 @@
-use std::cmp::min;
+use std::{cmp::min, num::NonZeroU64};
 
 use flume::Receiver;
 use pillar_crypto::{hashing::{HashFunction, Hashable}, types::StdByteArray};
@@ -64,7 +64,7 @@ pub async fn mine(
     block.header.nonce = 0;
     block.header.completion = Some(HeaderCompletion{
         miner_address: address,
-        difficulty_target: difficulty,
+        difficulty_target: NonZeroU64::new(difficulty).unwrap(),
         state_root: state_root,
     });
     loop {

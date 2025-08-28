@@ -120,7 +120,7 @@ impl PillarSerialize for crate::primitives::messages::Message {
     }
 }
 
-pub fn package_standard_message<T: PillarSerialize>(message: &T) -> Result<Vec<u8>, std::io::Error> {
+pub fn package_standard_message(message: &Message) -> Result<Vec<u8>, std::io::Error> {
     let mut buffer = vec![];
     let mbuff = message.serialize_pillar()?;
     buffer.extend((mbuff.len() as u32).to_le_bytes());

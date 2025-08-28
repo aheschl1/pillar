@@ -1,48 +1,31 @@
 use std::collections::{HashSet, VecDeque};
+use std::num::{NonZero, NonZeroU64};
+use std::ptr::NonNull;
 
 use pillar_crypto::hashing::{DefaultHash, HashFunction, Hashable};
 use pillar_crypto::merkle::{generate_tree, MerkleTree};
 use pillar_crypto::proofs::{generate_proof_of_inclusion, verify_proof_of_inclusion, MerkleProof};
 use pillar_crypto::signing::{DefaultVerifier, SigFunction, SigVerFunction, Signable};
 use pillar_crypto::types::StdByteArray;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, Bytes};
 
 use crate::primitives::errors::BlockValidationError;
+use crate::protocol::difficulty::MIN_DIFFICULTY;
 use crate::protocol::pow::is_valid_hash;
 use crate::protocol::reputation::N_TRANSMISSION_SIGNATURES;
 use crate::protocol::versions::Versions;
 use super::transaction::Transaction;
 
-#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[repr(C)]
 pub struct Block{
     // header is the header of the block
     pub header: BlockHeader,
-    // transactions is a vector of transactions in this block
-    pub transactions: Vec<Transaction>,
     // hash is the sha3_256 hash of the block header - is none if it hasnt been mined
     pub hash: Option<StdByteArray>,
-    // the merkle tree
-    #[serde(skip)]
-    pub merkle_tree: MerkleTree,
-}
-
-impl<'de> Deserialize<'de> for Block {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        struct PartialBlock {
-            // header is the header of the block
-            pub header: BlockHeader,
-            // transactions is a vector of transactions in this block
-            pub transactions: Vec<Transaction>,
-            // hash is the sha3_256 hash of the block header - is none if it hasnt been mined
-            pub _hash: Option<StdByteArray>,
-        }
-
-        let helper = PartialBlock::deserialize(deserializer)?;
-        Ok(Block::new_from_header_and_transactions(helper.header, helper.transactions, &mut DefaultHash::new()))
-    }
+    // transactions is a vector of transactions in this block
+    pub transactions: Vec<Transaction>
 }
 
 #[serde_as]
@@ -69,6 +52,7 @@ impl Default for Stamp {
 /// A block tail tracks the signatures of people who have broadcasted the block
 /// This is used for immutibility of participation reputation
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq, Default, Hash)]
+#[repr(C)]
 pub struct BlockTail{
     // the signatures of the people who have broadcasted the block
     pub stamps: [Stamp; N_TRANSMISSION_SIGNATURES]
@@ -160,12 +144,12 @@ impl BlockTail {
 #[repr(C)]
 /// Header completion exists so that the alignment of the fields uses minimal padding
 pub struct HeaderCompletion {
-    // the root hash of the global state after this block
-    pub state_root: StdByteArray,
     // the address of the miner is the sha3_256 hash of the miner address
     pub miner_address: StdByteArray,
+    // the root hash of the global state after this block
+    pub state_root: StdByteArray,
     // difficulty target of the block
-    pub difficulty_target: u64,
+    pub difficulty_target: NonZeroU64,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq, Default)]
@@ -182,11 +166,13 @@ pub struct BlockHeader{
     // the depth is a depth of the block in the chain
     pub depth: u64,
     // version of the protocol used in this block
-    pub version: u16, // note 4 bytes padding after this
-    // state_root is the root hash of the global state after this block
-    pub completion: Option<HeaderCompletion>, 
+    pub version: u16, 
+    // phantum pad
+    _pad: [u8; 4],
     // tail is the tail of the block which can contain stamps
     pub tail: BlockTail,
+    // state_root is the root hash of the global state after this block
+    pub completion: Option<HeaderCompletion>, 
 }
 
 impl BlockHeader {
@@ -198,7 +184,7 @@ impl BlockHeader {
         miner_address: Option<StdByteArray>,
         tail: BlockTail,
         depth: u64,
-        difficulty_target: Option<u64>,
+        difficulty_target: Option<NonZeroU64>,
     ) -> Self {
         Self::new_with_version(
             previous_hash, 
@@ -217,7 +203,7 @@ impl BlockHeader {
         miner_address: Option<StdByteArray>,
         tail: BlockTail,
         depth: u64,
-        difficulty_target: Option<u64>,
+        difficulty_target: Option<NonZeroU64>,
         version: Versions
     ) -> Self {
         match (&state_root, &miner_address, &difficulty_target) {
@@ -227,7 +213,7 @@ impl BlockHeader {
         let completion = if state_root.is_some() {Some(HeaderCompletion {
             state_root: state_root.unwrap_or([0; 32]),
             miner_address: miner_address.unwrap_or([0; 32]),
-            difficulty_target: difficulty_target.unwrap_or(0),
+            difficulty_target: difficulty_target.unwrap_or(MIN_DIFFICULTY),
         })} else{
             None
         };
@@ -238,6 +224,7 @@ impl BlockHeader {
             timestamp,
             depth,
             tail,
+            _pad: [0; 4],
             completion,
             version: version.to_u16()
         }
@@ -266,8 +253,8 @@ impl BlockHeader {
         if expected_hash != self.hash(hasher).unwrap() {
             return Err(BlockValidationError::HashMismatch(expected_hash, self.hash(hasher).unwrap()));
         }
-        if !is_valid_hash(self.completion.unwrap().difficulty_target, &self.hash(hasher).unwrap()) {
-            return Err(BlockValidationError::DifficultyMismatch(self.completion.unwrap().difficulty_target, *self));
+        if !is_valid_hash(self.completion.unwrap().difficulty_target.get(), &self.hash(hasher).unwrap()) {
+            return Err(BlockValidationError::DifficultyMismatch(self.completion.unwrap().difficulty_target.get(), *self));
         }
         // check that all the signatures work in the tail
         let tail = &mut self.tail.clone();
@@ -321,16 +308,15 @@ impl Hashable for BlockHeader {
                 "Miner address is not set"
             ));
         }
-        hash_function.update(self.previous_hash);
-        hash_function.update(self.merkle_root);
+        hash_function.update(self.version.to_le_bytes());
+        hash_function.update(self.nonce.to_le_bytes());
+        hash_function.update(self.depth.to_le_bytes());
+        hash_function.update(self.timestamp.to_le_bytes());
         hash_function.update(self.completion.unwrap().miner_address);
         hash_function.update(self.completion.unwrap().state_root);
-        hash_function.update(self.nonce.to_le_bytes());
-        hash_function.update(self.timestamp.to_le_bytes());
-        hash_function.update(self.depth.to_le_bytes());
-        hash_function.update(self.completion.unwrap().difficulty_target.to_le_bytes());
-        hash_function.update(self.version.to_le_bytes());
-
+        hash_function.update(self.completion.unwrap().difficulty_target.get().to_le_bytes());
+        hash_function.update(self.merkle_root);
+        hash_function.update(self.previous_hash);
         for i in 0..N_TRANSMISSION_SIGNATURES {
             hash_function.update(self.tail.stamps[i].signature);
             hash_function.update(self.tail.stamps[i].address);
@@ -350,7 +336,7 @@ impl Block {
         miner_address: Option<StdByteArray>,
         stamps: [Stamp; N_TRANSMISSION_SIGNATURES],
         depth: u64,
-        difficulty_target: Option<u64>,
+        difficulty_target: Option<NonZeroU64>,
         state_root: Option<StdByteArray>,
         hasher: &mut impl HashFunction,
     ) -> Self {
@@ -377,20 +363,22 @@ impl Block {
         transactions: Vec<Transaction>,
         hasher: &mut impl HashFunction
     ) -> Self {
-        let merkle_tree = generate_tree(transactions.iter().collect(), hasher).unwrap();
         let hash = header.hash(hasher);
         Block {
             header,
             transactions,
-            hash: hash.ok(),
-            merkle_tree
+            hash: hash.ok()
         }
+    }
+
+    pub fn get_merkle_tree(&self) -> Result<MerkleTree, std::io::Error>{
+        generate_tree(self.transactions.iter().collect(), &mut DefaultHash::new())
     }
 
     /// Creates the proof of inclusion for a transaction in the block
     pub fn get_proof_for_transaction<T: Into<StdByteArray>>(&self, transaction: T) -> Option<MerkleProof> {
         generate_proof_of_inclusion(
-            &self.merkle_tree,
+            &self.get_merkle_tree().ok()?,
             transaction.into(),
             &mut DefaultHash::new()
         )
@@ -431,9 +419,71 @@ impl From<Block> for StdByteArray {
 #[cfg(test)]
 mod tests {
 
+    use core::time;
+
     use pillar_crypto::signing::{DefaultSigner, SigFunction, SigVerFunction};
 
     use super::*;
+
+    #[test]
+    fn test_memory_layout() {
+        let previous_hash = [2; 32];
+        let sender = [3; 32];
+        let receiver = [4; 32];
+        let amount = 5;
+        let timestamp = 6;
+        let nonce = 7;
+        let depth = 9;
+        let mut hash_function = DefaultHash::new();
+        let transaction = Transaction::new(
+            sender, 
+            receiver, 
+            amount, 
+            timestamp, 
+            nonce, 
+            &mut hash_function
+        );
+        let block = Block::new(
+            previous_hash, 
+            0,
+            timestamp,
+            vec![transaction],
+            None,
+            [Stamp::default(); N_TRANSMISSION_SIGNATURES],
+            depth,
+            None,
+            None,
+            &mut DefaultHash::new(),
+        );
+        let merkle_root = block.header.merkle_root;
+        let total_size = size_of::<Block>();
+
+        let pointer: *const Block = &block;
+        unsafe {
+            let block_ref: &Block = &*pointer;
+            assert_eq!(block_ref.header.previous_hash, previous_hash);
+
+            let slice = std::slice::from_raw_parts(pointer as *const u8, total_size);
+            assert_eq!(slice[0..32], previous_hash);
+            assert_eq!(slice[32..64], merkle_root);
+            assert_eq!(slice[64..72], [0; 8]); // nonce
+            assert_eq!(slice[72..80], timestamp.to_le_bytes());
+            assert_eq!(slice[80..88], depth.to_le_bytes()); // depth
+            assert_eq!(slice[88..90], Versions::default().to_le_bytes()); // version
+            assert_eq!(slice[90..94], [0; 4]); // explicit padding
+            const STAMP_SIZE: usize = 96;
+            for i in 0..N_TRANSMISSION_SIGNATURES {
+                let start = 94 + i * STAMP_SIZE;
+                let end = start + STAMP_SIZE;
+                assert_eq!(slice[start..end], [0; STAMP_SIZE]);
+            }
+            let start: usize = 94 + N_TRANSMISSION_SIGNATURES * STAMP_SIZE;
+            // let end = start;
+            assert_eq!(slice[start + 64..start + 72], [0; 8]); // state_root
+
+        }
+
+    }
 
     #[test]
     fn test_tail() {

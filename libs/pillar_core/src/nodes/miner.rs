@@ -153,7 +153,7 @@ async fn monitor_block_pool(miner: Miner) {
 
 #[cfg(test)]
 mod test{
-    use std::{net::{IpAddr, Ipv4Addr}, str::FromStr, sync::Arc};
+    use std::{net::{IpAddr, Ipv4Addr}, num::NonZeroU64, str::FromStr, sync::Arc};
 
     use pillar_crypto::hashing::DefaultHash;
 
