@@ -7,6 +7,7 @@ use super::block::Block;
 
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
+#[repr(C)]
 pub struct Transaction{
     // header is the header of the transaction
     pub header: TransactionHeader,
@@ -18,6 +19,7 @@ pub struct Transaction{
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
+#[repr(C)]
 pub struct TransactionHeader{
     // sender is the ed25519 public key of the sender
     pub sender: StdByteArray,

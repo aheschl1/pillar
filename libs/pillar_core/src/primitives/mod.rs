@@ -6,6 +6,8 @@ pub mod errors;
 
 #[cfg(test)]
 mod tests{
+    use std::num::NonZeroU64;
+
     use pillar_crypto::{hashing::{DefaultHash, Hashable}, signing::{DefaultSigner, SigFunction, SigVerFunction, Signable}};
     
 
@@ -29,7 +31,7 @@ mod tests{
             Some(miner_address), 
             BlockTail::default(), 
             0,
-            Some(1),
+            Some(NonZeroU64::new(1).unwrap()),
         );
         let hash = block_header.hash(&mut DefaultHash::new());
 

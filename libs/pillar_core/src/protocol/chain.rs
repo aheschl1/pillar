@@ -4,7 +4,7 @@ use pillar_crypto::{hashing::{DefaultHash, Hashable}, merkle::generate_tree, typ
 use rand::{rng, seq::{IteratorRandom}};
 use tracing::{instrument, warn};
 
-use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, nodes::{node::{Broadcaster, Node, NodeState}, peer::Peer}, primitives::{block::{Block, BlockTail}, errors::{BlockValidationError, QueryError}, messages::Message, transaction::Transaction}};
+use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, nodes::{node::{Broadcaster, Node, NodeState}, peer::Peer}, primitives::{block::{Block, BlockTail}, errors::{BlockValidationError, QueryError}, messages::Message, transaction::Transaction}, protocol::difficulty::MIN_DIFFICULTY};
 
 use super::peers::discover_peers;
 
@@ -147,7 +147,7 @@ pub fn get_genesis_block(state_root: Option<StdByteArray>) -> Block{
         Some([0; 32]),
         BlockTail::default().stamps,
         0,
-        Some(0), // difficulty target
+        Some(MIN_DIFFICULTY), // difficulty target
         state_root,
         &mut DefaultHash::new()
     )
@@ -330,5 +330,21 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
             // the stamping process is done. do, if there is a miner address, then stamping is done on this block.
             tracing::info!("Reputations recorded for new block.");
         }
+    }
+}
+
+
+// tests
+mod tests {
+    use pillar_crypto::hashing::{DefaultHash, Hashable};
+
+    use crate::protocol::{chain::get_genesis_block, difficulty::MIN_DIFFICULTY, pow::{get_difficulty_for_block, is_valid_hash}};
+
+    #[test]
+    fn test_genesis_block(){
+        let block = get_genesis_block(Some([0u8; 32]));
+        let hash = Hashable::hash(&block.header, &mut DefaultHash::new()).unwrap();
+        assert!(get_difficulty_for_block(&block.header, &vec![]).0 == MIN_DIFFICULTY.get());
+        assert!(is_valid_hash(MIN_DIFFICULTY.get(), &hash));
     }
 }

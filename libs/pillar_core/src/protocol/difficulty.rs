@@ -1,15 +1,17 @@
+use std::num::NonZeroU64;
+
 use crate::protocol::reputation::N_TRANSMISSION_SIGNATURES;
 
 const INITIAL_BLOCK_REWARD: u64 = 10_000;
-pub const MIN_DIFFICULTY: u64 = 4; // minimum difficulty for the first 500 blocks
+pub const MIN_DIFFICULTY: NonZeroU64 = NonZeroU64::new(4).unwrap(); // minimum difficulty for the first 500 blocks
 
 /// get more difficult after every 500 blocks
 /// the schedule is 4 + 2*(depth // 500)
 pub fn _get_base_difficulty_from_depth(depth: u64) -> u64{
     if depth == 0{
-        return 0; // genesis block
+        return MIN_DIFFICULTY.get(); // genesis block
     }
-    MIN_DIFFICULTY+2*(depth/500)
+    MIN_DIFFICULTY.get() + 2*(depth/500)
 }
 
 /// Get the reward to pay to the miner
