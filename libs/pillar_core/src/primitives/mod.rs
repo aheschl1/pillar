@@ -24,6 +24,7 @@ mod tests{
         let state_root = [3u8; 32];
 
         let block_header = BlockHeader::new(
+            None,
             previous_hash, 
             merkle_root, 
             Some(state_root), 

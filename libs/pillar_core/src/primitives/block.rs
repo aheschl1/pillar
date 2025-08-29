@@ -22,8 +22,6 @@ use super::transaction::Transaction;
 pub struct Block{
     // header is the header of the block
     pub header: BlockHeader,
-    // hash is the sha3_256 hash of the block header - is none if it hasnt been mined
-    pub hash: Option<StdByteArray>,
     // transactions is a vector of transactions in this block
     pub transactions: Vec<Transaction>
 }
@@ -142,8 +140,10 @@ impl BlockTail {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq)]
 #[repr(C)]
-/// Header completion exists so that the alignment of the fields uses minimal padding
+/// Header completion is Some in the BlockHeader if the block is mined
 pub struct HeaderCompletion {
+    // pub hash
+    pub hash: StdByteArray,
     // the address of the miner is the sha3_256 hash of the miner address
     pub miner_address: StdByteArray,
     // the root hash of the global state after this block
@@ -177,6 +177,7 @@ pub struct BlockHeader{
 
 impl BlockHeader {
     pub fn new(
+        hash: Option<StdByteArray>,
         previous_hash: StdByteArray, 
         merkle_root: StdByteArray, 
         state_root: Option<StdByteArray>,
@@ -187,15 +188,19 @@ impl BlockHeader {
         difficulty_target: Option<NonZeroU64>,
     ) -> Self {
         Self::new_with_version(
+            hash,
             previous_hash, 
             merkle_root, 
             state_root, 
             nonce, 
             timestamp, 
-            miner_address, tail, depth, difficulty_target, Versions::default())
+            miner_address, tail, depth, difficulty_target, 
+            Versions::default()
+        )
     }
 
     fn new_with_version(
+        hash: Option<StdByteArray>,
         previous_hash: StdByteArray, 
         merkle_root: StdByteArray, 
         state_root: Option<StdByteArray>,
@@ -211,13 +216,14 @@ impl BlockHeader {
             _ => panic!("state_root, miner_address, and difficulty_target must all be Some or all be None"),
         }
         let completion = if state_root.is_some() {Some(HeaderCompletion {
+            hash: hash.unwrap_or([0; 32]),
             state_root: state_root.unwrap_or([0; 32]),
             miner_address: miner_address.unwrap_or([0; 32]),
             difficulty_target: difficulty_target.unwrap_or(MIN_DIFFICULTY),
         })} else{
             None
         };
-        BlockHeader {
+        let mut header = BlockHeader {
             previous_hash,
             merkle_root,
             nonce,
@@ -227,7 +233,19 @@ impl BlockHeader {
             _pad: [0; 4],
             completion,
             version: version.to_u16()
+        };
+        if completion.is_some() && hash.is_none() {
+            // derive the hash
+            let mut hasher = DefaultHash::new();
+            let hash = header.hash(&mut hasher).unwrap();
+            header.completion.as_mut().unwrap().hash = hash;
         }
+        if completion.is_some() && hash.is_some() {
+            let mut hasher = DefaultHash::new();
+            let hash = header.hash(&mut hasher).unwrap();
+            assert_eq!(hash, header.completion.unwrap().hash);
+        }
+        header
     }
 
     /// Validate header of the block
@@ -345,6 +363,7 @@ impl Block {
             stamps
         };
         let header = BlockHeader::new(
+            None,
             previous_hash, 
             merkle_tree.nodes.get(merkle_tree.root.unwrap()).unwrap().hash,
             state_root, // State root is not set in this context
@@ -355,19 +374,16 @@ impl Block {
             depth,
             difficulty_target
         );
-        Self::new_from_header_and_transactions(header, transactions, hasher)
+        Self::new_from_header_and_transactions(header, transactions)
     }
 
     pub fn new_from_header_and_transactions(
         header: BlockHeader, 
-        transactions: Vec<Transaction>,
-        hasher: &mut impl HashFunction
+        transactions: Vec<Transaction>
     ) -> Self {
-        let hash = header.hash(hasher);
         Block {
             header,
-            transactions,
-            hash: hash.ok()
+            transactions
         }
     }
 
@@ -407,12 +423,6 @@ impl Signable<64> for BlockHeader {
     
     fn sign<const K: usize, const P: usize>(&mut self, signing_function: &mut impl SigFunction<K, P, 64>) -> [u8; 64] {
         signing_function.sign(self)
-    }
-}
-
-impl From<Block> for StdByteArray {
-    fn from(block: Block) -> Self {
-        block.hash.unwrap()
     }
 }
 
@@ -479,7 +489,7 @@ mod tests {
             }
             let start: usize = 94 + N_TRANSMISSION_SIGNATURES * STAMP_SIZE;
             // let end = start;
-            assert_eq!(slice[start + 64..start + 72], [0; 8]); // state_root
+            assert_eq!(slice[start + 94..start + 102], [0; 8]); // state_root
 
         }
 

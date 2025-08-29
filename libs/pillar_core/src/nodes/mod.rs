@@ -894,8 +894,8 @@ mod tests {
             .collect::<Vec<_>>();
         cblocks.sort_by_key(|b| b.header.depth);
 
-        assert_eq!(ablocks[0].hash.unwrap(), cblocks[0].hash.unwrap(),);
-        assert_eq!(ablocks[1].hash.unwrap(), cblocks[1].hash.unwrap(),);
+        assert_eq!(ablocks[0].header.completion.unwrap().hash, cblocks[0].header.completion.unwrap().hash);
+        assert_eq!(ablocks[1].header.completion.unwrap().hash, cblocks[1].header.completion.unwrap().hash);
         drop(chain_c);
         assert!(node_c.inner.state.read().await.clone() == NodeState::Serving);
         // make sure reputations are correct

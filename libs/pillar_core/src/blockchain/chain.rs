@@ -42,8 +42,8 @@ impl Chain {
             .expect("Failed to create genesis state root");
 
         let genesis_block = get_genesis_block(Some(state_root));
-        let genisis_hash = genesis_block.hash.unwrap();
-        
+        let genisis_hash = genesis_block.header.completion.unwrap().hash;
+
         let mut headers = HashMap::new();
         headers.insert(genisis_hash, genesis_block.header);
         
@@ -105,12 +105,12 @@ impl Chain {
     }
     
     /// Validates the structure and metadata of a block.
-    #[instrument(skip_all, fields(block = ?block.hash))]
+    #[instrument(skip_all, fields(block = ?block.header.completion))]
     fn validate_block(&self, block: &Block) -> Result<(), BlockValidationError> {
         // check hash validity
-        if block.hash.is_none() {
-            tracing::info!("Block hash is None - Failing");
-            return Err(BlockValidationError::MalformedBlock("Hash is not specified".into()));
+        if block.header.completion.is_none() {
+            tracing::info!("Block hash is incomplete - Failing");
+            return Err(BlockValidationError::MalformedBlock("Complete details are not specified".into()));
         }
         // get all reputations according to previous block
         let reputations = get_current_reputations_for_stampers(self, &block.header).values().cloned().collect::<Vec<f64>>();
@@ -122,7 +122,7 @@ impl Chain {
             return Err(BlockValidationError::MalformedBlock("Difficulty target does not match".into()));
         }
 
-        if let Err(error) = block.header.validate(block.hash.unwrap(), &mut DefaultHash::new()) {
+        if let Err(error) = block.header.validate(block.header.completion.unwrap().hash, &mut DefaultHash::new()) {
             tracing::info!("Block header is not validated - Failing");
             return Err(error);
         }
@@ -296,10 +296,10 @@ impl Chain {
     }
 
     /// Call this only after a block has been verified
-    #[instrument(skip_all, fields(block = ?block.hash))]
+    #[instrument(skip_all, fields(block = ?block.header.completion))]
     fn settle_new_block(&mut self, block: Block) -> Result<(), BlockValidationError>{
-        if self.blocks.get(&block.hash.unwrap()).is_some() {
-            tracing::warn!("Block with hash {:?} already exists in the chain - skipping", block.hash);
+        if self.blocks.get(&block.header.completion.expect("Expected completed block").hash).is_some() {
+            tracing::warn!("Block with hash {:?} already exists in the chain - skipping", block.header.completion.unwrap().hash);
             return Ok(());
         }
         let prev_header = self.headers.get(&block.header.previous_hash).expect("Previous block header must exist");
@@ -311,16 +311,16 @@ impl Chain {
             return Err(BlockValidationError::MalformedBlock("State root does not match".into()));
         }
         tracing::debug!("Account settled");
-        self.blocks.insert(block.hash.unwrap(), block.clone());
+        self.blocks.insert(block.header.completion.unwrap().hash, block.clone());
         self.leaves.remove(&block.header.previous_hash);
-        self.leaves.insert(block.hash.unwrap());
-        self.headers.insert(block.hash.unwrap(), block.header);
+        self.leaves.insert(block.header.completion.unwrap().hash);
+        self.headers.insert(block.header.completion.unwrap().hash, block.header);
         tracing::debug!("Block settled in chain, but need to update depth.");
         // update the depth - the depth of this block is checked in the verification
         // perhaps this is a fork deeper in the chain, so we do not always update 
         if block.header.depth > self.depth {
             tracing::info!("Chain depth expanded to {}", block.header.depth);
-            self.deepest_hash = block.hash.unwrap();
+            self.deepest_hash = block.header.completion.unwrap().hash;
             self.depth = block.header.depth;
         }
         Ok(())
@@ -336,7 +336,7 @@ impl Chain {
     ///
     /// * `Ok(())` if the block is successfully added.
     /// * `Err(std::io::Error)` if the block is invalid.
-    #[instrument(skip_all, fields(block = ?block.hash))]
+    #[instrument(skip_all, fields(block = ?block.header.completion))]
     pub fn add_new_block(&mut self, block: Block) -> Result<(), BlockValidationError> {
         self.verify_block(&block)?;
         tracing::info!("Block is valid, settling...");
@@ -467,7 +467,7 @@ mod tests {
                 .expect("Previous block header not found");
             let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
             mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
-            parent_hash = block.hash.unwrap();
+            parent_hash = block.header.completion.unwrap().hash;
             chain.add_new_block(block).unwrap();
         }
 
@@ -494,11 +494,11 @@ mod tests {
         mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
         chain.add_new_block(fork_block.clone()).unwrap();
 
-        assert!(chain.blocks.contains_key(&fork_block.hash.unwrap()));
+        assert!(chain.blocks.contains_key(&fork_block.header.completion.unwrap().hash));
 
         // Trim should remove the short fork
         chain.trim();
-        assert!(!chain.blocks.contains_key(&fork_block.hash.unwrap()));
+        assert!(!chain.blocks.contains_key(&fork_block.header.completion.unwrap().hash));
         assert!(chain.blocks.contains_key(&long_chain_leaf));
         assert!(chain.blocks.contains_key(&chain.blocks[&long_chain_leaf].header.previous_hash));
     }
@@ -534,7 +534,7 @@ mod tests {
                 .expect("Previous block header not found");
             let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
             mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
-            parent_hash = block.hash.unwrap();
+            parent_hash = block.header.completion.unwrap().hash;
             chain.add_new_block(block).unwrap();
         }
 
@@ -557,7 +557,7 @@ mod tests {
             .expect("Previous block header not found");
         let state_root = chain.state_manager.branch_from_block_internal(&fork_block, prev_header, &sender);
         mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
-        let fork_hash = fork_block.hash.unwrap();
+        let fork_hash = fork_block.header.completion.unwrap().hash;
         chain.add_new_block(fork_block).unwrap();
 
         // This fork is <10 behind, so it should NOT be trimmed
@@ -595,7 +595,7 @@ mod tests {
                 .expect("Previous block header not found");
             let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
             mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
-            main_hash = block.hash.unwrap();
+            main_hash = block.header.completion.unwrap().hash;
             chain.add_new_block(block).unwrap();
         }
 
@@ -620,7 +620,7 @@ mod tests {
                 .expect("Previous block header not found");
             let state_root = chain.state_manager.branch_from_block_internal(&fork_block, prev_header, &sender);
             mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
-            let hash = fork_block.hash.unwrap();
+            let hash = fork_block.header.completion.unwrap().hash;
             fork_hashes.push(hash);
             chain.add_new_block(fork_block).unwrap();
         }
@@ -682,7 +682,7 @@ mod tests {
                 .expect("Previous block header not found");
             let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
             mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
-            main_hash = block.hash.unwrap();
+            main_hash = block.header.completion.unwrap().hash;
             chain.add_new_block(block).unwrap();
         }
 
@@ -709,7 +709,7 @@ mod tests {
                     .expect("Previous block header not found");
                 let state_root = chain.state_manager.branch_from_block_internal(&fork_block, prev_header, &sender);
                 mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
-                parent_hash = fork_block.hash.unwrap();
+                parent_hash = fork_block.header.completion.unwrap().hash;
                 if depth == fork_length {
                     fork_hashes.push(parent_hash);
                 }
@@ -766,7 +766,7 @@ mod tests {
                 .expect("Previous block header not found");
             let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
             mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
-            main_hash = block.hash.unwrap();
+            main_hash = block.header.completion.unwrap().hash;
             chain.add_new_block(block).unwrap();
         }
 
@@ -791,7 +791,7 @@ mod tests {
                 .expect("Previous block header not found");
             let state_root = chain.state_manager.branch_from_block_internal(&fork_block, prev_header, &sender);
             mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
-            fork_hash = fork_block.hash.unwrap();
+            fork_hash = fork_block.header.completion.unwrap().hash;
             chain.add_new_block(fork_block).unwrap();
         }
 
@@ -836,7 +836,7 @@ mod tests {
                 .expect("Previous block header not found");
             let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
             mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
-            main_hash = block.hash.unwrap();
+            main_hash = block.header.completion.unwrap().hash;
             chain.add_new_block(block).unwrap();
         }
 
@@ -861,7 +861,7 @@ mod tests {
                 .expect("Previous block header not found");
             let state_root = chain.state_manager.branch_from_block_internal(&fork_block, prev_header, &sender);
             mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
-            fork_hash = fork_block.hash.unwrap();
+            fork_hash = fork_block.header.completion.unwrap().hash;
             chain.add_new_block(fork_block).unwrap();
         }
 

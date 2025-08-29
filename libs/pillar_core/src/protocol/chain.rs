@@ -73,7 +73,7 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, Que
     let mut chain = Chain::new_with_genesis();
     for block in &blocks[1..]{ // skip the first - genesis
         let mut block = block.to_owned();
-        let hash = block.hash.unwrap();
+        let hash = block.header.completion.expect("Expected complete block").hash;
         loop{ // we need to keep going until it passes full validation
             match chain.add_new_block(block){
                 Err(_) => { // failed validation
@@ -287,11 +287,11 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
         let state = node.inner.state.read().await.clone();
         if !state.is_consume() {continue;}
         if let Some(block) = node.inner.late_settle_queue.dequeue(){
-            tracing::debug!("Block poped from settle queue: {:?}", block.hash);
+            tracing::debug!("Block poped from settle queue");
             let mut chain_lock = node.inner.chain.lock().await;
             let mut chain = chain_lock.as_mut().unwrap();
-            if chain.get_block(&block.hash.unwrap()).is_some(){
-                warn!("Block already exists in chain, skipping settlement: {:?}", block.hash.unwrap());
+            if chain.get_block(&&block.header.completion.expect("Expected complete block").hash).is_some(){
+                warn!("Block already exists in chain, skipping settlement: {:?}", block.header.completion.unwrap().hash);
                 continue; // block already exists, skip
             }
             if chain.get_block(&block.header.previous_hash).is_none() {

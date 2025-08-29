@@ -66,12 +66,13 @@ pub async fn mine(
         miner_address: address,
         difficulty_target: NonZeroU64::new(difficulty).unwrap(),
         state_root: state_root,
+        hash: [255u8; 32],
     });
     loop {
         match block.header.hash(&mut hash_function){
             Ok(hash) => {
                 if is_valid_hash(difficulty, &hash) {
-                    block.hash = Some(hash);
+                    block.header.completion.as_mut().unwrap().hash = hash;
                     break;
                 }
             },

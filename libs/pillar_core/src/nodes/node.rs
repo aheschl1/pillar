@@ -457,9 +457,7 @@ impl Node {
     }
 
     /// spawn a new thread to match transaction callback requests against the bock
-    #[instrument(name = "Node::handle_callbacks", skip(self, block), fields(
-        block_hash = ?block.hash
-    ))]
+    #[instrument(name = "Node::handle_callbacks", skip(self, block))]
     async fn handle_callbacks(&self, block: &Block){
         let block_clone = block.clone();
         let initpeer: Peer = self.clone().into();

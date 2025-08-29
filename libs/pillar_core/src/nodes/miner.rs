@@ -87,7 +87,7 @@ async fn monitor_transaction_pool(miner: Miner) {
             let chain_lock = miner.node.inner.chain.lock().await;
             let chain = chain_lock.as_ref().unwrap();
             let block = Block::new(
-                chain.get_top_block().unwrap().hash.unwrap(), // if it crahses, there is bug
+                chain.get_top_block().unwrap().header.completion.expect("Expected complete block").hash,
                 0, // undefined nonce
                 now,
                 transactions.iter().copied().collect(),
@@ -201,6 +201,6 @@ mod test{
         assert_eq!(block.header.previous_hash, previous_hash);
         assert_eq!(block.header.timestamp, timestamp);
         assert_eq!(block.header.completion.unwrap().difficulty_target, MIN_DIFFICULTY); // assuming initial difficulty is 4
-        assert!(block.hash.is_some());
+        assert_ne!(block.header.completion.unwrap().hash, [0; 32]);
     }
 }
