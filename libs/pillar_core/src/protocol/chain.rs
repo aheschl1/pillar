@@ -73,7 +73,7 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, Que
     let mut chain = Chain::new_with_genesis();
     for block in &blocks[1..]{ // skip the first - genesis
         let mut block = block.to_owned();
-        let hash = block.header.completion.expect("Expected complete block").hash;
+        let hash = block.header.completion.as_ref().expect("Expected complete block").hash;
         loop{ // we need to keep going until it passes full validation
             match chain.add_new_block(block){
                 Err(_) => { // failed validation
@@ -290,8 +290,8 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
             tracing::debug!("Block poped from settle queue");
             let mut chain_lock = node.inner.chain.lock().await;
             let mut chain = chain_lock.as_mut().unwrap();
-            if chain.get_block(&&block.header.completion.expect("Expected complete block").hash).is_some(){
-                warn!("Block already exists in chain, skipping settlement: {:?}", block.header.completion.unwrap().hash);
+            if chain.get_block(&&block.header.completion.as_ref().expect("Expected complete block").hash).is_some(){
+                warn!("Block already exists in chain, skipping settlement: {:?}", block.header.completion.as_ref().unwrap().hash);
                 continue; // block already exists, skip
             }
             if chain.get_block(&block.header.previous_hash).is_none() {
@@ -342,7 +342,7 @@ mod tests {
         let chain = Chain::new_with_genesis();
         let block = chain.get_top_block().unwrap();
         let hash = Hashable::hash(&block.header, &mut DefaultHash::new()).unwrap();
-        assert!(get_difficulty_for_block(&block.header, &vec![]).0 == MIN_DIFFICULTY.get());
-        assert!(is_valid_hash(MIN_DIFFICULTY.get(), &hash));
+        assert!(get_difficulty_for_block(&block.header, &vec![]).0 == MIN_DIFFICULTY);
+        assert!(is_valid_hash(MIN_DIFFICULTY, &hash));
     }
 }

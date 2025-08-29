@@ -99,7 +99,7 @@ pub fn get_current_reputations_for_stampers_from_state(
     let stampers = header.tail.get_stampers();
     // get all reputations according to previous block
     stampers.iter().map(|stamper| {
-        let history = state_manager.get_account(stamper, previous_header.completion.expect("Block should be complete").state_root)
+        let history = state_manager.get_account(stamper, previous_header.completion.as_ref().expect("Block should be complete").state_root)
             .unwrap_or(Account::new(*stamper, 0)).history;
         if let Some(history) = history {
             // compute based on new block

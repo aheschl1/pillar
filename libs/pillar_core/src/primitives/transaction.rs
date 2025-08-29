@@ -1,3 +1,4 @@
+use bytemuck::{Pod, Zeroable};
 use pillar_crypto::{hashing::{HashFunction, Hashable}, signing::{SigFunction, Signable}, types::StdByteArray};
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, Bytes};
@@ -6,7 +7,7 @@ use super::block::Block;
 
 
 #[serde_as]
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Pod, Zeroable, Debug, Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
 #[repr(C, align(8))]
 pub struct Transaction{
     // header is the header of the transaction
@@ -14,11 +15,11 @@ pub struct Transaction{
     // hash is the sha3_256 hash of the transaction header
     pub hash: StdByteArray,
     // signature is the signature over the transaction header
-    #[serde_as(as = "Option<Bytes>")]
-    pub signature: Option<[u8; 64]>,
+    #[serde_as(as = "Bytes")]
+    pub signature: [u8; 64],
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Pod, Zeroable, Debug, Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
 #[repr(C, align(8))]
 pub struct TransactionHeader{
     // sender is the ed25519 public key of the sender
@@ -31,8 +32,6 @@ pub struct TransactionHeader{
     pub timestamp: u64,
     // the nonce is a random number used to prevent replay attacks
     pub nonce: u64,
-    // explicit pad for 8-byte alignment
-    _pad: [u8; 8]
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
@@ -126,8 +125,7 @@ impl TransactionHeader {
             receiver,
             amount,
             timestamp,
-            nonce,
-            _pad: [0; 8]
+            nonce
         }
     }
 
@@ -173,7 +171,7 @@ impl Transaction {
         Transaction {
             header,
             hash,
-            signature: None,
+            signature: [0; 64],
         }
     }
 }
@@ -197,11 +195,8 @@ impl Signable<64> for Transaction {
     }
     
     fn sign<const K: usize, const P: usize>(&mut self, signing_function: &mut impl SigFunction<K, P, 64>) -> [u8; 64]{
-        if self.signature.is_some() {
-            panic!("Transaction already signed");
-        }
         let signature = signing_function.sign(self);
-        self.signature = Some(signature);
-        self.signature.unwrap()
+        self.signature = signature;
+        self.signature
     }
 }

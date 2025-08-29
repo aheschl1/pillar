@@ -15,7 +15,7 @@ impl Block {
         miner_address: Option<StdByteArray>,
         stamps: [Stamp; N_TRANSMISSION_SIGNATURES],
         depth: u64,
-        difficulty_target: Option<NonZeroU64>,
+        difficulty_target: Option<u64>,
         state_root: Option<StdByteArray>,
         hasher: &mut impl HashFunction,
     ) -> Self {

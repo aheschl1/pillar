@@ -14,7 +14,7 @@ impl BlockHeader {
         miner_address: Option<StdByteArray>,
         tail: BlockTail,
         depth: u64,
-        difficulty_target: Option<NonZeroU64>,
+        difficulty_target: Option<u64>,
     ) -> Self {
         Self::new_with_version(
             hash,
@@ -37,20 +37,20 @@ impl BlockHeader {
         miner_address: Option<StdByteArray>,
         tail: BlockTail,
         depth: u64,
-        difficulty_target: Option<NonZeroU64>,
+        difficulty_target: Option<u64>,
         version: Versions
     ) -> Self {
         match (&state_root, &miner_address, &difficulty_target) {
             (Some(_), Some(_), Some(_)) | (None, None, None) => {},
             _ => panic!("state_root, miner_address, and difficulty_target must all be Some or all be None"),
         }
-        let completion = if state_root.is_some() {Some(HeaderCompletion {
-            hash: hash.unwrap_or([0; 32]),
-            state_root: state_root.unwrap_or([0; 32]),
-            miner_address: miner_address.unwrap_or([0; 32]),
-            difficulty_target: difficulty_target.unwrap_or(MIN_DIFFICULTY),
-        })} else{
-            None
+        let completion = if state_root.is_some() {HeaderCompletion::new(
+            hash.unwrap_or([0; 32]),
+            miner_address.unwrap_or([0; 32]),
+            state_root.unwrap_or([0; 32]),
+            difficulty_target.unwrap_or(MIN_DIFFICULTY),
+        )} else{
+            HeaderCompletion::new_none()
         };
         let mut header = BlockHeader {
             previous_hash,
@@ -72,7 +72,7 @@ impl BlockHeader {
         if completion.is_some() && hash.is_some() {
             let mut hasher = DefaultHash::new();
             let hash = header.hash(&mut hasher).unwrap();
-            assert_eq!(hash, header.completion.unwrap().hash);
+            assert_eq!(hash, header.completion.as_ref().unwrap().hash);
         }
         header
     }
@@ -100,8 +100,8 @@ impl BlockHeader {
         if expected_hash != self.hash(hasher).unwrap() {
             return Err(BlockValidationError::HashMismatch(expected_hash, self.hash(hasher).unwrap()));
         }
-        if !is_valid_hash(self.completion.unwrap().difficulty_target.get(), &self.hash(hasher).unwrap()) {
-            return Err(BlockValidationError::DifficultyMismatch(self.completion.unwrap().difficulty_target.get(), *self));
+        if !is_valid_hash(self.completion.as_ref().unwrap().difficulty_target, &self.hash(hasher).unwrap()) {
+            return Err(BlockValidationError::DifficultyMismatch(self.completion.as_ref().unwrap().difficulty_target, *self));
         }
         // check that all the signatures work in the tail
         let tail = &mut self.tail.clone();
@@ -169,9 +169,9 @@ impl Hashable for BlockHeader {
         hash_function.update(self.nonce.to_le_bytes());
         hash_function.update(self.depth.to_le_bytes());
         hash_function.update(self.timestamp.to_le_bytes());
-        hash_function.update(self.completion.unwrap().miner_address);
-        hash_function.update(self.completion.unwrap().state_root);
-        hash_function.update(self.completion.unwrap().difficulty_target.get().to_le_bytes());
+        hash_function.update(self.completion.as_ref().unwrap().miner_address);
+        hash_function.update(self.completion.as_ref().unwrap().state_root);
+        hash_function.update(self.completion.as_ref().unwrap().difficulty_target.to_le_bytes());
         hash_function.update(self.merkle_root);
         hash_function.update(self.previous_hash);
         for i in 0..N_TRANSMISSION_SIGNATURES {

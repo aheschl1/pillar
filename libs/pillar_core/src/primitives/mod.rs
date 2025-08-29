@@ -33,7 +33,7 @@ mod tests{
             Some(miner_address), 
             BlockTail::default(), 
             0,
-            Some(NonZeroU64::new(1).unwrap()),
+            Some(1),
         );
         let hash = block_header.hash(&mut DefaultHash::new());
 
@@ -65,16 +65,15 @@ mod tests{
         let mut hash_function = DefaultHash::new();
 
         let mut transaction = Transaction::new(sender, receiver, amount, timestamp, nonce, &mut hash_function);
-        assert!(transaction.signature.is_none());
-        
+        assert_eq!(transaction.signature, [0; 64]);
+
         let mut signing_key = DefaultSigner::generate_random();
 
         transaction.sign(&mut signing_key);
-        assert!(transaction.signature.is_some());
         // Verify the signature
-        signing_key.get_verifying_function().verify(&transaction.signature.unwrap(), &transaction);
+        signing_key.get_verifying_function().verify(&transaction.signature, &transaction);
 
         let transaction2 = Transaction::new(sender, receiver, amount, timestamp, nonce+1, &mut hash_function);
-        assert!(!signing_key.get_verifying_function().verify(&transaction.signature.unwrap(), &transaction2));
+        assert!(!signing_key.get_verifying_function().verify(&transaction.signature, &transaction2));
     }
 }

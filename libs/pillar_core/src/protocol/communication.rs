@@ -283,7 +283,7 @@ mod tests {
             .await
             .unwrap();
 
-        let invalid_message = vec![0; 10]; // Invalid message
+        let invalid_message = vec![0; 22]; // Invalid message
         stream.write_all(&invalid_message).await.unwrap();
 
         let response: Message = read_standard_message(&mut stream).await.unwrap();

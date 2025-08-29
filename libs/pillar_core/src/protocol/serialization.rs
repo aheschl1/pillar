@@ -1,8 +1,8 @@
-use std::num::NonZeroU64;
+use std::alloc::Layout;
 
+use bytemuck::bytes_of;
 use pillar_crypto::{proofs::MerkleProof, types::StdByteArray};
 use serde::{Deserialize, Serialize};
-use sled::transaction;
 use tokio::{io::AsyncReadExt, net::TcpStream};
 
 use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, nodes::peer::Peer, primitives::{block::{Block, BlockHeader}, messages::Message, transaction::{Transaction, TransactionFilter}}};
@@ -36,14 +36,16 @@ pub fn package_standard_message(message: &Message) -> Result<Vec<u8>, std::io::E
     Ok(buffer)
 }
 
-pub async fn read_standard_message(stream: &mut TcpStream) -> Result<Message, std::io::Error>{
-    let mut buffer = [0; 4];
-    stream.read_exact(&mut buffer).await?;
-    let length = u32::from_le_bytes(buffer);
-    let mut message_buffer = vec![0; length as usize];
-    stream.read_exact(&mut message_buffer).await?;
-    let message = PillarSerialize::deserialize_pillar(&message_buffer)?;
-    Ok(message)
+pub async fn read_standard_message(stream: &mut TcpStream) -> Result<Message, std::io::Error>{    
+    let length = stream.read_u32_le().await?;
+    let layout = Layout::from_size_align(length as usize, 8).unwrap();
+    unsafe{
+        let buffer = std::alloc::alloc(layout);
+        let message_buffer = core::slice::from_raw_parts_mut(buffer, length as usize);
+        stream.read_exact(message_buffer).await?;
+        let message = PillarSerialize::deserialize_pillar(&message_buffer)?;
+        Ok(message)
+    }
 }
 
 impl PillarSerialize for crate::primitives::messages::Message {
@@ -98,50 +100,51 @@ impl PillarSerialize for crate::primitives::messages::Message {
     }
 
     fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
-        let code_bytes = match data.get(0){
-            Some(&b) => [b],
-            None => return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Missing message code")),
+        let n = 1;
+        let code = match data.get(0) {
+            Some(b) => *b,
+            None => return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Data too short")),
         };
-        let code = u8::from_le_bytes(code_bytes);
+        // let code = u8::from_le_bytes(code_bytes);
         let result = match code {
             0 => Message::Ping,
             1 => Message::ChainRequest,
-            2 => Message::ChainResponse(Chain::deserialize_pillar(&data[1..])?),
+            2 => Message::ChainResponse(Chain::deserialize_pillar(&data[n..])?),
             3 => Message::PeerRequest,
-            4 => Message::PeerResponse(Vec::deserialize_pillar(&data[1..])?),
-            5 => Message::Declaration(Peer::deserialize_pillar(&data[1..])?),
-            6 => Message::TransactionBroadcast(Transaction::deserialize_pillar(&data[1..])?),
+            4 => Message::PeerResponse(Vec::deserialize_pillar(&data[n..])?),
+            5 => Message::Declaration(Peer::deserialize_pillar(&data[n..])?),
+            6 => Message::TransactionBroadcast(Transaction::deserialize_pillar(&data[n..])?),
             7 => Message::TransactionAck,
-            8 => Message::BlockTransmission(Block::deserialize_pillar(&data[1..])?),
+            8 => Message::BlockTransmission(Block::deserialize_pillar(&data[n..])?),
             9 => Message::BlockAck,
-            10 => Message::BlockRequest(StdByteArray::deserialize_pillar(&data[1..])?),
-            11 => Message::BlockResponse(Option::<Block>::deserialize_pillar(&data[1..])?),
+            10 => Message::BlockRequest(StdByteArray::deserialize_pillar(&data[n..])?),
+            11 => Message::BlockResponse(Option::<Block>::deserialize_pillar(&data[n..])?),
             12 => Message::ChainShardRequest,
-            13 => Message::ChainShardResponse(ChainShard::deserialize_pillar(&data[1..])?),
-            14 => Message::TransactionProofRequest(TransactionStub::deserialize_pillar(&data[1..])?),
-            15 => Message::TransactionProofResponse(pillar_crypto::proofs::MerkleProof::deserialize_pillar(&data[1..])?),
+            13 => Message::ChainShardResponse(ChainShard::deserialize_pillar(&data[n..])?),
+            14 => Message::TransactionProofRequest(TransactionStub::deserialize_pillar(&data[n..])?),
+            15 => Message::TransactionProofResponse(pillar_crypto::proofs::MerkleProof::deserialize_pillar(&data[n..])?),
             16 => {
-                let filter_length = u32::from_le_bytes(data[1..5].try_into().unwrap());
-                let filter = TransactionFilter::deserialize_pillar(&data[5..5 + filter_length as usize])?;
-                let peer = Peer::deserialize_pillar(&data[5 + filter_length as usize..])?;
+                let filter_length = u32::from_le_bytes(data[n..n+4].try_into().unwrap());
+                let filter = TransactionFilter::deserialize_pillar(&data[n+4..n+4 + filter_length as usize])?;
+                let peer = Peer::deserialize_pillar(&data[n+4 + filter_length as usize..])?;
                 Message::TransactionFilterRequest(filter, peer)
             },
             17 => Message::TransactionFilterAck,
             18 => {
-                let filter_length = u32::from_le_bytes(data[1..5].try_into().unwrap());
-                let filter = TransactionFilter::deserialize_pillar(&data[5..5 + filter_length as usize])?;
-                let header = BlockHeader::deserialize_pillar(&data[5 + filter_length as usize..])?;
+                let filter_length = u32::from_le_bytes(data[n..n+4].try_into().unwrap());
+                let filter = TransactionFilter::deserialize_pillar(&data[n+4..n+4 + filter_length as usize])?;
+                let header = BlockHeader::deserialize_pillar(&data[n+4 + filter_length as usize..])?;
                 Message::TransactionFilterResponse(filter, header)
             },
-            19 => Message::ChainSyncRequest(Vec::<StdByteArray>::deserialize_pillar(&data[1..])?),
-            20 => Message::ChainSyncResponse(Vec::<Chain>::deserialize_pillar(&data[1..])?),
+            19 => Message::ChainSyncRequest(Vec::<StdByteArray>::deserialize_pillar(&data[n..])?),
+            20 => Message::ChainSyncResponse(Vec::<Chain>::deserialize_pillar(&data[n..])?),
             21 => {
-                let lower = f32::from_le_bytes(data[1..5].try_into().unwrap());
-                let upper = f32::from_le_bytes(data[5..9].try_into().unwrap());
+                let lower = f32::from_le_bytes(data[n..n+4].try_into().unwrap());
+                let upper = f32::from_le_bytes(data[n+4..n+8].try_into().unwrap());
                 Message::PercentileFilteredPeerRequest(lower, upper)
             },
-            22 => Message::PercentileFilteredPeerResponse(Vec::<Peer>::deserialize_pillar(&data[1..])?),
-            23 => Message::Error(String::deserialize_pillar(&data[1..])?),
+            22 => Message::PercentileFilteredPeerResponse(Vec::<Peer>::deserialize_pillar(&data[n..])?),
+            23 => Message::Error(String::deserialize_pillar(&data[n..])?),
             _ => return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Unknown message code")),
         };
         Ok(result)
@@ -151,53 +154,65 @@ impl PillarSerialize for crate::primitives::messages::Message {
 
 impl PillarSerialize for Transaction {
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
-        let mut ptr: *const u8 = self as *const _ as *const u8;
+        let mut bytes = bytes_of(self);
 
+        let mut le_tx: Transaction;
         if cfg!(target_endian = "big") {
-            let mut le_trans = *self;
-            le_trans.to_le();
-            ptr = &le_trans as *const _ as *const u8;
+            le_tx = *self;
+            le_tx.to_le();
+            bytes = bytes_of(&le_tx);
         }
-        unsafe {
-            let bytes = std::slice::from_raw_parts(ptr, size_of::<Self>());
-            Ok(Vec::from(bytes))
-        }
+        Ok(bytes.to_vec())
     }
 
     fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
-        let ptr = data.as_ptr();
-        let tx_ptr: *const Transaction = ptr as *const Transaction;
-        let mut tx = unsafe { *tx_ptr };
-        if cfg!(target_endian = "big") {
-            tx.to_le();
+        if data.len() < size_of::<Self>() {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Insufficient data"));
         }
-        Ok(tx)
+
+        let layout = Layout::from_size_align(size_of::<Self>(), 8);
+        // copy buffer into the new memory
+        let buffer = unsafe{
+            let ptr = std::alloc::alloc(layout.unwrap());
+            std::slice::from_raw_parts_mut(ptr, size_of::<Self>())
+        };
+        buffer.copy_from_slice(data);
+        let mut tx_le: Self = *bytemuck::from_bytes(&buffer);
+        if cfg!(target_endian = "big") {
+            tx_le.to_le();
+        }
+        Ok(tx_le)
     }
 }
 
 impl PillarSerialize for BlockHeader {
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
-        let mut ptr: *const u8 = self as *const _ as *const u8;
+        let mut bytes = bytes_of(self);
 
+        let mut le_block: BlockHeader;
         if cfg!(target_endian = "big") {
-            let mut le_block = *self;
+            le_block = *self;
             le_block.to_le();
-            ptr = &le_block as *const _ as *const u8;
+            bytes = bytes_of(&le_block);
         }
-        unsafe {
-            let bytes = std::slice::from_raw_parts(ptr, size_of::<Self>());
-            Ok(Vec::from(bytes))
-        }
+        Ok(bytes.to_vec())
     }
 
     fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
-        let ptr = data.as_ptr();
-        let header_ptr: *const BlockHeader = ptr as *const BlockHeader;
-        let mut header = unsafe { *header_ptr };
-        if cfg!(target_endian = "big") {
-            header.to_le();
+        if data.len() < size_of::<Self>() {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Insufficient data"));
         }
-        Ok(header)
+        let layout = Layout::from_size_align(size_of::<Self>(), 8);
+        let buffer = unsafe {
+            let ptr = std::alloc::alloc(layout.unwrap());
+            std::slice::from_raw_parts_mut(ptr, size_of::<Self>())
+        };
+        buffer.copy_from_slice(data);
+        let mut tx_le: Self = *bytemuck::from_bytes(&buffer);
+        if cfg!(target_endian = "big") {
+            tx_le.to_le();
+        }
+        Ok(tx_le)
     }
 }
 
@@ -290,7 +305,7 @@ impl PillarNativeEndian for BlockHeader {
         self.timestamp = self.timestamp.to_le();
         self.depth = self.depth.to_le();
         if let Some(c) = self.completion.as_mut() {
-            c.difficulty_target = NonZeroU64::new(c.difficulty_target.get().to_le()).expect("bad assumption");
+            c.difficulty_target = c.difficulty_target.to_le();
         }
     }
 }
@@ -402,7 +417,7 @@ mod tests {
             Some(miner_address),
             [Stamp::default(); N_TRANSMISSION_SIGNATURES],
             depth,
-            Some(NonZeroU64::new(difficulty).unwrap()),
+            Some(difficulty),
             Some(state_root),
             &mut DefaultHash::new(),
         );
@@ -471,7 +486,7 @@ mod tests {
             Some(miner_address),
             [Stamp::default(); N_TRANSMISSION_SIGNATURES],
             depth,
-            Some(NonZeroU64::new(difficulty).unwrap()),
+            Some(difficulty),
             Some(state_root),
             &mut DefaultHash::new(),
         ).header;
@@ -538,7 +553,7 @@ mod tests {
             Some(miner_address),
             [Stamp::default(); N_TRANSMISSION_SIGNATURES],
             depth,
-            Some(NonZeroU64::new(difficulty).unwrap()),
+            Some(difficulty),
             Some(state_root),
             &mut DefaultHash::new(),
         );
@@ -572,7 +587,7 @@ mod tests {
             Some(miner_address),
             [Stamp::default(); N_TRANSMISSION_SIGNATURES],
             depth,
-            Some(NonZeroU64::new(difficulty).unwrap()),
+            Some(difficulty),
             Some(state_root),
             &mut DefaultHash::new(),
         );

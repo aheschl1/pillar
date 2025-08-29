@@ -1,10 +1,13 @@
+use core::hash;
 use std::num::NonZeroU64;
 
+use bincode::de;
+use bytemuck::{Pod, Zeroable};
 use pillar_crypto::types::StdByteArray;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, Bytes};
 
-use crate::protocol::reputation::N_TRANSMISSION_SIGNATURES;
+use crate::{accounting::state, nodes::miner, protocol::{difficulty, reputation::N_TRANSMISSION_SIGNATURES}};
 use super::transaction::Transaction;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -17,7 +20,7 @@ pub struct Block{
 }
 
 #[serde_as]
-#[derive(Debug, PartialEq, Clone, Copy, Eq, Hash, Serialize, Deserialize)]
+#[derive(Pod, Zeroable, Debug, PartialEq, Clone, Copy, Eq, Hash, Serialize, Deserialize)]
 #[repr(C, align(8))]
 pub struct Stamp{
     // the signature of the person who broadcasted the block
@@ -39,17 +42,23 @@ impl Default for Stamp {
 
 /// A block tail tracks the signatures of people who have broadcasted the block
 /// This is used for immutibility of participation reputation
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq, Default, Hash)]
+#[derive(Pod, Zeroable, Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq, Default, Hash)]
 #[repr(C, align(8))]
 pub struct BlockTail{
     // the signatures of the people who have broadcasted the block
     pub stamps: [Stamp; N_TRANSMISSION_SIGNATURES]
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq)]
+#[derive(Default, Pod, Zeroable, Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq)]
 #[repr(C, align(8))]
 /// Header completion is Some in the BlockHeader if the block is mined
 pub struct HeaderCompletion {
+    inner: HeaderCompletionInner
+}
+
+#[derive(Pod, Zeroable, Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq, Default)]
+#[repr(C, align(8))]
+pub struct HeaderCompletionInner{
     // hash of the block
     pub hash: StdByteArray,
     // the address of the miner is the sha3_256 hash of the miner address
@@ -57,10 +66,55 @@ pub struct HeaderCompletion {
     // the root hash of the global state after this block
     pub state_root: StdByteArray,
     // difficulty target of the block
-    pub difficulty_target: NonZeroU64, // this will be set to 0 in memory for the option
+    pub difficulty_target: u64, // this will be set to 0 in memory for the option
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq, Default)]
+impl HeaderCompletion {
+    pub fn new(
+        hash: StdByteArray,
+        miner_address: StdByteArray,
+        state_root: StdByteArray,
+        difficulty_target: u64,
+    ) -> Self{
+        if difficulty_target == 0 {
+            panic!("difficulty_target must be non-zero, or use HeaderCompletion::new_none()");
+        }
+        HeaderCompletion { inner: HeaderCompletionInner{
+            hash,
+            miner_address,
+            state_root,
+            difficulty_target
+        } }
+    }
+
+    pub fn new_none() -> Self {
+        Self::default()
+    }
+
+    pub fn is_none(&self) -> bool {
+        self.inner.difficulty_target == 0
+    }
+
+    pub fn is_some(&self) -> bool {
+        !self.is_none()
+    }
+
+    pub fn as_mut(&mut self) -> Option<&mut HeaderCompletionInner> {
+        if self.is_none() {
+            return None;
+        }
+        Some(&mut self.inner)
+    }
+
+    pub fn as_ref(&self) -> Option<&HeaderCompletionInner> {
+        if self.is_none() {
+            return None;
+        }
+        Some(&self.inner)
+    }
+}
+
+#[derive(Pod, Zeroable, Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq, Default)]
 #[repr(C, align(8))]
 pub struct BlockHeader{
     // previous_hash is the sha3_356 hash of the previous block in the chain
@@ -80,7 +134,7 @@ pub struct BlockHeader{
     // tail is the tail of the block which can contain stamps
     pub tail: BlockTail,
     // state_root is the root hash of the global state after this block
-    pub completion: Option<HeaderCompletion>, 
+    pub completion: HeaderCompletion, 
 }
 
 
