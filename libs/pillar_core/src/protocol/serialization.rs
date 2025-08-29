@@ -1,3 +1,5 @@
+use std::num::NonZeroU64;
+
 use pillar_crypto::{proofs::MerkleProof, types::StdByteArray};
 use serde::{Deserialize, Serialize};
 use tokio::{io::AsyncReadExt, net::TcpStream};
@@ -139,7 +141,42 @@ pub async fn read_standard_message(stream: &mut TcpStream) -> Result<Message, st
 }
 
 impl PillarSerialize for BlockHeader {
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mut ptr: *const u8 = self as *const _ as *const u8;
 
+        if cfg!(target_endian = "big") {
+            // in this case, convert to le
+            let mut le_block = *self;
+            le_block.nonce = self.nonce.to_le();
+            le_block.timestamp = self.timestamp.to_le();
+            le_block.depth = self.depth.to_le();
+            le_block.version = self.version.to_le();
+            if let Some(c) = le_block.completion.as_mut() {
+                c.difficulty_target = NonZeroU64::new(c.difficulty_target.get().to_le()).expect("bad assumption");
+            }
+            ptr = &le_block as *const _ as *const u8;
+        }
+        unsafe {
+            let bytes = std::slice::from_raw_parts(ptr, size_of::<Self>());
+            Ok(Vec::from(bytes))
+        }
+    }
+
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        let ptr = data.as_ptr();
+        let header_ptr: *const BlockHeader = ptr as *const BlockHeader;
+        let mut header = unsafe { *header_ptr };
+        if cfg!(target_endian = "big") {
+            header.nonce = header.nonce.to_le();
+            header.timestamp = header.timestamp.to_le();
+            header.depth = header.depth.to_le();
+            header.version = header.version.to_le();
+            if let Some(c) = header.completion.as_mut() {
+                c.difficulty_target = NonZeroU64::new(c.difficulty_target.get().to_le()).expect("bad assumption");
+            }
+        }
+        Ok(header)
+    }
 }
 
 impl PillarSerialize for TransactionFilter {
@@ -199,3 +236,181 @@ impl PillarSerialize for StdByteArray {
     }
 }
 
+
+mod tests {
+    use std::num::{NonZero, NonZeroU64};
+
+    use pillar_crypto::hashing::{DefaultHash, Hashable};
+    use serde::de::IntoDeserializer;
+
+    use crate::{primitives::{block::{Block, BlockHeader, Stamp}, transaction::Transaction}, protocol::{difficulty, reputation::N_TRANSMISSION_SIGNATURES, serialization::PillarSerialize, versions::Versions}};
+
+    #[test]
+    fn test_block_alignment() {
+        // this is a fragile test because it relies on the exact memory layout of the Block struct
+        // this may differ between architectures
+        let previous_hash = [2; 32];
+        let sender = [3; 32];
+        let receiver = [4; 32];
+        let amount = 5;
+        let timestamp = 6;
+        let nonce = 7;
+        let depth = 9;
+        let mut hash_function = DefaultHash::new();
+        let transaction = Transaction::new(
+            sender, 
+            receiver, 
+            amount, 
+            timestamp, 
+            nonce, 
+            &mut hash_function
+        );
+        let block = Block::new(
+            previous_hash, 
+            0,
+            timestamp,
+            vec![transaction],
+            None,
+            [Stamp::default(); N_TRANSMISSION_SIGNATURES],
+            depth,
+            None,
+            None,
+            &mut DefaultHash::new(),
+        );
+        let merkle_root = block.header.merkle_root;
+        let total_size = size_of::<Block>();
+
+        let pointer: *const Block = &block;
+        unsafe {
+            let block_ref: &Block = &*pointer;
+            assert_eq!(block_ref.header.previous_hash, previous_hash);
+
+            let slice = std::slice::from_raw_parts(pointer as *const u8, total_size);
+            assert_eq!(slice[0..32], previous_hash);
+            assert_eq!(slice[32..64], merkle_root);
+            assert_eq!(slice[64..72], [0; 8]); // nonce
+            assert_eq!(slice[72..80], timestamp.to_ne_bytes());
+            assert_eq!(slice[80..88], depth.to_ne_bytes()); // depth
+            assert_eq!(slice[88..90], Versions::default().to_ne_bytes()); // version
+            assert_eq!(slice[90..96], [0; 6]); // explicit padding
+            const STAMP_SIZE: usize = 96;
+            for i in 0..N_TRANSMISSION_SIGNATURES {
+                let start = 96 + i * STAMP_SIZE;
+                let end = start + STAMP_SIZE;
+                assert_eq!(slice[start..end], [0; STAMP_SIZE]);
+            }
+            let start: usize = 96 + N_TRANSMISSION_SIGNATURES * STAMP_SIZE;
+            // let end = start;
+            assert_eq!(slice[start + 94..start + 102], [0; 8]); // state_root
+        }
+    }
+
+    #[test]
+    fn test_block_alignment_complete() {
+        // this is a fragile test because it relies on the exact memory layout of the Block struct
+        // this may differ between architectures
+        let previous_hash = [2; 32];
+        let sender = [3; 32];
+        let receiver = [4; 32];
+        let amount = 5;
+        let timestamp = 6;
+        let nonce = 7;
+        let depth = 9;
+        let miner_address = [1; 32];
+        let difficulty = 10;
+        let state_root = [5; 32];
+        let mut hash_function = DefaultHash::new();
+        let transaction = Transaction::new(
+            sender, 
+            receiver, 
+            amount, 
+            timestamp, 
+            nonce, 
+            &mut hash_function
+        );
+        let block = Block::new(
+            previous_hash, 
+            0,
+            timestamp,
+            vec![transaction],
+            Some(miner_address),
+            [Stamp::default(); N_TRANSMISSION_SIGNATURES],
+            depth,
+            Some(NonZeroU64::new(difficulty).unwrap()),
+            Some(state_root),
+            &mut DefaultHash::new(),
+        );
+        let merkle_root = block.header.merkle_root;
+        let total_size = size_of::<Block>();
+
+        let pointer: *const Block = &block;
+        unsafe {
+            let block_ref: &Block = &*pointer;
+            assert_eq!(block_ref.header.previous_hash, previous_hash);
+
+            let slice = std::slice::from_raw_parts(pointer as *const u8, total_size);
+            assert_eq!(slice[0..32], previous_hash);
+            assert_eq!(slice[32..64], merkle_root);
+            assert_eq!(slice[64..72], [0; 8]); // nonce
+            assert_eq!(slice[72..80], timestamp.to_ne_bytes());
+            assert_eq!(slice[80..88], depth.to_ne_bytes()); // depth
+            assert_eq!(slice[88..90], Versions::default().to_ne_bytes()); // version
+            assert_eq!(slice[90..96], [0; 6]); // explicit padding
+            const STAMP_SIZE: usize = 96;
+            let mut start: usize = 96;
+            for _ in 0..N_TRANSMISSION_SIGNATURES {
+                let end = start + STAMP_SIZE;
+                assert_eq!(slice[start..end], [0; STAMP_SIZE]);
+                start = end;
+            }
+            // let end = start;
+            assert_eq!(slice[start .. start + 32], block.header.hash(&mut DefaultHash::new()).unwrap());
+            assert_eq!(slice[start + 32..start + 64], miner_address);
+            assert_eq!(slice[start + 64..start + 96], state_root); // state_root
+            assert_eq!(slice[start + 96..start + 104], difficulty.to_ne_bytes()); // difficulty
+        }
+    }
+
+    #[test]
+    fn test_header_serialize() {
+        let header = BlockHeader::default();
+        let serialized = header.serialize_pillar().unwrap();
+        let deserialized: BlockHeader = BlockHeader::deserialize_pillar(&serialized).unwrap();
+        assert_eq!(header, deserialized);
+        // more complex
+              let previous_hash = [2; 32];
+        let sender = [3; 32];
+        let receiver = [4; 32];
+        let amount = 5;
+        let timestamp = 6;
+        let nonce = 7;
+        let depth = 9;
+        let miner_address = [1; 32];
+        let difficulty = 10;
+        let state_root = [5; 32];
+        let mut hash_function = DefaultHash::new();
+        let transaction = Transaction::new(
+            sender, 
+            receiver, 
+            amount, 
+            timestamp, 
+            nonce, 
+            &mut hash_function
+        );
+        let header = Block::new(
+            previous_hash, 
+            0,
+            timestamp,
+            vec![transaction],
+            Some(miner_address),
+            [Stamp::default(); N_TRANSMISSION_SIGNATURES],
+            depth,
+            Some(NonZeroU64::new(difficulty).unwrap()),
+            Some(state_root),
+            &mut DefaultHash::new(),
+        ).header;
+        let serialized = header.serialize_pillar().unwrap();
+        let deserialized: BlockHeader = BlockHeader::deserialize_pillar(&serialized).unwrap();
+        assert_eq!(header, deserialized);
+    }
+}

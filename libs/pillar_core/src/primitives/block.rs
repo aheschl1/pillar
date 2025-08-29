@@ -1,6 +1,5 @@
 use std::collections::{HashSet, VecDeque};
-use std::num::{NonZero, NonZeroU64};
-use std::ptr::NonNull;
+use std::num::NonZeroU64;
 
 use pillar_crypto::hashing::{DefaultHash, HashFunction, Hashable};
 use pillar_crypto::merkle::{generate_tree, MerkleTree};
@@ -142,14 +141,14 @@ impl BlockTail {
 #[repr(C)]
 /// Header completion is Some in the BlockHeader if the block is mined
 pub struct HeaderCompletion {
-    // pub hash
+    // hash of the block
     pub hash: StdByteArray,
     // the address of the miner is the sha3_256 hash of the miner address
     pub miner_address: StdByteArray,
     // the root hash of the global state after this block
     pub state_root: StdByteArray,
     // difficulty target of the block
-    pub difficulty_target: NonZeroU64,
+    pub difficulty_target: NonZeroU64, // this will be set to 0 in memory for the option
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq, Default)]
@@ -167,8 +166,8 @@ pub struct BlockHeader{
     pub depth: u64,
     // version of the protocol used in this block
     pub version: u16, 
-    // phantum pad
-    _pad: [u8; 4],
+    // phantum pad. with repr C this should in theory add no extra size to the struct
+    _pad: [u8; 6],
     // tail is the tail of the block which can contain stamps
     pub tail: BlockTail,
     // state_root is the root hash of the global state after this block
@@ -230,7 +229,7 @@ impl BlockHeader {
             timestamp,
             depth,
             tail,
-            _pad: [0; 4],
+            _pad: [0; 6],
             completion,
             version: version.to_u16()
         };
@@ -429,71 +428,12 @@ impl Signable<64> for BlockHeader {
 #[cfg(test)]
 mod tests {
 
-    use core::time;
 
     use pillar_crypto::signing::{DefaultSigner, SigFunction, SigVerFunction};
 
     use super::*;
 
-    #[test]
-    fn test_memory_layout() {
-        let previous_hash = [2; 32];
-        let sender = [3; 32];
-        let receiver = [4; 32];
-        let amount = 5;
-        let timestamp = 6;
-        let nonce = 7;
-        let depth = 9;
-        let mut hash_function = DefaultHash::new();
-        let transaction = Transaction::new(
-            sender, 
-            receiver, 
-            amount, 
-            timestamp, 
-            nonce, 
-            &mut hash_function
-        );
-        let block = Block::new(
-            previous_hash, 
-            0,
-            timestamp,
-            vec![transaction],
-            None,
-            [Stamp::default(); N_TRANSMISSION_SIGNATURES],
-            depth,
-            None,
-            None,
-            &mut DefaultHash::new(),
-        );
-        let merkle_root = block.header.merkle_root;
-        let total_size = size_of::<Block>();
-
-        let pointer: *const Block = &block;
-        unsafe {
-            let block_ref: &Block = &*pointer;
-            assert_eq!(block_ref.header.previous_hash, previous_hash);
-
-            let slice = std::slice::from_raw_parts(pointer as *const u8, total_size);
-            assert_eq!(slice[0..32], previous_hash);
-            assert_eq!(slice[32..64], merkle_root);
-            assert_eq!(slice[64..72], [0; 8]); // nonce
-            assert_eq!(slice[72..80], timestamp.to_le_bytes());
-            assert_eq!(slice[80..88], depth.to_le_bytes()); // depth
-            assert_eq!(slice[88..90], Versions::default().to_le_bytes()); // version
-            assert_eq!(slice[90..94], [0; 4]); // explicit padding
-            const STAMP_SIZE: usize = 96;
-            for i in 0..N_TRANSMISSION_SIGNATURES {
-                let start = 94 + i * STAMP_SIZE;
-                let end = start + STAMP_SIZE;
-                assert_eq!(slice[start..end], [0; STAMP_SIZE]);
-            }
-            let start: usize = 94 + N_TRANSMISSION_SIGNATURES * STAMP_SIZE;
-            // let end = start;
-            assert_eq!(slice[start + 94..start + 102], [0; 8]); // state_root
-
-        }
-
-    }
+    
 
     #[test]
     fn test_tail() {
