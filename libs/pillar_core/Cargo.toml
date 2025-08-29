@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 tokio = { version = "1.44.2", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
+pillar_crypto = { path = "../pillar_crypto" }
 serde_with = "3"
 slotmap = "1.0.7"
 rand = "0.9.1"
@@ -18,7 +19,6 @@ ctor = "0.4.2"
 tracing-appender = "0.2.3"
 chrono = "0.4.41"
 tracing-tree = "0.4.0"
-pillar_crypto = { path = "../pillar_crypto" }
 lfqueue = "0.5.0"
 lz4_flex = "0.11.5"
 bincode = "1"

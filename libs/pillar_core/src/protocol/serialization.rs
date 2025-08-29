@@ -6,6 +6,13 @@ use tokio::{io::AsyncReadExt, net::TcpStream};
 
 use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, nodes::peer::Peer, primitives::{block::{Block, BlockHeader}, messages::Message, transaction::{Transaction, TransactionFilter}}};
 
+/// This trait is for converting to protocol endian format
+/// is a noop on a LE machine, which is a machine that can 
+/// interpret it by default
+pub trait PillarNativeEndian {
+    fn to_le(&mut self);
+}
+
 pub trait PillarSerialize : Serialize + for<'a> Deserialize<'a> + Sized {
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
         let encoded = bincode::serialize(&self)
@@ -18,6 +25,24 @@ pub trait PillarSerialize : Serialize + for<'a> Deserialize<'a> + Sized {
             .map_err(std::io::Error::other)?;
         Ok(decoded)
     }
+}
+
+pub fn package_standard_message(message: &Message) -> Result<Vec<u8>, std::io::Error> {
+    let mut buffer = vec![];
+    let mbuff = message.serialize_pillar()?;
+    buffer.extend((mbuff.len() as u32).to_le_bytes());
+    buffer.extend(mbuff);
+    Ok(buffer)
+}
+
+pub async fn read_standard_message(stream: &mut TcpStream) -> Result<Message, std::io::Error>{
+    let mut buffer = [0; 4];
+    stream.read_exact(&mut buffer).await?;
+    let length = u32::from_le_bytes(buffer);
+    let mut message_buffer = vec![0; length as usize];
+    stream.read_exact(&mut message_buffer).await?;
+    let message = PillarSerialize::deserialize_pillar(&message_buffer)?;
+    Ok(message)
 }
 
 impl PillarSerialize for crate::primitives::messages::Message {
@@ -122,38 +147,13 @@ impl PillarSerialize for crate::primitives::messages::Message {
     }
 }
 
-pub fn package_standard_message(message: &Message) -> Result<Vec<u8>, std::io::Error> {
-    let mut buffer = vec![];
-    let mbuff = message.serialize_pillar()?;
-    buffer.extend((mbuff.len() as u32).to_le_bytes());
-    buffer.extend(mbuff);
-    Ok(buffer)
-}
-
-pub async fn read_standard_message(stream: &mut TcpStream) -> Result<Message, std::io::Error>{
-    let mut buffer = [0; 4];
-    stream.read_exact(&mut buffer).await?;
-    let length = u32::from_le_bytes(buffer);
-    let mut message_buffer = vec![0; length as usize];
-    stream.read_exact(&mut message_buffer).await?;
-    let message = PillarSerialize::deserialize_pillar(&message_buffer)?;
-    Ok(message)
-}
-
 impl PillarSerialize for BlockHeader {
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
         let mut ptr: *const u8 = self as *const _ as *const u8;
 
         if cfg!(target_endian = "big") {
-            // in this case, convert to le
             let mut le_block = *self;
-            le_block.nonce = self.nonce.to_le();
-            le_block.timestamp = self.timestamp.to_le();
-            le_block.depth = self.depth.to_le();
-            le_block.version = self.version.to_le();
-            if let Some(c) = le_block.completion.as_mut() {
-                c.difficulty_target = NonZeroU64::new(c.difficulty_target.get().to_le()).expect("bad assumption");
-            }
+            le_block.to_le();
             ptr = &le_block as *const _ as *const u8;
         }
         unsafe {
@@ -167,16 +167,14 @@ impl PillarSerialize for BlockHeader {
         let header_ptr: *const BlockHeader = ptr as *const BlockHeader;
         let mut header = unsafe { *header_ptr };
         if cfg!(target_endian = "big") {
-            header.nonce = header.nonce.to_le();
-            header.timestamp = header.timestamp.to_le();
-            header.depth = header.depth.to_le();
-            header.version = header.version.to_le();
-            if let Some(c) = header.completion.as_mut() {
-                c.difficulty_target = NonZeroU64::new(c.difficulty_target.get().to_le()).expect("bad assumption");
-            }
+            header.to_le();
         }
         Ok(header)
     }
+}
+
+impl PillarSerialize for Block{
+    
 }
 
 impl PillarSerialize for TransactionFilter {
@@ -207,10 +205,6 @@ impl PillarSerialize for Transaction {
 
 }
 
-impl PillarSerialize for Block{
-
-}
-
 impl PillarSerialize for Chain {
 
 }
@@ -236,6 +230,17 @@ impl PillarSerialize for StdByteArray {
     }
 }
 
+impl PillarNativeEndian for BlockHeader {
+    fn to_le(&mut self) {
+        self.nonce = self.nonce.to_le();
+        self.timestamp = self.timestamp.to_le();
+        self.depth = self.depth.to_le();
+        self.version = self.version.to_le();
+        if let Some(c) = self.completion.as_mut() {
+            c.difficulty_target = NonZeroU64::new(c.difficulty_target.get().to_le()).expect("bad assumption");
+        }
+    }
+}
 
 mod tests {
     use std::num::{NonZero, NonZeroU64};
