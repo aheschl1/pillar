@@ -7,7 +7,7 @@ use super::block::Block;
 
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
-#[repr(C)]
+#[repr(C, align(8))]
 pub struct Transaction{
     // header is the header of the transaction
     pub header: TransactionHeader,
@@ -19,7 +19,7 @@ pub struct Transaction{
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
-#[repr(C)]
+#[repr(C, align(8))]
 pub struct TransactionHeader{
     // sender is the ed25519 public key of the sender
     pub sender: StdByteArray,
@@ -30,7 +30,9 @@ pub struct TransactionHeader{
     // timestamp is the time the transaction was created
     pub timestamp: u64,
     // the nonce is a random number used to prevent replay attacks
-    pub nonce: u64
+    pub nonce: u64,
+    // explicit pad for 8-byte alignment
+    _pad: [u8; 8]
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
@@ -124,7 +126,8 @@ impl TransactionHeader {
             receiver,
             amount,
             timestamp,
-            nonce
+            nonce,
+            _pad: [0; 8]
         }
     }
 

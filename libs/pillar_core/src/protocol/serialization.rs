@@ -2,6 +2,7 @@ use std::num::NonZeroU64;
 
 use pillar_crypto::{proofs::MerkleProof, types::StdByteArray};
 use serde::{Deserialize, Serialize};
+use sled::transaction;
 use tokio::{io::AsyncReadExt, net::TcpStream};
 
 use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, nodes::peer::Peer, primitives::{block::{Block, BlockHeader}, messages::Message, transaction::{Transaction, TransactionFilter}}};
@@ -147,6 +148,33 @@ impl PillarSerialize for crate::primitives::messages::Message {
     }
 }
 
+
+impl PillarSerialize for Transaction {
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mut ptr: *const u8 = self as *const _ as *const u8;
+
+        if cfg!(target_endian = "big") {
+            let mut le_trans = *self;
+            le_trans.to_le();
+            ptr = &le_trans as *const _ as *const u8;
+        }
+        unsafe {
+            let bytes = std::slice::from_raw_parts(ptr, size_of::<Self>());
+            Ok(Vec::from(bytes))
+        }
+    }
+
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        let ptr = data.as_ptr();
+        let tx_ptr: *const Transaction = ptr as *const Transaction;
+        let mut tx = unsafe { *tx_ptr };
+        if cfg!(target_endian = "big") {
+            tx.to_le();
+        }
+        Ok(tx)
+    }
+}
+
 impl PillarSerialize for BlockHeader {
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
         let mut ptr: *const u8 = self as *const _ as *const u8;
@@ -174,6 +202,36 @@ impl PillarSerialize for BlockHeader {
 }
 
 impl PillarSerialize for Block{
+
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mut bytes = self.header.serialize_pillar()?;
+        // extend with transactions one at a time.
+        assert!(bytes.len() % 8 == 0); // ensure alignment
+        bytes.extend((self.transactions.len() as u64).to_le_bytes());
+        for transaction in &self.transactions {
+            bytes.extend(transaction.serialize_pillar()?);
+        }
+        Ok(bytes)
+    }
+
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        let nheader_bytes = size_of::<BlockHeader>();
+        let size_transaction = size_of::<Transaction>();
+
+        let header = BlockHeader::deserialize_pillar(&data[..nheader_bytes])?;
+        let ntransactions = u64::from_le_bytes(data[nheader_bytes..nheader_bytes + 8].try_into().unwrap());
+        let mut transactions = Vec::with_capacity(ntransactions as usize);
+        let mut offset = nheader_bytes + 8;
+        for _ in 0..ntransactions {
+            let tx = Transaction::deserialize_pillar(&data[offset..offset+size_transaction])?;
+            transactions.push(tx);
+            offset += size_transaction;
+        }
+        Ok(Block {
+            header,
+            transactions,
+        })
+    }
     
 }
 
@@ -198,10 +256,6 @@ impl<T: PillarSerialize> PillarSerialize for Option<T> {
 }
 
 impl PillarSerialize for Peer {
-
-}
-
-impl PillarSerialize for Transaction {
 
 }
 
@@ -235,10 +289,17 @@ impl PillarNativeEndian for BlockHeader {
         self.nonce = self.nonce.to_le();
         self.timestamp = self.timestamp.to_le();
         self.depth = self.depth.to_le();
-        self.version = self.version.to_le();
         if let Some(c) = self.completion.as_mut() {
             c.difficulty_target = NonZeroU64::new(c.difficulty_target.get().to_le()).expect("bad assumption");
         }
+    }
+}
+
+impl PillarNativeEndian for Transaction {
+    fn to_le(&mut self) {
+        self.header.amount = self.header.amount.to_le();
+        self.header.timestamp = self.header.timestamp.to_le();
+        self.header.nonce = self.header.nonce.to_le();
     }
 }
 
@@ -248,7 +309,7 @@ mod tests {
     use pillar_crypto::hashing::{DefaultHash, Hashable};
     use serde::de::IntoDeserializer;
 
-    use crate::{primitives::{block::{Block, BlockHeader, Stamp}, transaction::Transaction}, protocol::{difficulty, reputation::N_TRANSMISSION_SIGNATURES, serialization::PillarSerialize, versions::Versions}};
+    use crate::{primitives::{block::{Block, BlockHeader, Stamp}, transaction::Transaction}, protocol::{reputation::N_TRANSMISSION_SIGNATURES, serialization::PillarSerialize, versions::Versions}};
 
     #[test]
     fn test_block_alignment() {
@@ -383,7 +444,7 @@ mod tests {
         let deserialized: BlockHeader = BlockHeader::deserialize_pillar(&serialized).unwrap();
         assert_eq!(header, deserialized);
         // more complex
-              let previous_hash = [2; 32];
+        let previous_hash = [2; 32];
         let sender = [3; 32];
         let receiver = [4; 32];
         let amount = 5;
@@ -417,5 +478,126 @@ mod tests {
         let serialized = header.serialize_pillar().unwrap();
         let deserialized: BlockHeader = BlockHeader::deserialize_pillar(&serialized).unwrap();
         assert_eq!(header, deserialized);
+    }
+
+    #[test]
+    fn test_transaction_serialize() {
+        let tx = Transaction::new(
+            [1; 32],
+            [2; 32],
+            3,
+            4,
+            5,
+            &mut DefaultHash::new()
+        );
+        let serialized = tx.serialize_pillar().unwrap();
+        let deserialized: Transaction = Transaction::deserialize_pillar(&serialized).unwrap();
+        assert_eq!(tx, deserialized);
+
+        // now test more convoluted transaction
+        let tx2 = Transaction::new(
+            [8; 32],
+            [1; 32],
+            30000,
+            434882983,
+            5289432,
+            &mut DefaultHash::new()
+        );
+        let serialized = tx2.serialize_pillar().unwrap();
+        let deserialized: Transaction = Transaction::deserialize_pillar(&serialized).unwrap();
+        assert_eq!(tx2, deserialized);
+
+    }
+
+    #[test]
+    fn test_block_serialization(){
+        let previous_hash = [2; 32];
+        let sender = [3; 32];
+        let receiver = [4; 32];
+        let amount = 5;
+        let timestamp = 6;
+        let nonce = 7;
+        let depth = 9;
+        let miner_address = [1; 32];
+        let difficulty = 10;
+        let state_root = [5; 32];
+        let mut hash_function = DefaultHash::new();
+        let transaction = Transaction::new(
+            sender,
+            receiver,
+            amount,
+            timestamp,
+            nonce,
+            &mut hash_function
+        );
+        let block = Block::new(
+            previous_hash,
+            0,
+            timestamp,
+            vec![transaction],
+            Some(miner_address),
+            [Stamp::default(); N_TRANSMISSION_SIGNATURES],
+            depth,
+            Some(NonZeroU64::new(difficulty).unwrap()),
+            Some(state_root),
+            &mut DefaultHash::new(),
+        );
+        let serialized = block.serialize_pillar().unwrap();
+        let deserialized: Block = Block::deserialize_pillar(&serialized).unwrap();
+        assert_eq!(block, deserialized);
+
+        // now block multiple transaction
+
+        let tx2 = Transaction::new(
+            [1; 32],
+            [2; 32],
+            3,
+            4,
+            5,
+            &mut DefaultHash::new()
+        );
+        let tx3 = Transaction::new(
+            [1; 32],
+            [2; 32],
+            3,
+            4,
+            5,
+            &mut DefaultHash::new()
+        );
+        let block = Block::new(
+            previous_hash,
+            0,
+            timestamp,
+            vec![transaction, tx2, tx3],
+            Some(miner_address),
+            [Stamp::default(); N_TRANSMISSION_SIGNATURES],
+            depth,
+            Some(NonZeroU64::new(difficulty).unwrap()),
+            Some(state_root),
+            &mut DefaultHash::new(),
+        );
+
+        let serialized = block.serialize_pillar().unwrap();
+        let deserialized: Block = Block::deserialize_pillar(&serialized).unwrap();
+        assert_eq!(block, deserialized);
+
+        // test incomplete block - one with None root
+        let block = Block::new(
+            previous_hash,
+            0,
+            timestamp,
+            vec![transaction, tx2, tx3],
+            None,
+            [Stamp::default(); N_TRANSMISSION_SIGNATURES],
+            depth,
+            None,
+            None,
+            &mut DefaultHash::new(),
+        );
+
+        let serialized = block.serialize_pillar().unwrap();
+        let deserialized: Block = Block::deserialize_pillar(&serialized).unwrap();
+        assert_eq!(block, deserialized);
+
     }
 }

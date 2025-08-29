@@ -3,6 +3,7 @@ pub mod block;
 pub mod pool;
 pub mod messages;
 pub mod errors;
+pub mod implementations;
 
 #[cfg(test)]
 mod tests{
