@@ -149,7 +149,7 @@ mod tests {
             let prev_header = chain.headers.get(&parent_hash).expect("Parent hash must exist");
             let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
             mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
-            parent_hash = block.header.completion.unwrap().hash;
+            parent_hash = block.header.completion.as_ref().unwrap().hash;
             chain.add_new_block(block).unwrap();
         }
 
@@ -175,12 +175,12 @@ mod tests {
         mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
         chain.add_new_block(fork_block.clone()).unwrap();
 
-        assert!(chain.blocks.contains_key(&fork_block.header.completion.unwrap().hash));
+        assert!(chain.blocks.contains_key(&fork_block.header.completion.as_ref().unwrap().hash));
 
         // Trim should remove the short fork
         let mut shard: ChainShard = chain.into();
         shard.trim();
-        assert!(!shard.headers.contains_key(&fork_block.header.completion.unwrap().hash));
+        assert!(!shard.headers.contains_key(&fork_block.header.completion.as_ref().unwrap().hash));
         assert!(shard.headers.contains_key(&long_chain_leaf));
         assert!(shard.headers.contains_key(&shard.headers[&long_chain_leaf].previous_hash));
     }
@@ -215,7 +215,7 @@ mod tests {
             let prev_header = chain.headers.get(&parent_hash).expect("Parent hash must exist");
             let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
             mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
-            parent_hash = block.header.completion.unwrap().hash;
+            parent_hash = block.header.completion.as_ref().unwrap().hash;
             chain.add_new_block(block).unwrap();
         }
 
@@ -237,7 +237,7 @@ mod tests {
         let prev_header = chain.headers.get(&genesis_hash).expect("Genesis hash must exist");
         let state_root = chain.state_manager.branch_from_block_internal(&fork_block, prev_header, &sender);
         mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
-        let fork_hash = fork_block.header.completion.unwrap().hash;
+        let fork_hash = fork_block.header.completion.as_ref().unwrap().hash;
         chain.add_new_block(fork_block).unwrap();
 
         // This fork is <10 behind, so it should NOT be trimmed
@@ -275,7 +275,7 @@ mod tests {
             let prev_header = chain.headers.get(&main_hash).expect("Parent hash must exist");
             let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
             mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
-            main_hash = block.header.completion.unwrap().hash;
+            main_hash = block.header.completion.as_ref().unwrap().hash;
             chain.add_new_block(block).unwrap();
         }
 
@@ -299,7 +299,7 @@ mod tests {
             let prev_header = chain.headers.get(&genesis_hash).expect("Genesis hash must exist");
             let state_root = chain.state_manager.branch_from_block_internal(&fork_block, prev_header, &sender);
             mine(&mut fork_block, sender, state_root, vec![], None, DefaultHash::new()).await;
-            let hash = fork_block.header.completion.unwrap().hash;
+            let hash = fork_block.header.completion.as_ref().unwrap().hash;
             fork_hashes.push(hash);
             chain.add_new_block(fork_block).unwrap();
         }

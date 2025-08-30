@@ -62,12 +62,12 @@ pub async fn mine(
     let (difficulty, _) = get_difficulty_for_block(&block.header, &reputations);
 
     block.header.nonce = 0;
-    block.header.completion = Some(HeaderCompletion{
-        miner_address: address,
-        difficulty_target: NonZeroU64::new(difficulty).unwrap(),
-        state_root: state_root,
-        hash: [255u8; 32],
-    });
+    block.header.completion = HeaderCompletion::new(
+        [255u8; 32],
+        address,
+        state_root,
+        difficulty,
+    );
     loop {
         match block.header.hash(&mut hash_function){
             Ok(hash) => {

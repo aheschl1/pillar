@@ -192,7 +192,7 @@ mod tests {
 
         let peer = Peer {
             public_key: [3; 32],
-            ip_address,
+            ip_address: ip_address.into(),
             port: 8085,
         };
 
@@ -223,7 +223,7 @@ mod tests {
 
         let peer = Peer {
             public_key: [3; 32],
-            ip_address,
+            ip_address: ip_address.into(),
             port: 8081,
         };
 
@@ -283,7 +283,7 @@ mod tests {
             .await
             .unwrap();
 
-        let invalid_message = vec![0; 10]; // Invalid message
+        let invalid_message = vec![0; 22]; // Invalid message
         stream.write_all(&invalid_message).await.unwrap();
 
         let response: Message = read_standard_message(&mut stream).await.unwrap();

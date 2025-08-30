@@ -65,7 +65,7 @@ impl StateManager{
         block: &Block,
         prev_header: &BlockHeader,
     ) -> StdByteArray {
-        let miner_address = block.header.completion.expect("Block should be complete").miner_address;
+        let miner_address = block.header.completion.as_ref().expect("Block should be complete").miner_address;
         self.branch_from_block_internal(block, prev_header, &miner_address)
     }
 
@@ -87,7 +87,7 @@ impl StateManager{
         );
         // Update the accounts from the block
         let mut state_updates: HashMap<StdByteArray, Account> = HashMap::new();
-        let state_root = prev_header.completion.expect("Previous block should be complete").state_root;
+        let state_root = prev_header.completion.as_ref().expect("Previous block should be complete").state_root;
         let mut state_trie = self.state_trie.lock().expect("Failed to lock state trie");
         for transaction in &block.transactions {
             let mut sender = match state_updates.get(&transaction.header.sender){

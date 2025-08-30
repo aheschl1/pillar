@@ -58,7 +58,7 @@ mod tests {
     async fn test_discover_peers_adds_new_peers() {
         let existing_peer = Peer {
             public_key: [3; 32],
-            ip_address: IpAddr::V4(Ipv4Addr::from_str("127.0.0.2").unwrap()),
+            ip_address: IpAddr::V4(Ipv4Addr::from_str("127.0.0.2").unwrap()).into(),
             port: 8081,
         };
         let listener = tokio::net::TcpListener::bind(format!(
@@ -79,12 +79,12 @@ mod tests {
         // Mock new peer to be discovered
         let new_peer = Peer {
             public_key: [4; 32],
-            ip_address: IpAddr::V4(Ipv4Addr::from_str("127.0.0.3").unwrap()),
+            ip_address: IpAddr::V4(Ipv4Addr::from_str("127.0.0.3").unwrap()).into(),
             port: 8082,
         };
         let new_peer2 = Peer {
             public_key: [5; 32],
-            ip_address: IpAddr::V4(Ipv4Addr::from_str("127.0.0.3").unwrap()),
+            ip_address: IpAddr::V4(Ipv4Addr::from_str("127.0.0.3").unwrap()).into(),
             port: 8082,
         };
 

@@ -35,4 +35,10 @@ impl Versions{
             Versions::V1V6 => 2u16.to_le_bytes(),
         }
     }
+    pub fn to_ne_bytes(&self) -> [u8; 2] {
+        match self {
+            Versions::V1V4 => 1u16.to_ne_bytes(),
+            Versions::V1V6 => 2u16.to_ne_bytes(),
+        }
+    }
 }

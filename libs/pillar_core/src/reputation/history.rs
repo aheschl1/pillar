@@ -69,7 +69,7 @@ impl NodeHistory{
                     break;
                 }
                 blocks_seen.insert(hash);
-                if current_block.completion.expect("Block should be complete").miner_address == miner{
+                if current_block.completion.as_ref().expect("Block should be complete").miner_address == miner{
                     blocks_mined.push(current_block.into());
                 }
                 curr = shard.get_block(&current_block.previous_hash); // recurse
