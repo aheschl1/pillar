@@ -1,11 +1,11 @@
-use std::alloc::Layout;
+use std::{alloc::Layout, collections::HashMap};
 
-use bytemuck::bytes_of;
+use bytemuck::{bytes_of, Pod, Zeroable};
 use pillar_crypto::{proofs::MerkleProof, types::StdByteArray};
 use serde::{Deserialize, Serialize};
 use tokio::{io::AsyncReadExt, net::TcpStream};
 
-use crate::{accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, nodes::peer::Peer, primitives::{block::{Block, BlockHeader}, messages::Message, transaction::{Transaction, TransactionFilter}}};
+use crate::{accounting::{account::TransactionStub, state::StateManager}, blockchain::{chain::Chain, chain_shard::ChainShard}, nodes::peer::Peer, primitives::{block::{Block, BlockHeader}, messages::Message, transaction::{Transaction, TransactionFilter}}};
 
 /// This trait is for converting to protocol endian format
 /// is a noop on a LE machine, which is a machine that can 
@@ -25,6 +25,13 @@ pub trait PillarSerialize : Serialize + for<'a> Deserialize<'a> + Sized {
         let decoded = bincode::deserialize::<Self>(data)
             .map_err(std::io::Error::other)?;
         Ok(decoded)
+    }
+
+    fn fixed_width() -> bool{
+        // false is a reasonable default, as this being false when in reality it could be true would
+        // break nothing. however, if it is true, it could lead to unexpected behavior for variadic sized
+        // elements
+        false
     }
 }
 
@@ -149,6 +156,10 @@ impl PillarSerialize for crate::primitives::messages::Message {
         };
         Ok(result)
     }
+
+    fn fixed_width() -> bool {
+        false
+    }
 }
 
 
@@ -183,6 +194,9 @@ impl PillarSerialize for Transaction {
         }
         Ok(tx_le)
     }
+    fn fixed_width() -> bool {
+        true
+    }
 }
 
 impl PillarSerialize for BlockHeader {
@@ -214,40 +228,89 @@ impl PillarSerialize for BlockHeader {
         }
         Ok(tx_le)
     }
+
+    fn fixed_width() -> bool {
+        true
+    }
 }
 
 impl PillarSerialize for Block{
 
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
         let mut bytes = self.header.serialize_pillar()?;
-        // extend with transactions one at a time.
         assert!(bytes.len() % 8 == 0); // ensure alignment
-        bytes.extend((self.transactions.len() as u64).to_le_bytes());
-        for transaction in &self.transactions {
-            bytes.extend(transaction.serialize_pillar()?);
-        }
+        bytes.extend(self.transactions.serialize_pillar()?);
         Ok(bytes)
     }
 
     fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
         let nheader_bytes = size_of::<BlockHeader>();
-        let size_transaction = size_of::<Transaction>();
-
         let header = BlockHeader::deserialize_pillar(&data[..nheader_bytes])?;
-        let ntransactions = u64::from_le_bytes(data[nheader_bytes..nheader_bytes + 8].try_into().unwrap());
-        let mut transactions = Vec::with_capacity(ntransactions as usize);
-        let mut offset = nheader_bytes + 8;
-        for _ in 0..ntransactions {
-            let tx = Transaction::deserialize_pillar(&data[offset..offset+size_transaction])?;
-            transactions.push(tx);
-            offset += size_transaction;
-        }
+        let transactions: Vec<Transaction> = Vec::<Transaction>::deserialize_pillar(&data[nheader_bytes..])?;
         Ok(Block {
             header,
             transactions,
         })
     }
+
+    fn fixed_width() -> bool {
+        false
+    }
+}
+
+impl<T: PillarSerialize> PillarSerialize for Vec<T>{
     
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        if T::fixed_width(){
+            let mut buffer = vec![];
+            // buffer.extend((self.len() as u32).to_le_bytes());
+            for item in self {
+                buffer.extend(item.serialize_pillar()?);
+            }
+            Ok(buffer)
+        }else{
+            let mut buffer = vec![];
+            buffer.extend((self.len() as u32).to_le_bytes());
+            for item in self {
+                let serialized = item.serialize_pillar()?;
+                buffer.extend((serialized.len() as u32).to_le_bytes());
+                buffer.extend(serialized);
+            }
+            Ok(buffer)
+        }
+    }
+
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        if T::fixed_width(){
+            let size = size_of::<T>();
+            assert!(data.len() % size == 0);
+            let length = data.len() / size;
+            let mut items = Vec::with_capacity(length as usize);
+            let mut offset = 0;
+            for _ in 0..length {
+                let item = T::deserialize_pillar(&data[offset..offset + size])?;
+                items.push(item);
+                offset += size;
+            }
+            Ok(items)
+        }else {
+            let mut items = Vec::new();
+            let length = u32::from_le_bytes(data[..4].try_into().unwrap());
+            let mut offset = 4;
+            for _ in 0..length {
+                let size = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
+                offset += 4;
+                let item = T::deserialize_pillar(&data[offset..offset + size as usize])?;
+                items.push(item);
+                offset += size as usize;
+            }
+            Ok(items)
+        }
+    }
+
+    fn fixed_width() -> bool {
+        false
+    }
 }
 
 impl PillarSerialize for TransactionFilter {
@@ -262,20 +325,118 @@ impl PillarSerialize for String{
 
 }
 
-impl<T: PillarSerialize> PillarSerialize for Vec<T>{
-
-}
 
 impl<T: PillarSerialize> PillarSerialize for Option<T> {
 
 }
 
 impl PillarSerialize for Peer {
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        // dereference
+        let mut bytes = bytemuck::bytes_of(self);
+        let mut le_peer; // maybe a waste of space, whatever
+        if cfg!(target_endian = "big") {
+            le_peer = self.clone();
+            le_peer.to_le();
+            bytes = bytemuck::bytes_of(&le_peer);
+        }
+        Ok(bytes.to_vec())
+    }
 
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        if data.len() < size_of::<Self>() {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Insufficient data"));
+        }
+        let layout = Layout::from_size_align(size_of::<Self>(), 8);
+        let buffer = unsafe {
+            let ptr = std::alloc::alloc(layout.unwrap());
+            std::slice::from_raw_parts_mut(ptr, size_of::<Self>())
+        };
+        buffer.copy_from_slice(data);
+        let mut le_peer: Self = *bytemuck::from_bytes(&buffer);
+        if cfg!(target_endian = "big") {
+            le_peer.to_le();
+        }
+        Ok(le_peer)
+    }
+
+    fn fixed_width() -> bool {
+        true
+    }
 }
 
 impl PillarSerialize for Chain {
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mut buffer = vec![];
+        // key pair hashmap
+        buffer.extend((self.blocks.len() as u32).to_le_bytes());
+        for (key, value) in &self.blocks {
+            buffer.extend(key.serialize_pillar()?);
+            buffer.extend(value.serialize_pillar()?);
+        }
+        buffer.extend((self.headers.len() as u32).to_le_bytes());
+        for (key, value) in &self.headers {
+            buffer.extend(key.serialize_pillar()?);
+            buffer.extend(value.serialize_pillar()?);
+        }
+        buffer.extend(self.depth.to_le_bytes());
+        buffer.extend(self.deepest_hash.serialize_pillar()?);
+        // TODO maybe big clone
+        buffer.extend(self.leaves.iter().cloned().collect::<Vec<_>>().serialize_pillar()?);
+        Ok(buffer)
+    }
 
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        let mut offset = 0;
+        let block_size = size_of::<Block>();
+        let header_size = size_of::<BlockHeader>();
+
+        let blocks_len = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
+        offset += 4;
+
+        let mut blocks = HashMap::new();
+        for _ in 0..blocks_len {
+            let key = StdByteArray::deserialize_pillar(&data[offset..offset + 32])?;
+            offset += 32;
+            let value = Block::deserialize_pillar(&data[offset..offset + block_size])?;
+            offset += block_size;
+            blocks.insert(key, value);
+        }
+
+        let headers_len = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
+        offset += 4;
+
+        let mut headers = HashMap::new();
+        for _ in 0..headers_len {
+            let key = StdByteArray::deserialize_pillar(&data[offset..offset + 32])?;
+            offset += 32;
+            let value = BlockHeader::deserialize_pillar(&data[offset..offset + header_size])?;
+            offset += header_size;
+            headers.insert(key, value);
+        }
+
+        let depth = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        offset += 8;
+
+        let deepest_hash = StdByteArray::deserialize_pillar(&data[offset..offset + 32])?;
+        offset += 32;
+
+        // TODO make hashet deserialization
+        let leaves = Vec::<StdByteArray>::deserialize_pillar(&data[offset..])?;
+
+        Ok(Chain {
+            blocks,
+            headers,
+            depth,
+            deepest_hash,
+            leaves: leaves.into_iter().collect(),
+            state_manager: StateManager::default(),
+        })
+    }
+
+    fn fixed_width() -> bool {
+        false
+    }
 }
 
 impl PillarSerialize for ChainShard {
@@ -297,6 +458,10 @@ impl PillarSerialize for StdByteArray {
             .map_err(|_| std::io::ErrorKind::InvalidData)?;
         Ok(*buff)
     }
+
+    fn fixed_width() -> bool {
+        true
+    }
 }
 
 impl PillarNativeEndian for BlockHeader {
@@ -308,6 +473,7 @@ impl PillarNativeEndian for BlockHeader {
             c.difficulty_target = c.difficulty_target.to_le();
         }
     }
+
 }
 
 impl PillarNativeEndian for Transaction {
@@ -315,6 +481,56 @@ impl PillarNativeEndian for Transaction {
         self.header.amount = self.header.amount.to_le();
         self.header.timestamp = self.header.timestamp.to_le();
         self.header.nonce = self.header.nonce.to_le();
+    }
+}
+
+impl PillarNativeEndian for Peer {
+    fn to_le(&mut self) {
+        self.port = self.port.to_le();
+    }
+}
+
+impl PillarSerialize for u8 {
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        Ok(self.to_le_bytes().to_vec())
+    }
+
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        let array: [u8; 1] = data.try_into().map_err(|_| std::io::ErrorKind::InvalidData)?;
+        Ok(u8::from_le_bytes(array))
+    }
+}
+
+impl PillarSerialize for u16 {
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        Ok(self.to_le_bytes().to_vec())
+    }
+
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        let array: [u8; 2] = data.try_into().map_err(|_| std::io::ErrorKind::InvalidData)?;
+        Ok(u16::from_le_bytes(array))
+    }
+}
+
+impl PillarSerialize for u32 {
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        Ok(self.to_le_bytes().to_vec())
+    }
+
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        let array: [u8; 4] = data.try_into().map_err(|_| std::io::ErrorKind::InvalidData)?;
+        Ok(u32::from_le_bytes(array))
+    }
+}
+
+impl PillarSerialize for u64 {
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        Ok(self.to_le_bytes().to_vec())
+    }
+
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        let array: [u8; 8] = data.try_into().map_err(|_| std::io::ErrorKind::InvalidData)?;
+        Ok(u64::from_le_bytes(array))
     }
 }
 

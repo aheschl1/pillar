@@ -1,5 +1,7 @@
-use std::{net::IpAddr, time::Duration};
+use std::{ffi::os_str::Display, fmt::{Debug}, net::IpAddr, time::Duration};
 
+use bytemuck::{Pod, Zeroable};
+use pillar_crypto::types::StdByteArray;
 use serde::{Serialize, Deserialize};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream, time::timeout};
 use tracing::instrument;
@@ -7,24 +9,58 @@ use crate::protocol::serialization::{package_standard_message, read_standard_mes
 
 use crate::{primitives::messages::Message};
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash)]
-pub struct Peer{
-    /// The public key of the peer
-    pub public_key: [u8; 32],
-    /// The IP address of the peer
-    pub ip_address: IpAddr,
-    /// The port of the peer
-    pub port: u16,
-}
+#[derive(Pod, Zeroable, Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
+#[repr(C)]
+pub struct PillarIPAddr([u8; 16]);
 
-impl Clone for Peer {
-    fn clone(&self) -> Self {
-        Peer {
-            public_key: self.public_key,
-            ip_address: self.ip_address,
-            port: self.port
+impl From<PillarIPAddr> for IpAddr {
+    fn from(pillar_ip: PillarIPAddr) -> Self {
+        if pillar_ip.0[..12] == [0u8; 12] {
+            // IPv4
+            let octets: [u8; 4] = pillar_ip.0[12..].try_into().unwrap();
+            IpAddr::V4(octets.into())
+        } else {
+            // IPv6
+            let octets: [u8; 16] = pillar_ip.0;
+            IpAddr::V6(octets.into())
         }
     }
+}
+
+impl From<IpAddr> for PillarIPAddr {
+    fn from(ip: IpAddr) -> Self {
+        match ip {
+            IpAddr::V4(v4) => {
+                let octets = v4.octets();
+                let mut bytes = [0u8; 16];
+                bytes[12..].copy_from_slice(&octets);
+                PillarIPAddr(bytes)
+            },
+            IpAddr::V6(v6) => {
+                let octets = v6.octets();
+                PillarIPAddr(octets)
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for PillarIPAddr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let ip: IpAddr = (*self).into();
+        write!(f, "{}", ip)
+    }
+}
+
+#[derive(Pod, Zeroable, Serialize, Deserialize, Debug, PartialEq, Eq, Hash, Copy, Clone)]
+#[repr(C)]
+pub struct Peer{
+    /// The public key of the peer
+    pub public_key: StdByteArray,
+    /// The IP address of the peer
+    pub ip_address: PillarIPAddr, // 16 bytes
+    /// The port of the peer
+    pub port: u16, // 2 bytes
+    // pads at end
 }
 
 impl Peer{
@@ -32,7 +68,7 @@ impl Peer{
     pub fn new(public_key: [u8; 32], ip_address: IpAddr, port: u16) -> Self {
         Peer {
             public_key,
-            ip_address,
+            ip_address: ip_address.into(),
             port
         }
     }
@@ -83,7 +119,7 @@ mod tests{
     fn test_peer_new(){
         let peer = Peer::new([1u8; 32], IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
         assert_eq!(peer.public_key, [1u8; 32]);
-        assert_eq!(peer.ip_address, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+        assert_eq!(peer.ip_address, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)).into());
         assert_eq!(peer.port, 8080);
     }
 

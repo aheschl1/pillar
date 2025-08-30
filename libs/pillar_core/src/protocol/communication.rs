@@ -192,7 +192,7 @@ mod tests {
 
         let peer = Peer {
             public_key: [3; 32],
-            ip_address,
+            ip_address: ip_address.into(),
             port: 8085,
         };
 
@@ -223,7 +223,7 @@ mod tests {
 
         let peer = Peer {
             public_key: [3; 32],
-            ip_address,
+            ip_address: ip_address.into(),
             port: 8081,
         };
 
