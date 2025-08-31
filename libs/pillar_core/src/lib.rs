@@ -1,3 +1,4 @@
+#![feature(specialization)]
 mod blockchain;
 mod nodes;
 mod primitives;
