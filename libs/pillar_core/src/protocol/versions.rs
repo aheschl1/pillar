@@ -1,8 +1,6 @@
-use serde::{Serialize, Deserialize};
-
 use crate::protocol::PROTOCOL_VERSION;
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive( Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Versions{
     V1V4 = 1,
     #[allow(dead_code)]

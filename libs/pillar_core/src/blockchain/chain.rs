@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use pillar_crypto::{hashing::DefaultHash, signing::{DefaultVerifier, SigVerFunction}, types::StdByteArray};
-use serde::{Deserialize, Serialize};
+
 use tracing::instrument;
 
 use crate::{
@@ -11,7 +11,7 @@ use crate::{
 use super::TrimmableChain;
 
 /// Represents the state of the blockchain, including blocks, accounts, and chain parameters.
-#[derive(Debug, Serialize, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Chain {
     /// The blocks in the chain.
     pub blocks: HashMap<StdByteArray, Block>,
@@ -25,8 +25,7 @@ pub struct Chain {
     // track the leaves
     pub leaves: HashSet<StdByteArray>,
     /// The account manager for tracking account balances and nonces.
-    #[serde(skip)]
-    pub state_manager: StateManager,
+    pub state_manager: StateManager, // serialize skips
 }
 
 impl Chain {

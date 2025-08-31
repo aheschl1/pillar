@@ -1,23 +1,70 @@
 use std::hash::Hash;
 
-use serde::{Deserialize, Serialize};
+
+use pillar_serialize::{PillarFixedSize, PillarSerialize};
 
 use crate::{hashing::{HashFunction, Hashable}, merkle::MerkleTree, merkle_trie::{to_nibbles, MerkleTrie}, types::StdByteArray};
 
 
 
-#[derive(Debug, Clone, Deserialize, Serialize, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum HashDirection {
     Left,
     Right,
 }
 
+impl PillarSerialize for HashDirection {
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        match self{
+            Self::Left => Ok(vec![0]),
+            Self::Right => Ok(vec![1]),
+        }
+    }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Hash, PartialEq, Eq)]
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        match data {
+            [0] => Ok(Self::Left),
+            [1] => Ok(Self::Right),
+            _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid HashDirection")),
+        }
+    }
+}
+
+// note that no optimization will pik up on this for now
+// because it is not a zeroable pod
+impl PillarFixedSize for HashDirection {}
+
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct MerkleProof {
     pub hashes: Vec<StdByteArray>,
     pub directions: Vec<HashDirection>,
     pub root: StdByteArray,
+}
+
+impl PillarSerialize for MerkleProof {
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mut buffer = vec![];
+        let hashes = self.hashes.serialize_pillar()?;
+        let directions = self.directions.serialize_pillar()?;
+        let root = self.root.serialize_pillar()?;
+
+        buffer.extend((hashes.len() as u32).to_le_bytes());
+        buffer.extend(hashes);
+        buffer.extend((directions.len() as u32).to_le_bytes());
+        buffer.extend(directions);
+        buffer.extend(root);
+        Ok(buffer)
+    }
+
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        let hlen = u32::from_le_bytes(data[..4].try_into().unwrap()) as usize;
+        let hashes = Vec::<StdByteArray>::deserialize_pillar(&data[4..4 + hlen])?;
+        let dlen = u32::from_le_bytes(data[4 + hlen..8 + hlen].try_into().unwrap()) as usize;
+        let directions = Vec::<HashDirection>::deserialize_pillar(&data[8 + hlen..8 + hlen + dlen])?;
+        let root = StdByteArray::deserialize_pillar(&data[8 + hlen + dlen..])?;
+        Ok(MerkleProof { hashes, directions, root })
+    }
 }
 
 /// Generate a Merkle proof for a specific transaction
@@ -86,7 +133,7 @@ pub fn verify_proof_of_inclusion<T: Into<StdByteArray>>(data: T, proof: &MerkleP
 // Trie proofs to follow
 // TODO generalize
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug,  Clone)]
 pub struct TrieMerkleProof {
     pub steps: Vec<ProofStep>,
 }
@@ -97,7 +144,7 @@ impl TrieMerkleProof {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug,  Clone)]
 pub(crate) struct ProofStep {
     // native is the index of the value on which they are constructing the proof
     pub native: u8,
@@ -180,7 +227,7 @@ pub fn generate_proof_of_state<K, V>(
     root: Option<StdByteArray>, 
     hash_function: &mut impl HashFunction
 ) -> Option<(TrieMerkleProof, V)> 
-where K: Hashable, V: Serialize + for<'a> Deserialize<'a>
+where K: Hashable, V: PillarSerialize
 {
     let value = merkle_trie.get(&target_key, root.expect("Root must be provided"));
     value.as_ref()?;

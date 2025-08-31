@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use pillar_crypto::{hashing::DefaultHash, types::StdByteArray};
-use serde::{Deserialize, Serialize};
+
 
 use crate::{accounting::{account::Account, state::StateManager}, primitives::{block::BlockHeader, errors::BlockValidationError}, protocol::chain::get_genesis_block};
 
@@ -10,7 +10,7 @@ use super::{chain::Chain, TrimmableChain};
 /// chain shard is used to build up a chain given a list of block headers
 /// It is responsible for the validation and construction of the chain from a new node.
 /// // chain shard is just a chain of headers
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone,  PartialEq, Eq)]
 pub struct ChainShard {
     pub headers: HashMap<StdByteArray, BlockHeader>,
     pub leaves: HashSet<StdByteArray>

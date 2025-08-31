@@ -1,13 +1,10 @@
 use bytemuck::{Pod, Zeroable};
 use pillar_crypto::{hashing::{HashFunction, Hashable}, signing::{SigFunction, Signable}, types::StdByteArray};
-use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, Bytes};
 
 use super::block::Block;
 
 
-#[serde_as]
-#[derive(Pod, Zeroable, Debug, Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Pod, Zeroable, Debug,  Clone, Copy, Hash, PartialEq, Eq)]
 #[repr(C, align(8))]
 pub struct Transaction{
     // header is the header of the transaction
@@ -15,11 +12,10 @@ pub struct Transaction{
     // hash is the sha3_256 hash of the transaction header
     pub hash: StdByteArray,
     // signature is the signature over the transaction header
-    #[serde_as(as = "Bytes")]
     pub signature: [u8; 64],
 }
 
-#[derive(Pod, Zeroable, Debug, Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Pod, Zeroable, Debug,  Clone, Copy, Hash, PartialEq, Eq)]
 #[repr(C, align(8))]
 pub struct TransactionHeader{
     // sender is the ed25519 public key of the sender
@@ -34,7 +30,7 @@ pub struct TransactionHeader{
     pub nonce: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug,  Clone, PartialEq, Eq, Hash)]
 /// TransactionFilter is sent from lightweight nodes to full nodes in order to register a callback to receive 
 /// a proof of a transaction when it is incorporated into a block.
 pub struct TransactionFilter {

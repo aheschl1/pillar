@@ -136,13 +136,13 @@ pub fn generate_tree(data: Vec<&impl Hashable>, hash_function: &mut impl HashFun
 
 #[cfg(test)]
 mod tests {
-    use serde::{Deserialize, Serialize};
+    
 
     use super::*;
     use crate::proofs::{generate_proof_of_inclusion, verify_proof_of_inclusion};
     use crate::hashing::DefaultHash;
 
-    #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug,  Clone, Copy, PartialEq, Eq)]
     pub struct TransactionHeader{
         // sender is the ed25519 public key of the sender
         pub sender: StdByteArray,

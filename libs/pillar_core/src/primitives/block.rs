@@ -1,16 +1,14 @@
 use core::hash;
 use std::num::NonZeroU64;
 
-use bincode::de;
 use bytemuck::{Pod, Zeroable};
 use pillar_crypto::types::StdByteArray;
-use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, Bytes};
+
 
 use crate::{accounting::state, nodes::miner, protocol::{difficulty, reputation::N_TRANSMISSION_SIGNATURES}};
 use super::transaction::Transaction;
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug,  Clone, PartialEq, Eq)]
 #[repr(C, align(8))]
 pub struct Block{
     // header is the header of the block
@@ -19,12 +17,10 @@ pub struct Block{
     pub transactions: Vec<Transaction>
 }
 
-#[serde_as]
-#[derive(Pod, Zeroable, Debug, PartialEq, Clone, Copy, Eq, Hash, Serialize, Deserialize)]
+#[derive(Pod, Zeroable, Debug, PartialEq, Clone, Copy, Eq, Hash)]
 #[repr(C, align(8))]
 pub struct Stamp{
     // the signature of the person who broadcasted the block
-    #[serde_as(as = "Bytes")]
     pub signature: [u8; 64],
     // the address of the person who stamped the block
     pub address: StdByteArray
@@ -42,21 +38,21 @@ impl Default for Stamp {
 
 /// A block tail tracks the signatures of people who have broadcasted the block
 /// This is used for immutibility of participation reputation
-#[derive(Pod, Zeroable, Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq, Default, Hash)]
+#[derive(Pod, Zeroable, Debug,  PartialEq, Clone, Copy, Eq, Default, Hash)]
 #[repr(C, align(8))]
 pub struct BlockTail{
     // the signatures of the people who have broadcasted the block
     pub stamps: [Stamp; N_TRANSMISSION_SIGNATURES]
 }
 
-#[derive(Default, Pod, Zeroable, Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq)]
+#[derive(Default, Pod, Zeroable, Debug,  PartialEq, Clone, Copy, Eq)]
 #[repr(C, align(8))]
 /// Header completion is Some in the BlockHeader if the block is mined
 pub struct HeaderCompletion {
     inner: HeaderCompletionInner
 }
 
-#[derive(Pod, Zeroable, Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq, Default)]
+#[derive(Pod, Zeroable, Debug,  PartialEq, Clone, Copy, Eq, Default)]
 #[repr(C, align(8))]
 pub struct HeaderCompletionInner{
     // hash of the block
@@ -114,7 +110,7 @@ impl HeaderCompletion {
     }
 }
 
-#[derive(Pod, Zeroable, Debug, Serialize, Deserialize, PartialEq, Clone, Copy, Eq, Default)]
+#[derive(Pod, Zeroable, Debug,  PartialEq, Clone, Copy, Eq, Default)]
 #[repr(C, align(8))]
 pub struct BlockHeader{
     // previous_hash is the sha3_356 hash of the previous block in the chain

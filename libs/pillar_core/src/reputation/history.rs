@@ -1,17 +1,20 @@
 use std::{cmp::max, collections::HashSet};
 
+use bytemuck::{Pod, Zeroable};
 use pillar_crypto::{hashing::{HashFunction, Hashable}, types::StdByteArray};
-use serde::{Deserialize, Serialize};
+
 
 use crate::{blockchain::{chain_shard::ChainShard, TrimmableChain}, primitives::block::BlockHeader, protocol::reputation::{block_worth_scaling_fn, BLOCK_STAMP_SCALING, N_TRANSMISSION_SIGNATURES}};
 
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-struct HeaderShard{
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Pod, Zeroable)]
+#[repr(C)]
+pub struct HeaderShard{
     previous_hash: StdByteArray,
-    n_stamps: u32,
-    depth: u64,
-    timestamp: u64, // timestamp of the block
+    pub depth: u64,
+    pub timestamp: u64, // timestamp of the block
+    pub n_stamps: u32,
+    _pad: [u8; 4],
 }
 
 impl From<BlockHeader> for HeaderShard {
@@ -21,20 +24,21 @@ impl From<BlockHeader> for HeaderShard {
             depth: header.depth,
             n_stamps: header.tail.get_stampers().len() as u32, // number of stampers
             timestamp: header.timestamp,
+            _pad: [0; 4],
         }
     }
 }
 
 /// The reputation structure holds all the information needed to compute the reputation of a node
 /// This information should be stored by each node, and each node can add it to a side chain
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug,  Clone, PartialEq, Eq)]
 pub struct NodeHistory{
     /// The public key of the node
     pub public_key: StdByteArray,
     /// The blocks that have been mined by the node - could be empty if the node does not mine
-    blocks_mined: Vec<HeaderShard>,
+    pub blocks_mined: Vec<HeaderShard>,
     /// the blocks that have been stamped by the node - could be empty if the node does not stamp
-    blocks_stamped: Vec<HeaderShard>,
+    pub blocks_stamped: Vec<HeaderShard>,
 }
 
 impl NodeHistory{

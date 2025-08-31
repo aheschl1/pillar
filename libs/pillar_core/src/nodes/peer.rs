@@ -2,14 +2,13 @@ use std::{ffi::os_str::Display, fmt::{Debug}, net::IpAddr, time::Duration};
 
 use bytemuck::{Pod, Zeroable};
 use pillar_crypto::types::StdByteArray;
-use serde::{Serialize, Deserialize};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream, time::timeout};
 use tracing::instrument;
 use crate::protocol::serialization::{package_standard_message, read_standard_message};
 
 use crate::{primitives::messages::Message};
 
-#[derive(Pod, Zeroable, Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
+#[derive(Pod, Zeroable, Copy, Clone, Debug, PartialEq, Eq,  Hash)]
 #[repr(C)]
 pub struct PillarIPAddr([u8; 16]);
 
@@ -51,7 +50,7 @@ impl std::fmt::Display for PillarIPAddr {
     }
 }
 
-#[derive(Pod, Zeroable, Serialize, Deserialize, Debug, PartialEq, Eq, Hash, Copy, Clone)]
+#[derive(Pod, Zeroable,  Debug, PartialEq, Eq, Hash, Copy, Clone)]
 #[repr(C)]
 pub struct Peer{
     /// The public key of the peer
@@ -80,7 +79,6 @@ impl Peer{
         let mut stream = tokio::net::TcpStream::connect(format!("{}:{}", self.ip_address, self.port)).await?;
         // always send a "peer" object of the initializing node first, and length of the message in bytes
         let declaration = Message::Declaration(initializing_peer.clone());
-        // serialize with bincode
         let bytes = package_standard_message(&declaration)?;
 
         stream.write_all(bytes.as_slice()).await?;

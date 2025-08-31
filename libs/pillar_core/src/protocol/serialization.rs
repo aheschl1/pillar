@@ -1,83 +1,19 @@
 use std::{alloc::Layout, collections::HashMap, io::Bytes};
 
 use bytemuck::{bytes_of, Pod, Zeroable};
-use pillar_crypto::{proofs::MerkleProof, types::{StdByteArray, STANDARD_ARRAY_LENGTH}};
-use serde::{Deserialize, Serialize};
+use pillar_crypto::{proofs::{HashDirection, MerkleProof}, types::{StdByteArray, STANDARD_ARRAY_LENGTH}};
+
+use pillar_serialize::{PillarFixedSize, PillarNativeEndian, PillarSerialize};
 use tokio::{io::AsyncReadExt, net::TcpStream};
 
-use crate::{accounting::{account::TransactionStub, state::StateManager}, blockchain::{chain::Chain, chain_shard::ChainShard}, nodes::peer::Peer, primitives::{block::{Block, BlockHeader}, messages::Message, transaction::{Transaction, TransactionFilter}}};
+use crate::{accounting::{account::{Account, TransactionStub}, state::StateManager}, blockchain::{chain::Chain, chain_shard::ChainShard}, nodes::{node::Node, peer::Peer}, primitives::{block::{Block, BlockHeader}, messages::Message, transaction::{Transaction, TransactionFilter}}, reputation::history::{HeaderShard, NodeHistory}};
 
-/// This trait is for converting to protocol endian format
-/// is a noop on a LE machine, which is a machine that can 
-/// interpret it by default
-pub trait PillarNativeEndian {
-    fn to_le(&mut self);
-}
-
-pub trait PillarSerialize: Sized {
-    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error>;
-    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error>;
-}
-
-pub trait PillarFixedSize {}
-
-impl<T> PillarSerialize for T 
-where 
-    T: Serialize + for<'a> Deserialize<'a> + Sized
-{
-    default fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
-        let encoded = bincode::serialize(&self)
-            .map_err(std::io::Error::other)?;
-        Ok(encoded)
-    }
-
-    default fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
-        let decoded = bincode::deserialize::<Self>(data)
-            .map_err(std::io::Error::other)?;
-        Ok(decoded)
-    }
-}
-
-impl<T> PillarSerialize for T 
-where 
-    T: Serialize + for<'a> Deserialize<'a> + Sized + PillarNativeEndian + Pod + Zeroable + PillarFixedSize
-{
-    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
-        let mut bytes = bytes_of(self);
-
-        let mut le_tx: T;
-        if cfg!(target_endian = "big") {
-            le_tx = *self;
-            le_tx.to_le();
-            bytes = bytes_of(&le_tx);
-        }
-        Ok(bytes.to_vec())
-    }
-
-    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
-        if data.len() < size_of::<Self>() {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Insufficient data"));
-        }
-        let mut tx_le: Self = bytemuck::pod_read_unaligned::<Self>(data);
-        if cfg!(target_endian = "big") {
-            tx_le.to_le();
-        }
-        Ok(tx_le)
-    }
-}
-
-impl PillarFixedSize for u8                          {}
-impl PillarFixedSize for u16                         {}
-impl PillarFixedSize for u32                         {}
-impl PillarFixedSize for u64                         {}
-impl PillarFixedSize for i8                          {}
-impl PillarFixedSize for i16                         {}
-impl PillarFixedSize for i32                         {}
-impl PillarFixedSize for i64                         {}
-impl PillarFixedSize for StdByteArray                {}
 impl PillarFixedSize for BlockHeader                 {}
 impl PillarFixedSize for Transaction                 {}
 impl PillarFixedSize for Peer                        {}
+impl PillarFixedSize for TransactionStub             {}
+impl PillarFixedSize for HeaderShard                 {}
+
 
 pub fn package_standard_message(message: &Message) -> Result<Vec<u8>, std::io::Error> {
     let mut buffer = vec![];
@@ -219,65 +155,6 @@ impl PillarSerialize for Block{
     }
 }
 
-impl<T> PillarSerialize for Vec<T>
-where
-    T: Serialize + for<'a> Deserialize<'a> + Sized
-{
-    
-    default fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
-        let mut buffer = vec![];
-        buffer.extend((self.len() as u32).to_le_bytes());
-        for item in self {
-            let serialized = item.serialize_pillar()?;
-            buffer.extend((serialized.len() as u32).to_le_bytes());
-            buffer.extend(serialized);
-        }
-        Ok(buffer)
-    }
-
-    default fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
-        let mut items = Vec::new();
-        let length = u32::from_le_bytes(data[..4].try_into().unwrap());
-        let mut offset = 4;
-        for _ in 0..length {
-            let size = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
-            offset += 4;
-            let item = T::deserialize_pillar(&data[offset..offset + size])?;
-            items.push(item);
-            offset += size;
-        }
-        Ok(items)
-    }
-
-}
-
-impl<T> PillarSerialize for Vec<T> 
-where
-    T: Serialize + for<'a> Deserialize<'a> + Sized + PillarNativeEndian + Pod + Zeroable,
-{
-    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
-        let mut buffer = vec![];
-        for item in self {
-            buffer.extend(item.serialize_pillar()?);
-        }
-        Ok(buffer)
-    }
-
-    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
-        let size = size_of::<T>();
-        assert!(data.len() % size == 0);
-        let length = data.len() / size;
-        let mut items = Vec::with_capacity(length as usize);
-        let mut offset = 0;
-        for _ in 0..length {
-            let item = T::deserialize_pillar(&data[offset..offset + size])?;
-            items.push(item);
-            offset += size;
-        }
-        Ok(items)
-    }
-}
-
 impl PillarSerialize for Chain {
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
         let mut buffer = vec![];
@@ -352,6 +229,55 @@ impl PillarSerialize for Chain {
 
 }
 
+impl PillarSerialize for ChainShard {
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        let header_bytes = self.headers.serialize_pillar()?;
+        let leaves_bytes = self.leaves.iter().copied().collect::<Vec<_>>().serialize_pillar()?;
+        let mut buffer = vec![];
+        buffer.extend((header_bytes.len() as u32).to_le_bytes());
+        buffer.extend(header_bytes);
+        buffer.extend((leaves_bytes.len() as u32).to_le_bytes());
+        buffer.extend(leaves_bytes);
+        Ok(buffer)
+    }
+
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        let mut offset = 0;
+        let header_len = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
+        offset += 4;
+        let header = HashMap::<StdByteArray, BlockHeader>::deserialize_pillar(&data[offset..offset + header_len])
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Failed to deserialize header: {}", e)))?;
+        offset += header_len;
+
+        let leaves_len = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
+        offset += 4;
+        let leaves = Vec::<StdByteArray>::deserialize_pillar(&data[offset..offset + leaves_len])
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Failed to deserialize leaves: {}", e)))?;
+        offset += leaves_len;
+
+        Ok(ChainShard { headers: header, leaves: leaves.iter().copied().collect() })
+    }
+}
+
+impl PillarSerialize for TransactionFilter {
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mut buffer = self.sender.serialize_pillar()?;
+        buffer.extend(self.receiver.serialize_pillar()?);
+        buffer.extend(self.amount.serialize_pillar()?);
+        Ok(buffer)
+    }
+
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        let mut offset = 0;
+        let sender = Option::<StdByteArray>::deserialize_pillar(&data[offset..offset + 33])?;
+        offset += 33;
+        let receiver = Option::<StdByteArray>::deserialize_pillar(&data[offset..offset + 33])?;
+        offset += 33;
+        let amount = Option::<u64>::deserialize_pillar(&data[offset..offset + 9])?;
+        Ok(TransactionFilter { sender, receiver, amount })
+    }
+}
+
 impl PillarNativeEndian for BlockHeader {
     fn to_le(&mut self) {
         self.nonce = self.nonce.to_le();
@@ -371,35 +297,63 @@ impl PillarNativeEndian for Transaction {
     }
 }
 
+impl PillarNativeEndian for TransactionStub {
+    fn to_le(&mut self) {}
+}
+
 impl PillarNativeEndian for Peer {
     fn to_le(&mut self) {
         self.port = self.port.to_le();
     }
 }
 
-impl PillarNativeEndian for StdByteArray {
-    fn to_le(&mut self) {}
-}
-
-impl PillarNativeEndian for u8 {
-    fn to_le(&mut self) {}
-}
-
-impl PillarNativeEndian for u16 {
+impl PillarNativeEndian for HeaderShard {
     fn to_le(&mut self) {
-        *self = u16::to_le(*self);
+        self.depth = self.depth.to_le();
+        self.timestamp = self.timestamp.to_le();
+        self.n_stamps = self.n_stamps.to_le();
     }
 }
 
-impl PillarNativeEndian for u32 {
-    fn to_le(&mut self) {
-        *self = u32::to_le(*self);
+impl PillarSerialize for NodeHistory {
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mut buffer = vec![];
+        buffer.extend(self.public_key.serialize_pillar()?);
+        let blockbuf = self.blocks_mined.serialize_pillar()?;
+        buffer.extend((blockbuf.len() as u32).to_le_bytes());
+        buffer.extend(blockbuf);
+        buffer.extend(self.blocks_stamped.serialize_pillar()?);
+        Ok(buffer)
+    }
+
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        let mut offset = 0;
+        let public_key = StdByteArray::deserialize_pillar(&data[offset..offset + STANDARD_ARRAY_LENGTH])?;
+        offset += STANDARD_ARRAY_LENGTH;
+        let length = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
+        offset += 4;
+        let blocks_mined = Vec::<HeaderShard>::deserialize_pillar(&data[offset..offset + length])?;
+        let blocks_stamped = Vec::<HeaderShard>::deserialize_pillar(&data[offset + length..])?;
+        Ok(NodeHistory { public_key, blocks_mined, blocks_stamped })
     }
 }
 
-impl PillarNativeEndian for u64 {
-    fn to_le(&mut self) {
-        *self = u64::to_le(*self);
+impl PillarSerialize for Account {
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+       let mut buffer = vec![];
+       buffer.extend(self.address.serialize_pillar()?);
+       buffer.extend(self.balance.serialize_pillar()?);
+       buffer.extend(self.nonce.serialize_pillar()?);
+       buffer.extend(self.history.serialize_pillar()?);
+       Ok(buffer)
+    }
+
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        let address = StdByteArray::deserialize_pillar(&data[0..STANDARD_ARRAY_LENGTH])?;
+        let balance = u64::deserialize_pillar(&data[STANDARD_ARRAY_LENGTH..STANDARD_ARRAY_LENGTH + 8])?;
+        let nonce = u64::deserialize_pillar(&data[STANDARD_ARRAY_LENGTH + 8..STANDARD_ARRAY_LENGTH + 16])?;
+        let history = Option::<NodeHistory>::deserialize_pillar(&data[STANDARD_ARRAY_LENGTH + 16..])?;
+        Ok(Account { address, balance, nonce, history })
     }
 }
 
@@ -407,7 +361,6 @@ mod tests {
     use std::num::{NonZero, NonZeroU64};
 
     use pillar_crypto::hashing::{DefaultHash, Hashable};
-    use serde::de::IntoDeserializer;
 
     use crate::{primitives::{block::{Block, BlockHeader, Stamp}, transaction::Transaction}, protocol::{reputation::N_TRANSMISSION_SIGNATURES, serialization::PillarSerialize, versions::Versions}};
 

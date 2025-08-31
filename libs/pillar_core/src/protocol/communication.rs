@@ -166,9 +166,10 @@ async fn send_error_message(stream: &mut TcpStream, e: impl std::error::Error) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pillar_serialize::PillarSerialize;
     use tokio::net::TcpStream;
     use crate::nodes::peer::Peer;
-    use crate::protocol::serialization::{package_standard_message, PillarSerialize};
+    use crate::protocol::serialization::{package_standard_message};
     use crate::{
         primitives::transaction::Transaction
     };
