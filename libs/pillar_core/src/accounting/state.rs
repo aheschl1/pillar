@@ -1,11 +1,27 @@
+//! State management built on a Merkle trie with optional reputation tracking.
+//!
+//! Example (no_run): branching from a block
+//!
+//! ```no_run
+//! use pillar_core::accounting::state::StateManager;
+//! use pillar_core::primitives::block::{Block, BlockHeader};
+//! let mut sm = StateManager::new();
+//! # let prev = BlockHeader{ version: 0, depth: 0, tail: Default::default(), completion: Some(Default::default()), _flag: 0, timestamp: 0 }; // placeholder
+//! # let blk = Block { header: prev, transactions: vec![] };
+//! # let prev_header = blk.header;
+//! // This would return a new state root after applying `blk`.
+//! // sm.branch_from_block(&blk, &prev_header);
+//! ```
 use std::{collections::HashMap, fmt::Debug, sync::{Arc, Mutex}};
 
 use pillar_crypto::{merkle_trie::MerkleTrie, types::StdByteArray};
 
 use crate::{accounting::account::Account, primitives::block::{Block, BlockHeader}, protocol::{difficulty::get_reward_from_depth_and_stampers, pow::{get_difficulty_for_block, POR_INCLUSION_MINIMUM, POR_MINER_SHARE_DIVISOR}, reputation::get_current_reputations_for_stampers_from_state}, reputation::history::NodeHistory};
 
+/// Mapping from address to recorded node history (used for reputation).
 pub type ReputationMap = HashMap<StdByteArray, NodeHistory>;
 
+/// Coordinates state updates and provides read access to accounts.
 #[derive(Clone, Default)]
 pub struct StateManager{
     // The mapping from address to account
@@ -21,6 +37,7 @@ impl Debug for StateManager {
     }
 }
 
+/// Integer division rounding toward +infinity for positive integers.
 fn div_up(x: u64, y: u64) -> u64 {
     if y == 0 {
         panic!("Division by zero");
@@ -29,7 +46,7 @@ fn div_up(x: u64, y: u64) -> u64 {
 }
 
 impl StateManager{
-    // Creates a new account manager
+    /// Create a new state manager with an empty trie and no reputations.
     pub fn new() -> Self {
         StateManager {
             state_trie: Arc::new(Mutex::new(MerkleTrie::new())),
@@ -37,29 +54,34 @@ impl StateManager{
         }
     }
 
+    /// Get an account by address at a specific `state_root` (if present).
     pub fn get_account(&self, address: &StdByteArray, state_root: StdByteArray) -> Option<Account> {
         let state_trie = self.state_trie.lock().expect("Failed to lock state trie");
         state_trie.get(address, state_root)
     }
 
+    /// Get an account or a default zero-balance account for the given address.
     pub fn get_account_or_default(&self, address: &StdByteArray, state_root: StdByteArray) -> Account {
         let state_trie = self.state_trie.lock().expect("Failed to lock state trie");
         state_trie.get(address, state_root).unwrap_or(Account::new(*address, 0))
     }
 
+    /// Return all accounts reachable from `root`.
     pub fn get_all_accounts(&self, root: StdByteArray) -> Vec<Account>{
         self.state_trie.lock().unwrap().get_all(root)
     }
 
+    /// Remove a branched root and decrement reference counts, pruning unique nodes.
     pub fn remove_branch(&mut self, root: StdByteArray){
         let mut state_trie = self.state_trie.lock().expect("Failed to lock state trie");
         state_trie.trim_branch(root).expect("Failed to remove branch from state trie");
     }
 
-    /// Updates the accounts from the block
-    /// This is called when a new block is added to the chain
-    /// This does NOT verify the block - VERIFY THE BLOCK FIRST
-    /// This is called when a new block is added to the chain
+    /// Apply a complete block to produce a new state root branch.
+    ///
+    /// Notes:
+    /// - The block must be validated before calling this.
+    /// - The previous header must be complete to provide a `state_root`.
     pub fn branch_from_block(
         &mut self,
         block: &Block,
@@ -69,6 +91,8 @@ impl StateManager{
         self.branch_from_block_internal(block, prev_header, &miner_address)
     }
 
+    /// Internal variant of `branch_from_block` where the recipient of the full
+    /// mining reward can be specified (used by PoR splitting logic).
     pub fn branch_from_block_internal(
         &mut self, 
         block: &Block, 

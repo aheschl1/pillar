@@ -1,3 +1,4 @@
+//! Core account structures stored in the chain state.
 
 use bytemuck::{Pod, Zeroable};
 use pillar_crypto::types::StdByteArray;
@@ -5,6 +6,7 @@ use pillar_crypto::types::StdByteArray;
 use crate::reputation::history::NodeHistory;
 
 
+/// Minimal reference to a transaction within a specific block.
 #[derive(Debug, Clone, PartialEq, Eq, Pod, Copy, Zeroable)]
 #[repr(C)]
 pub struct TransactionStub{
@@ -14,6 +16,16 @@ pub struct TransactionStub{
     pub transaction_hash: StdByteArray,
 }
 
+/// An account identified by its address (public key), with balance and nonce.
+///
+/// Example
+///
+/// ```
+/// use pillar_core::accounting::account::Account;
+/// let addr = [0u8; 32];
+/// let a = Account::new(addr, 100);
+/// assert_eq!(a.balance, 100);
+/// ```
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct Account{
     // The address of the account is the public key
@@ -27,7 +39,7 @@ pub struct Account{
 }
 
 impl Account{
-    // Creates a new account with the given address and balance
+    /// Creates a new account with the given address and initial balance.
     pub fn new(address: StdByteArray, balance: u64) -> Self {
         // for now, this placeholder will work; however, in the long run we need a coinbase account for initial distribution
         // TODO deal with coinbase

@@ -14,6 +14,7 @@ use crate::{
     reputation::{nth_percentile_peer, N_TRANSMISSION_SIGNATURES}},
 };
  
+/// Operational state of a node, which controls how it treats incoming data.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum NodeState{
     ICD,
@@ -24,8 +25,8 @@ pub enum NodeState{
 }
 
 impl NodeState {
-    /// If a state is_track, then the node should track incoming blocks and transactions
-    /// These values should be added to chain at the soonest available moment, but not immediately
+    /// If a state is_track, then the node tracks incoming blocks/transactions.
+    /// They are queued and applied when the chain is ready, not immediately.
     pub fn is_track(&self) -> bool {
         // return true;
         matches!(self, 
@@ -36,7 +37,7 @@ impl NodeState {
         )
     }
 
-    /// If a state is_forward, then the node should forward incoming blocks and transactions
+    /// If a state is_forward, then the node forwards incoming blocks/transactions.
     pub fn is_forward(&self) -> bool {
         // return true;
         matches!(self,
@@ -48,8 +49,8 @@ impl NodeState {
         )
     }
 
-    /// If a state is_consume, then the node should consume incoming blocks and transactions
-    /// This means that state should be updated immediately. This includes consuming a tracking queue
+    /// If a state is_consume, the node consumes data immediately and updates state.
+    /// This includes draining any pending tracking queue.
     pub fn is_consume(&self) -> bool {
         // return true;
         matches!(self, 
@@ -78,6 +79,7 @@ fn get_initial_state(datastore: &dyn Datastore) -> (NodeState, Option<Chain>) {
     }
 }
 
+/// Shared inner state of a node (behind `Arc`).
 pub struct NodeInner {
     pub public_key: StdByteArray,
     /// The private key of the node
@@ -102,6 +104,7 @@ pub struct NodeInner {
     pub filter_callbacks: Mutex<HashMap<TransactionFilter, Sender<BlockHeader>>>,
 }
 
+/// A Pillar network node capable of participating in consensus and gossip.
 #[derive(Clone)]
 pub struct Node {
     pub inner: Arc<NodeInner>,
@@ -177,7 +180,7 @@ impl Node {
         }
     }
     
-    /// when called, launches a new thread that listens for incoming connections
+    /// Launch peer serving, broadcast, and block-settle tasks; start ICD/sync if needed.
     #[instrument(skip_all, name = "Node::serve", fields(
         public_key = ?self.inner.public_key,
         ip_address = ?self.ip_address,
@@ -251,8 +254,8 @@ impl Node {
         tracing::info!("Node stopping.");
     }
 
-    /// Register a transaction filter callback - adds the callback channel and adds it to the transaction filter queue
-    /// Sends a broadcast to request peers to also watch for the block - if a peer catches it, it will be sent back
+    /// Register a transaction filter callback, enqueue filter, and broadcast the request.
+    /// If a peer observes a matching block, the header will be sent on the returned channel.
     #[instrument(name = "Node::register_transaction_callback", skip(self, filter), fields(
         public_key = ?self.inner.public_key,
         filter = ?filter
@@ -271,7 +274,7 @@ impl Node {
         receiver
     }
 
-    /// Derive the response to a request from a peer
+    /// Derive the response to a request from a peer.
     #[instrument(name = "Node::serve_request", skip(self, message, _declared_peer), fields(
         public_key = ?self.inner.public_key,
         peer = ?_declared_peer.public_key,
@@ -425,8 +428,8 @@ impl Node {
         }
     }
 
-    /// After receiving a block - settle it to the chain
-    /// Includes the tracking of reputation, braodcasting, and responding to callbacks
+    /// After receiving an unmined block, stamp/broadcast/maybe enqueue for mining.
+    /// Includes reputation tracking, broadcasting, and callback responses.
     #[instrument(name = "Node::settle_unmined_block", skip(self, block))]
     async fn settle_unmined_block(&self, block: &mut Block) -> Result<(), std::io::Error> {
         tracing::info!("Block is not mined, stamping and transmitting.");
@@ -455,7 +458,7 @@ impl Node {
         Ok(())
     }
 
-    /// spawn a new thread to match transaction callback requests against the bock
+    /// Spawn a task to match registered transaction filters against this block.
     #[instrument(name = "Node::handle_callbacks", skip(self, block))]
     async fn handle_callbacks(&self, block: &Block){
         let block_clone = block.clone();
@@ -495,7 +498,7 @@ impl Node {
         block.header.tail.stamp(stamp)
     }
 
-    /// ed25519 signature for the node over the hash of some data
+    /// ed25519 signature for the node over the canonical bytes of `sign`.
     fn signature_for<T: Signable<64>>(&self, sign: &T) -> Result<[u8; 64], std::io::Error> {
         // sign the data with the private key
         let mut signer = DefaultSigner::new(self.inner.private_key);
@@ -504,6 +507,7 @@ impl Node {
         Ok(signature)
     }
 
+    /// Insert a peer into the set if it's not ourselves and not already present.
     pub async fn maybe_update_peer(&self, peer: Peer) -> Result<(), std::io::Error> {
         // check if the peer is already in the list
         let mut peers = self.inner.peers.write().await;
@@ -514,6 +518,7 @@ impl Node {
         Ok(())
     }
 
+    /// Convenience to insert multiple peers via `maybe_update_peer`.
     pub async fn maybe_update_peers(&self, peers: Vec<Peer>){
         for peer in peers {
             self.maybe_update_peer(peer).await.unwrap();
@@ -535,9 +540,20 @@ impl From<Node> for Peer {
 }
 
 pub trait Broadcaster {
-    /// Broadcast a message to all peers
+    /// Broadcast a message to all peers.
     async fn broadcast(&self, message: &Message) -> Result<Vec<Message>, std::io::Error>;
 }
+
+/// Example: broadcasting a ping (no_run)
+///
+/// ```no_run
+/// use pillar_core::primitives::messages::Message;
+/// use pillar_core::nodes::node::{Node, Broadcaster};
+/// # async fn f(node: Node) -> Result<(), std::io::Error> {
+/// let responses = node.broadcast(&Message::PeerRequest).await?;
+/// println!("got {} responses", responses.len());
+/// # Ok(()) }
+/// ```
 
 impl Broadcaster for Node {
     #[instrument(name = "Node::broadcast", skip(self, message), fields(

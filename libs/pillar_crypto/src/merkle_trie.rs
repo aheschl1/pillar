@@ -1,3 +1,36 @@
+//! Compact Merkle trie used for on-chain state.
+//!
+//! The trie is keyed by the SHA3-256 hash of the provided key type `K`, split
+//! into nibbles (0-15). Values are serialized using `PillarSerialize`. The
+//! structure supports multiple roots for branching state (e.g., competing
+//! chain tips) while sharing unchanged subtrees.
+//!
+//! Example: create genesis, insert, read, branch
+//!
+//! ```rust
+//! use pillar_crypto::hashing::DefaultHash;
+//! use pillar_crypto::merkle_trie::MerkleTrie;
+//! use pillar_serialize::PillarSerialize;
+//!
+//! #[derive(Clone, PartialEq, Debug)]
+//! struct Val(u64);
+//! impl PillarSerialize for Val {
+//!     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> { Ok(self.0.to_le_bytes().to_vec()) }
+//!     fn deserialize_pillar(d: &[u8]) -> Result<Self, std::io::Error> {
+//!         let mut a = [0u8;8]; a.copy_from_slice(&d[0..8]); Ok(Val(u64::from_le_bytes(a)))
+//!     }
+//! }
+//!
+//! let mut trie = MerkleTrie::<&str, Val>::new();
+//! let root = trie.create_genesis("a", Val(1)).unwrap();
+//! trie.insert("b", Val(2), root).unwrap();
+//! assert_eq!(trie.get(&"b", root), Some(Val(2)));
+//! let new_root = trie.branch(Some(root), std::collections::HashMap::from([("b", Val(3))])).unwrap();
+//! assert_eq!(trie.get(&"b", new_root), Some(Val(3)));
+//! assert_eq!(trie.get(&"b", root), Some(Val(2)));
+//! let all = trie.get_all(root);
+//! assert_eq!(all.len(), 2);
+//! ```
 use std::{collections::{HashMap, HashSet, VecDeque}, fmt::Debug, marker::PhantomData};
 
 
@@ -18,6 +51,7 @@ new_key_type! { pub struct NodeKey; }
 /// 
 /// Generics K and V are not required for this to work; however it is good to avoid mismatches
 
+/// Internal trie node storing children and an optional serialized value.
 pub struct TrieNode<V: PillarSerialize> {
     _phantum: PhantomData<V>,
     references: u16, // track for deletions
@@ -162,7 +196,7 @@ impl<K: Hashable, V: PillarSerialize> MerkleTrie<K, V> {
         serialized.map(|data| PillarSerialize::deserialize_pillar(data).unwrap())
     }
 
-    /// Retreives all values stored in the trie starting from the given root.
+    /// Retrieves all values stored in the trie starting from the given root.
     /// 
     /// # Arguments
     /// * `root` - The hash of the root node to start traversal from.
@@ -272,6 +306,7 @@ impl<K: Hashable, V: PillarSerialize> MerkleTrie<K, V> {
         Ok(new_root_hash)
     }
 
+    /// Decrement references along a branch and remove nodes unique to the branch.
     pub fn trim_branch(&mut self, root: StdByteArray) -> Result<(), std::io::Error> {
         let root_key = self.roots.get(&root).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Root not found"))?;
         let mut visit_queue = VecDeque::new();

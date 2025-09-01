@@ -1,3 +1,27 @@
+//! Signature traits and default ed25519 implementation.
+//!
+//! The `Signable` trait defines how a type exposes its canonical bytes to be
+//! signed. `SigFunction` and `SigVerFunction` abstract signature operations
+//! over fixed key/signature sizes. `DefaultSigner` and `DefaultVerifier`
+//! provide concrete ed25519 implementations.
+//!
+//! Example: sign and verify
+//!
+//! ```rust
+//! use pillar_crypto::signing::{DefaultSigner, SigFunction, SigVerFunction, Signable};
+//!
+//! struct Msg(&'static [u8]);
+//! impl<const S: usize> Signable<S> for Msg {
+//!     fn get_signing_bytes(&self) -> impl AsRef<[u8]> { self.0 }
+//!     fn sign<const K: usize, const P: usize>(&mut self, f: &mut impl SigFunction<K,P,S>) -> [u8; S] { f.sign(self) }
+//! }
+//!
+//! let mut signer = DefaultSigner::generate_random();
+//! let verifier = signer.get_verifying_function();
+//! let mut msg = Msg(b"hello");
+//! let sig = signer.sign(&msg);
+//! assert!(verifier.verify(&sig, &msg));
+//! ```
 use ed25519::signature::SignerMut;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use rand_core::OsRng;
@@ -33,7 +57,7 @@ pub trait SigFunction<const K: usize, const P: usize, const S: usize>{
     /// * `Err(std::io::Error)` if signing fails.
     fn sign(&mut self, data: &impl Signable<S>) -> [u8; S];
     
-    /// Retreive the byte representation of the signing function
+    /// Retrieve the byte representation of the signing function.
     /// This often will be a private key
     /// 
     /// # Returns
@@ -41,13 +65,14 @@ pub trait SigFunction<const K: usize, const P: usize, const S: usize>{
     /// [u8; _] containing the byte representation of the signing function
     fn to_bytes(&self) -> [u8; K];
 
-    /// Get the function that will verify the signature
+    /// Get the function that will verify the signature.
     ///
     /// # Returns
     /// 
     /// * An object that implements the `SigVerFunction` trait.
     fn get_verifying_function(&self) -> impl SigVerFunction<P, S>;
 
+    /// Generate a new random signing function (keypair). Implementation-defined.
     fn generate_random() -> Self;
 }
 
@@ -69,22 +94,25 @@ pub trait SigVerFunction<const K: usize, const S: usize>{
     /// * `true` if the signature is valid, `false` otherwise.
     fn verify(&self, signature: &[u8; S], target: &impl Signable<S>) -> bool;
 
+    /// Get the public key bytes associated with this verifying function.
     fn to_bytes(&self) -> [u8; K];
 
+    /// Construct a verifying function from public key bytes.
     fn from_bytes(bytes: &[u8; K]) -> Self;
 }
 
-/// Default signer is the ed25519 signing function
+/// Default ed25519 signing function.
 pub struct DefaultSigner{
     private_key: SigningKey
 }
 
-/// Default verifier is the ed25519 verifying function
+/// Default ed25519 verifying function.
 pub struct DefaultVerifier{
     public_key: VerifyingKey
 }
 
 impl DefaultVerifier{
+    /// Create a new verifier from public key bytes.
     pub fn new(public_key: StdByteArray) -> Self{
         DefaultVerifier{
             public_key: VerifyingKey::from_bytes(&public_key).expect("Invlaid public key")
@@ -93,6 +121,7 @@ impl DefaultVerifier{
 }
 
 impl DefaultSigner{
+    /// Create a new signer from private key bytes.
     pub fn new(private_key: StdByteArray) -> Self{
         DefaultSigner{
             private_key: SigningKey::from_bytes(&private_key)

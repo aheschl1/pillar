@@ -1,3 +1,30 @@
+//! Binary Merkle tree nodes, construction, and basic equality via root hash.
+//!
+//! The tree stores nodes in a `slotmap` and supports building a balanced
+//! binary Merkle tree from hashable leaves. Two trees are equal if their
+//! root hashes are equal.
+//!
+//! Example: build a tree from custom items
+//!
+//! ```rust
+//! use pillar_crypto::hashing::{Hashable, HashFunction, DefaultHash};
+//! use pillar_crypto::merkle::generate_tree;
+//! use pillar_crypto::types::StdByteArray;
+//!
+//! struct Item(u64);
+//! impl Hashable for Item {
+//!     fn hash(&self, hasher: &mut impl HashFunction) -> Result<StdByteArray, std::io::Error> {
+//!         hasher.update(self.0.to_le_bytes());
+//!         hasher.digest()
+//!     }
+//! }
+//!
+//! let items = vec![Item(1), Item(2), Item(3)];
+//! let refs: Vec<&dyn Hashable> = items.iter().map(|i| i as &dyn Hashable).collect();
+//! let mut h = DefaultHash::new();
+//! let tree = generate_tree(refs, &mut h).unwrap();
+//! assert!(tree.get_root_hash().is_some());
+//! ```
 use std::hash::Hash;
 use slotmap::{SlotMap, new_key_type};
 
@@ -11,14 +38,20 @@ new_key_type! {
 }
 
 
+/// A Merkle tree node storing child pointers and the node hash.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct TreeNode {
+    /// Left child node key (if any).
     pub left: Option<NodeKey>,
+    /// Right child node key (if any).
     pub right: Option<NodeKey>,
+    /// Parent node key (if any).
     pub parent: Option<NodeKey>,
+    /// Hash of this node (children concatenation or leaf hash depending on level).
     pub hash: StdByteArray,
 }
 
+/// A Merkle tree with an optional root and the set of leaf keys.
 #[derive(Debug, Clone)]
 pub struct MerkleTree {
     pub nodes: SlotMap<NodeKey, TreeNode>,
@@ -55,6 +88,7 @@ impl Default for MerkleTree {
 }
 
 impl MerkleTree {
+    /// Create an empty tree.
     pub fn new() -> Self {
         MerkleTree {
             nodes: SlotMap::with_key(),
@@ -63,6 +97,7 @@ impl MerkleTree {
         }
     }
 
+    /// Return the root hash if present.
     pub fn get_root_hash(&self) -> Option<StdByteArray>{
         match self.root{
             None => None,
@@ -74,7 +109,7 @@ impl MerkleTree {
     }
 }
 
-/// Generate a Merkle tree from the given data
+/// Generate a Merkle tree from the given data.
 pub fn generate_tree(data: Vec<&impl Hashable>, hash_function: &mut impl HashFunction) -> Result<MerkleTree, std::io::Error> {
     if data.is_empty() {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Data is empty"));

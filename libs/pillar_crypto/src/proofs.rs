@@ -1,3 +1,57 @@
+//! Merkle and Merkle trie proof generation and verification.
+//!
+//! This module offers compact proofs of inclusion for both the binary Merkle
+//! tree (`MerkleProof`) and the state `MerkleTrie` (`TrieMerkleProof`).
+//!
+//! Example: Merkle proof generation and verification
+//!
+//! ```rust
+//! use pillar_crypto::hashing::{DefaultHash, HashFunction, Hashable};
+//! use pillar_crypto::merkle::generate_tree;
+//! use pillar_crypto::proofs::{generate_proof_of_inclusion, verify_proof_of_inclusion};
+//! use pillar_crypto::types::StdByteArray;
+//!
+//! struct Leaf(&'static str);
+//! impl Hashable for Leaf {
+//!     fn hash(&self, h: &mut impl HashFunction) -> Result<StdByteArray, std::io::Error> {
+//!         h.update(self.0.as_bytes());
+//!         h.digest()
+//!     }
+//! }
+//!
+//! let leaves = vec![Leaf("a"), Leaf("b"), Leaf("c")];
+//! let refs: Vec<&dyn Hashable> = leaves.iter().map(|l| l as &dyn Hashable).collect();
+//! let mut hasher = DefaultHash::new();
+//! let tree = generate_tree(refs, &mut hasher).unwrap();
+//!
+//! // Proof for "b"
+//! let mut h2 = DefaultHash::new();
+//! let b_hash = Leaf("b").hash(&mut h2).unwrap();
+//! let proof = generate_proof_of_inclusion(&tree, b_hash, &mut DefaultHash::new()).unwrap();
+//! let ok = verify_proof_of_inclusion(b_hash, &proof, tree.get_root_hash().unwrap(), &mut DefaultHash::new());
+//! assert!(ok);
+//! ```
+//!
+//! Example: Trie proof verification (no_run)
+//!
+//! ```no_run
+//! use pillar_crypto::hashing::DefaultHash;
+//! use pillar_crypto::merkle_trie::MerkleTrie;
+//! use pillar_crypto::proofs::generate_proof_of_state;
+//! use pillar_serialize::PillarSerialize;
+//!
+//! #[derive(Clone)]
+//! struct State(u64);
+//! impl PillarSerialize for State {
+//!     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> { Ok(self.0.to_le_bytes().to_vec()) }
+//!     fn deserialize_pillar(_: &[u8]) -> Result<Self, std::io::Error> { unimplemented!() }
+//! }
+//! let mut trie = MerkleTrie::<&str, State>::new();
+//! let root = trie.create_genesis("k0", State(1)).unwrap();
+//! let (proof, _v) = generate_proof_of_state(&trie, "k0", Some(root), &mut DefaultHash::new()).unwrap();
+//! let ok = proof.verify(State(1).serialize_pillar().unwrap(), trie.get_hash_for(*trie.roots.get(&root).unwrap(), &mut DefaultHash::new()).unwrap(), &mut DefaultHash::new());
+//! assert!(ok);
+//! ```
 use std::hash::Hash;
 
 
@@ -7,6 +61,7 @@ use crate::{hashing::{HashFunction, Hashable}, merkle::MerkleTree, merkle_trie::
 
 
 
+/// Direction of a sibling hash used when reconstructing a Merkle branch.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum HashDirection {
     Left,
@@ -35,6 +90,7 @@ impl PillarSerialize for HashDirection {
 impl PillarFixedSize for HashDirection {}
 
 
+/// A binary Merkle proof for a single leaf.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct MerkleProof {
     pub hashes: Vec<StdByteArray>,
@@ -67,7 +123,7 @@ impl PillarSerialize for MerkleProof {
     }
 }
 
-/// Generate a Merkle proof for a specific transaction
+/// Generate a Merkle proof of inclusion for a specific leaf value.
 pub fn generate_proof_of_inclusion(merkle_tree: &MerkleTree, data: StdByteArray, hash_function: &mut impl HashFunction) -> Option<MerkleProof> {
     let leaves = merkle_tree.leaves.as_ref()?;
     let nodes = &merkle_tree.nodes;
@@ -106,7 +162,7 @@ pub fn generate_proof_of_inclusion(merkle_tree: &MerkleTree, data: StdByteArray,
 }
 
 
-/// Verify a Merkle proof
+/// Verify a binary Merkle proof against a root hash.
 pub fn verify_proof_of_inclusion<T: Into<StdByteArray>>(data: T, proof: &MerkleProof, root: StdByteArray, hash_function: &mut impl HashFunction) -> bool {
     hash_function.update(data.into());
     let mut current_hash = hash_function.digest().expect("Hashing failed");
@@ -132,6 +188,8 @@ pub fn verify_proof_of_inclusion<T: Into<StdByteArray>>(data: T, proof: &MerkleP
 // Trie proofs to follow
 // TODO generalize
 
+/// A step in a trie proof, describing the position of the target within a level
+/// and the sibling indices and hashes required to reconstruct that level hash.
 #[derive(Debug,  Clone)]
 pub struct TrieMerkleProof {
     pub steps: Vec<ProofStep>,
@@ -144,13 +202,14 @@ impl TrieMerkleProof {
 }
 
 #[derive(Debug,  Clone)]
-pub(crate) struct ProofStep {
+pub struct ProofStep {
     // native is the index of the value on which they are constructing the proof
     pub native: u8,
     // Give the indices and hashes of the siblings in the trie
     // MUST BE SORTED BY THE INDEX
     pub siblings: Vec<(u8, StdByteArray)>,
-    // value
+    // Value at this node if present. The `u8` index is a special marker equal
+    // to the number of children (16) to disambiguate it from child indices.
     pub value: Option<(u8, Vec<u8>)>,
 }
 
@@ -207,6 +266,7 @@ impl ProofStep {
 }
 
 impl TrieMerkleProof {
+    /// Verify the proof for the provided native data bytes against a root hash.
     pub fn verify(&self, native_data: Vec<u8>, root_hash: StdByteArray, hash_function: &mut impl HashFunction) -> bool {
         let steps = self.steps.iter().rev().collect::<Vec<_>>();
         let mut current_hash = steps[0].compute_level_first(native_data, hash_function);
@@ -217,7 +277,7 @@ impl TrieMerkleProof {
     }
 }
 
-/// Generate a Merkle proof for a specific value in the Merkle Trie.
+/// Generate a Merkle trie proof for a specific value in the `MerkleTrie`.
 /// # Arguments
 /// * `target_key` - The key for which the proof is generated.
 pub fn generate_proof_of_state<K, V>(
