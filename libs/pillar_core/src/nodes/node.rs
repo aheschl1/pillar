@@ -544,17 +544,6 @@ pub trait Broadcaster {
     async fn broadcast(&self, message: &Message) -> Result<Vec<Message>, std::io::Error>;
 }
 
-/// Example: broadcasting a ping (no_run)
-///
-/// ```no_run
-/// use crate::primitives::messages::Message;
-/// use crate::nodes::node::{Node, Broadcaster};
-/// # async fn f(node: Node) -> Result<(), std::io::Error> {
-/// let responses = node.broadcast(&Message::PeerRequest).await?;
-/// println!("got {} responses", responses.len());
-/// # Ok(()) }
-/// ```
-
 impl Broadcaster for Node {
     #[instrument(name = "Node::broadcast", skip(self, message), fields(
         public_key = ?self.inner.public_key,
