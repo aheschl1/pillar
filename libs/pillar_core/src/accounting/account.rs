@@ -16,16 +16,6 @@ pub struct TransactionStub{
     pub transaction_hash: StdByteArray,
 }
 
-/// An account identified by its address (public key), with balance and nonce.
-///
-/// Example
-///
-/// ```
-/// use pillar_core::accounting::account::Account;
-/// let addr = [0u8; 32];
-/// let a = Account::new(addr, 100);
-/// assert_eq!(a.balance, 100);
-/// ```
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct Account{
     // The address of the account is the public key

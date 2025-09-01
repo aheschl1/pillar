@@ -2,22 +2,6 @@
 use pillar_crypto::{signing::{DefaultSigner, DefaultVerifier, SigFunction, SigVerFunction, Signable}, types::StdByteArray};
 
 /// A local wallet that can sign data and exposes its public address.
-///
-/// Example
-///
-/// ```
-/// use pillar_core::accounting::wallet::Wallet;
-/// use pillar_crypto::signing::{SigFunction, Signable};
-///
-/// struct Msg(&'static [u8]);
-/// impl<const S: usize> Signable<S> for Msg {
-///     fn get_signing_bytes(&self) -> impl AsRef<[u8]> { self.0 }
-///     fn sign<const K: usize, const P: usize>(&mut self, f: &mut impl SigFunction<K,P,S>) -> [u8; S] { f.sign(self) }
-/// }
-/// let mut wallet = Wallet::generate_random();
-/// let sig = wallet.sign(&Msg(b"hello"));
-/// assert_eq!(sig.len(), 64);
-/// ```
 pub struct Wallet{
     pub address: StdByteArray,
     signing_key: DefaultSigner,

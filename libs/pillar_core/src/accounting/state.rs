@@ -1,17 +1,4 @@
 //! State management built on a Merkle trie with optional reputation tracking.
-//!
-//! Example (no_run): branching from a block
-//!
-//! ```no_run
-//! use pillar_core::accounting::state::StateManager;
-//! use pillar_core::primitives::block::{Block, BlockHeader};
-//! let mut sm = StateManager::new();
-//! # let prev = BlockHeader{ version: 0, depth: 0, tail: Default::default(), completion: Some(Default::default()), _flag: 0, timestamp: 0 }; // placeholder
-//! # let blk = Block { header: prev, transactions: vec![] };
-//! # let prev_header = blk.header;
-//! // This would return a new state root after applying `blk`.
-//! // sm.branch_from_block(&blk, &prev_header);
-//! ```
 use std::{collections::HashMap, fmt::Debug, sync::{Arc, Mutex}};
 
 use pillar_crypto::{merkle_trie::MerkleTrie, types::StdByteArray};

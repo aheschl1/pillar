@@ -82,5 +82,4 @@ Featured modules with examples:
 
 ## Serialization and platform notes
 
-Serialization is optimized for 64-bit targets and is endian-agnostic. Big-endian machines may serialize less efficiently due to byte swaps for some fixed-size primitives.
-
+Serialization works only for 64-bit targets but is endian-agnostic. Big-endian machines may serialize less efficiently due to byte swaps for some fixed-size primitives.

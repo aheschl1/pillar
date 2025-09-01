@@ -547,8 +547,8 @@ pub trait Broadcaster {
 /// Example: broadcasting a ping (no_run)
 ///
 /// ```no_run
-/// use pillar_core::primitives::messages::Message;
-/// use pillar_core::nodes::node::{Node, Broadcaster};
+/// use crate::primitives::messages::Message;
+/// use crate::nodes::node::{Node, Broadcaster};
 /// # async fn f(node: Node) -> Result<(), std::io::Error> {
 /// let responses = node.broadcast(&Message::PeerRequest).await?;
 /// println!("got {} responses", responses.len());
