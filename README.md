@@ -1,6 +1,4 @@
-# Pillar
-
-![Pillar Logo](./figures/logo.svg)
+# <img src="./figures/logo.svg" alt="Pillar Logo" width="50" style="vertical-align: middle; margin-right: 8px;" /> Pillar <!-- markdownlint-disable-line MD033 -->
 
 Zero-trust decentralized ledger with a Proof of Reputation (PoR) trust layer. It combines a conventional transaction layer with a reputation-driven incentive layer to reduce wasted computation, and provide a trust metric.
 
