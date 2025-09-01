@@ -1,0 +1,8 @@
+ignore: 
+    - "*.png"
+    - "*.svg"
+    - "*.toml"
+    - "*/lib.rs"
+    - "*/mod.rs"
+    - "*.yml"
+    - "*.lock"
