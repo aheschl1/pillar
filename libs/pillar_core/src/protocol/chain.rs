@@ -289,7 +289,7 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
             tracing::debug!("Block poped from settle queue");
             let mut chain_lock = node.inner.chain.lock().await;
             let mut chain = chain_lock.as_mut().unwrap();
-            if chain.get_block((&block.header.completion.as_ref().expect("Expected complete block").hash)).is_some(){
+            if chain.get_block(&block.header.completion.as_ref().expect("Expected complete block").hash).is_some(){
                 warn!("Block already exists in chain, skipping settlement: {:?}", block.header.completion.as_ref().unwrap().hash);
                 continue; // block already exists, skip
             }

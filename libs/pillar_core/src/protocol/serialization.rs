@@ -121,8 +121,9 @@ impl PillarSerialize for crate::primitives::messages::Message {
             19 => Message::ChainSyncRequest(Vec::<StdByteArray>::deserialize_pillar(&data[n..])?),
             20 => Message::ChainSyncResponse(Vec::<Chain>::deserialize_pillar(&data[n..])?),
             21 => {
-                let lower = f32::from_le_bytes(data[n..n+4].try_into().unwrap());
-                let upper = f32::from_le_bytes(data[n+4..n+8].try_into().unwrap());
+                let _lower_len = u32::from_le_bytes(data[n..n+4].try_into().unwrap()) as usize; // expected 4
+                let lower = f32::from_le_bytes(data[n+4..n+8].try_into().unwrap());
+                let upper = f32::from_le_bytes(data[n+8..n+12].try_into().unwrap());
                 Message::PercentileFilteredPeerRequest(lower, upper)
             },
             22 => Message::PercentileFilteredPeerResponse(Vec::<Peer>::deserialize_pillar(&data[n..])?),
@@ -341,13 +342,19 @@ mod tests {
     use pillar_crypto::hashing::{DefaultHash, Hashable};
     use pillar_serialize::PillarSerialize;
 
-    use crate::{primitives::{block::{Block, BlockHeader, Stamp}, transaction::Transaction}, protocol::{reputation::N_TRANSMISSION_SIGNATURES, versions::Versions}};
-
-    
-
-    
-
-    
+    use crate::{
+        primitives::{
+            block::{Block, BlockHeader, Stamp},
+            messages::Message,
+            transaction::{Transaction, TransactionFilter},
+        },
+        protocol::{reputation::N_TRANSMISSION_SIGNATURES, versions::Versions},
+        blockchain::{chain::Chain, chain_shard::ChainShard},
+        nodes::peer::Peer,
+        accounting::account::TransactionStub,
+    };
+    use pillar_crypto::{types::StdByteArray, proofs::{MerkleProof, HashDirection}};
+    use std::net::{IpAddr, Ipv4Addr};
 
     #[test]
     fn test_block_alignment() {
@@ -638,4 +645,133 @@ mod tests {
         assert_eq!(block, deserialized);
 
     }
+
+    // =============================
+    // Message serialization tests
+    // =============================
+
+    fn assert_roundtrip(msg: &Message) {
+        let bytes = msg.serialize_pillar().expect("serialize");
+        let rt = Message::deserialize_pillar(&bytes).expect("deserialize");
+        let bytes2 = rt.serialize_pillar().expect("serialize 2");
+        assert_eq!(bytes, bytes2, "Round-trip bytes must match for {}", msg.name());
+    }
+
+    fn make_peer(pk: u8, port: u16) -> Peer {
+        Peer::new([pk; 32], IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port)
+    }
+
+    fn make_tx() -> Transaction {
+        Transaction::new([1; 32], [2; 32], 3, 4, 5, &mut DefaultHash::new())
+    }
+
+    fn make_block() -> Block {
+        let transaction = make_tx();
+        Block::new(
+            [9; 32],
+            0,
+            42,
+            vec![transaction],
+            None,
+            [Stamp::default(); N_TRANSMISSION_SIGNATURES],
+            1,
+            None,
+            None,
+            &mut DefaultHash::new(),
+        )
+    }
+
+    fn make_chain() -> Chain {
+        Chain::new_with_genesis()
+    }
+
+    fn make_chain_shard() -> ChainShard {
+        let c = make_chain();
+        c.into()
+    }
+
+    fn make_tx_stub() -> TransactionStub { TransactionStub { block_hash: [7; 32], transaction_hash: [8; 32] } }
+
+    fn make_merkle_proof() -> MerkleProof {
+        MerkleProof { hashes: vec![[1; 32], [2; 32]], directions: vec![HashDirection::Left, HashDirection::Right], root: [3; 32] }
+    }
+
+    fn make_filter() -> TransactionFilter { TransactionFilter::new(Some([1; 32]), Some([2; 32]), Some(3)) }
+
+    #[test]
+    fn test_message_ping() { assert_roundtrip(&Message::Ping); }
+
+    #[test]
+    fn test_message_chain_request() { assert_roundtrip(&Message::ChainRequest); }
+
+    #[test]
+    fn test_message_chain_response() { assert_roundtrip(&Message::ChainResponse(make_chain())); }
+
+    #[test]
+    fn test_message_peer_request() { assert_roundtrip(&Message::PeerRequest); }
+
+    #[test]
+    fn test_message_peer_response() { assert_roundtrip(&Message::PeerResponse(vec![make_peer(5, 18080), make_peer(6, 18081)])); }
+
+    #[test]
+    fn test_message_declaration() { assert_roundtrip(&Message::Declaration(make_peer(7, 18082))); }
+
+    #[test]
+    fn test_message_transaction_broadcast() { assert_roundtrip(&Message::TransactionBroadcast(make_tx())); }
+
+    #[test]
+    fn test_message_transaction_ack() { assert_roundtrip(&Message::TransactionAck); }
+
+    #[test]
+    fn test_message_block_transmission() { assert_roundtrip(&Message::BlockTransmission(make_block())); }
+
+    #[test]
+    fn test_message_block_ack() { assert_roundtrip(&Message::BlockAck); }
+
+    #[test]
+    fn test_message_block_request() { assert_roundtrip(&Message::BlockRequest([9; 32])); }
+
+    #[test]
+    fn test_message_block_response_some() { assert_roundtrip(&Message::BlockResponse(Some(make_block()))); }
+
+    #[test]
+    fn test_message_block_response_none() { assert_roundtrip(&Message::BlockResponse(None)); }
+
+    #[test]
+    fn test_message_chain_shard_request() { assert_roundtrip(&Message::ChainShardRequest); }
+
+    #[test]
+    fn test_message_chain_shard_response() { assert_roundtrip(&Message::ChainShardResponse(make_chain_shard())); }
+
+    #[test]
+    fn test_message_tx_proof_request() { assert_roundtrip(&Message::TransactionProofRequest(make_tx_stub())); }
+
+    #[test]
+    fn test_message_tx_proof_response() { assert_roundtrip(&Message::TransactionProofResponse(make_merkle_proof())); }
+
+    #[test]
+    fn test_message_tx_filter_request() { assert_roundtrip(&Message::TransactionFilterRequest(make_filter(), make_peer(11, 18083))); }
+
+    #[test]
+    fn test_message_tx_filter_ack() { assert_roundtrip(&Message::TransactionFilterAck); }
+
+    #[test]
+    fn test_message_tx_filter_response() { assert_roundtrip(&Message::TransactionFilterResponse(make_filter(), BlockHeader::default())); }
+
+    #[test]
+    fn test_message_chain_sync_request() { assert_roundtrip(&Message::ChainSyncRequest(vec![[1; 32], [2; 32]])); }
+
+    #[test]
+    fn test_message_chain_sync_response() { assert_roundtrip(&Message::ChainSyncResponse(vec![make_chain(), make_chain()])); }
+
+    #[test]
+    fn test_message_percentile_filtered_peer_request() { assert_roundtrip(&Message::PercentileFilteredPeerRequest(0.1, 0.9)); }
+
+    #[test]
+    fn test_message_percentile_filtered_peer_response() { assert_roundtrip(&Message::PercentileFilteredPeerResponse(vec![make_peer(21, 19000)])); }
+
+    #[test]
+    fn test_message_error() { assert_roundtrip(&Message::Error("oops".to_string())); }
+
+    
 }
