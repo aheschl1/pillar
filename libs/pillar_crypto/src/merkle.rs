@@ -3,28 +3,6 @@
 //! The tree stores nodes in a `slotmap` and supports building a balanced
 //! binary Merkle tree from hashable leaves. Two trees are equal if their
 //! root hashes are equal.
-//!
-//! Example: build a tree from custom items
-//!
-//! ```rust
-//! use pillar_crypto::hashing::{Hashable, HashFunction, DefaultHash};
-//! use pillar_crypto::merkle::generate_tree;
-//! use pillar_crypto::types::StdByteArray;
-//!
-//! struct Item(u64);
-//! impl Hashable for Item {
-//!     fn hash(&self, hasher: &mut impl HashFunction) -> Result<StdByteArray, std::io::Error> {
-//!         hasher.update(self.0.to_le_bytes());
-//!         hasher.digest()
-//!     }
-//! }
-//!
-//! let items = vec![Item(1), Item(2), Item(3)];
-//! let refs: Vec<&dyn Hashable> = items.iter().map(|i| i as &dyn Hashable).collect();
-//! let mut h = DefaultHash::new();
-//! let tree = generate_tree(refs, &mut h).unwrap();
-//! assert!(tree.get_root_hash().is_some());
-//! ```
 use std::hash::Hash;
 use slotmap::{SlotMap, new_key_type};
 

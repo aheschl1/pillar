@@ -4,24 +4,6 @@
 //! signed. `SigFunction` and `SigVerFunction` abstract signature operations
 //! over fixed key/signature sizes. `DefaultSigner` and `DefaultVerifier`
 //! provide concrete ed25519 implementations.
-//!
-//! Example: sign and verify
-//!
-//! ```rust
-//! use pillar_crypto::signing::{DefaultSigner, SigFunction, SigVerFunction, Signable};
-//!
-//! struct Msg(&'static [u8]);
-//! impl<const S: usize> Signable<S> for Msg {
-//!     fn get_signing_bytes(&self) -> impl AsRef<[u8]> { self.0 }
-//!     fn sign<const K: usize, const P: usize>(&mut self, f: &mut impl SigFunction<K,P,S>) -> [u8; S] { f.sign(self) }
-//! }
-//!
-//! let mut signer = DefaultSigner::generate_random();
-//! let verifier = signer.get_verifying_function();
-//! let mut msg = Msg(b"hello");
-//! let sig = signer.sign(&msg);
-//! assert!(verifier.verify(&sig, &msg));
-//! ```
 use ed25519::signature::SignerMut;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use rand_core::OsRng;

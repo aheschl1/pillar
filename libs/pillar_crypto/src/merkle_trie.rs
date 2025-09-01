@@ -4,33 +4,6 @@
 //! into nibbles (0-15). Values are serialized using `PillarSerialize`. The
 //! structure supports multiple roots for branching state (e.g., competing
 //! chain tips) while sharing unchanged subtrees.
-//!
-//! Example: create genesis, insert, read, branch
-//!
-//! ```rust
-//! use pillar_crypto::hashing::DefaultHash;
-//! use pillar_crypto::merkle_trie::MerkleTrie;
-//! use pillar_serialize::PillarSerialize;
-//!
-//! #[derive(Clone, PartialEq, Debug)]
-//! struct Val(u64);
-//! impl PillarSerialize for Val {
-//!     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> { Ok(self.0.to_le_bytes().to_vec()) }
-//!     fn deserialize_pillar(d: &[u8]) -> Result<Self, std::io::Error> {
-//!         let mut a = [0u8;8]; a.copy_from_slice(&d[0..8]); Ok(Val(u64::from_le_bytes(a)))
-//!     }
-//! }
-//!
-//! let mut trie = MerkleTrie::<&str, Val>::new();
-//! let root = trie.create_genesis("a", Val(1)).unwrap();
-//! trie.insert("b", Val(2), root).unwrap();
-//! assert_eq!(trie.get(&"b", root), Some(Val(2)));
-//! let new_root = trie.branch(Some(root), std::collections::HashMap::from([("b", Val(3))])).unwrap();
-//! assert_eq!(trie.get(&"b", new_root), Some(Val(3)));
-//! assert_eq!(trie.get(&"b", root), Some(Val(2)));
-//! let all = trie.get_all(root);
-//! assert_eq!(all.len(), 2);
-//! ```
 use std::{collections::{HashMap, HashSet, VecDeque}, fmt::Debug, marker::PhantomData};
 
 

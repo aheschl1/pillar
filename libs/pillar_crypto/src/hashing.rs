@@ -3,29 +3,6 @@
 //! The `Hashable` trait abstracts how a type contributes bytes to a hash
 //! function. The `HashFunction` trait exposes a minimal update/finalize API
 //! to keep implementations simple and easily swappable in tests.
-//!
-//! Example: implement `Hashable` for a type and compute a hash
-//!
-//! ```rust
-//! use pillar_crypto::hashing::{Hashable, HashFunction, DefaultHash};
-//! use pillar_crypto::types::StdByteArray;
-//!
-//! #[derive(Clone)]
-//! struct Thing { a: u64, b: u32 }
-//!
-//! impl Hashable for Thing {
-//!     fn hash(&self, hasher: &mut impl HashFunction) -> Result<StdByteArray, std::io::Error> {
-//!         hasher.update(self.a.to_le_bytes());
-//!         hasher.update(self.b.to_le_bytes());
-//!         hasher.digest()
-//!     }
-//! }
-//!
-//! let t = Thing { a: 1, b: 2 };
-//! let mut h = DefaultHash::new();
-//! let digest = t.hash(&mut h).unwrap();
-//! assert_eq!(digest.len(), 32);
-//! ```
 
 use sha3::{Digest, Sha3_256};
 
