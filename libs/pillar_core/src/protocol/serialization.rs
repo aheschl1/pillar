@@ -13,7 +13,10 @@ impl PillarFixedSize for Peer                        {}
 impl PillarFixedSize for TransactionStub             {}
 impl PillarFixedSize for HeaderShard                 {}
 
-
+/// Pack a serialized `Message` with a 4-byte little-endian length prefix.
+///
+/// Wire layout: `[len:u32][message-bytes...]`, where `message-bytes` begins with the
+/// 1-byte `Message` code followed by the variant payload (see `impl PillarSerialize for Message`).
 pub fn package_standard_message(message: &Message) -> Result<Vec<u8>, std::io::Error> {
     let mut buffer = vec![];
     let mbuff = message.serialize_pillar()?;
@@ -22,6 +25,10 @@ pub fn package_standard_message(message: &Message) -> Result<Vec<u8>, std::io::E
     Ok(buffer)
 }
 
+/// Read one length-prefixed `Message` from a TCP stream.
+///
+/// Expects the stream to provide a 4-byte little-endian length, then exactly that many
+/// bytes comprising a serialized `Message` (code + payload). Returns the decoded `Message`.
 pub async fn read_standard_message(stream: &mut TcpStream) -> Result<Message, std::io::Error>{    
     let length = stream.read_u32_le().await?;
     let mut buffer = vec![0u8; length as usize];
@@ -31,6 +38,21 @@ pub async fn read_standard_message(stream: &mut TcpStream) -> Result<Message, st
 }
 
 impl PillarSerialize for crate::primitives::messages::Message {
+    /// Serialize a `Message` as a 1-byte code followed by a variant-specific payload.
+    ///
+    /// Notes on payload layout and alignment:
+    /// - All multi-byte integers are little-endian. Types that implement `PillarNativeEndian`
+    ///   are converted to LE before raw byte emission.
+    /// - Fixed-size, POD-like structs (repr(C, align(8)) + Pod + Zeroable + PillarFixedSize)
+    ///   serialize as tight raw bytes after `to_le()`; no internal length prefix is included.
+    /// - Vectors are serialized in two ways:
+    ///   - For fixed-size items (as above): concatenated items with no length prefix. The count
+    ///     is inferred by dividing the slice length by `size_of::<T>()`.
+    ///   - Otherwise: a `u32` length followed by each element length-prefixed.
+    /// - Special cases:
+    ///   - `TransactionFilterRequest(filter, peer)` -> `[filter_len:u32][filter][peer]`.
+    ///   - `TransactionFilterResponse(filter, header)` -> `[filter_len:u32][filter][header]`.
+    ///   - `PercentileFilteredPeerRequest(lower, upper)` -> `[lower:f32][upper:f32]`.
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
         let payload_buffer = match self {
             Self::ChainResponse(c) => c.serialize_pillar(),
@@ -63,9 +85,7 @@ impl PillarSerialize for crate::primitives::messages::Message {
             Self::ChainSyncResponse(c) => c.serialize_pillar(),
             Self::PercentileFilteredPeerRequest(b, t) => {
                 let mut buff = vec![];
-                let bbuff = b.to_le_bytes();
-                buff.extend((bbuff.len() as u32).to_le_bytes());
-                buff.extend(bbuff);
+                buff.extend(b.to_le_bytes());
                 buff.extend(t.to_le_bytes());
                 Ok(buff)
             },
@@ -81,6 +101,14 @@ impl PillarSerialize for crate::primitives::messages::Message {
         Ok(buffer)
     }
 
+    /// Deserialize a `Message` from bytes beginning with a 1-byte code.
+    ///
+    /// Important framing details to remember:
+    /// - `Block`, `Vec<Transaction>`, `Vec<HeaderShard>`, etc. may use the fixed-size vector encoding
+    ///   (no internal length). In these cases, the deserializer consumes the remainder of the provided slice.
+    /// - For `TransactionFilterRequest/Response`, the embedded `TransactionFilter` is length-prefixed with a `u32`
+    ///   so we can unambiguously parse the subsequent field.
+    /// - For `PercentileFilteredPeerRequest`, we expect `[lower:f32][upper:f32]`.
     fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
         let n = 1;
         let code = match data.first() {
@@ -121,9 +149,8 @@ impl PillarSerialize for crate::primitives::messages::Message {
             19 => Message::ChainSyncRequest(Vec::<StdByteArray>::deserialize_pillar(&data[n..])?),
             20 => Message::ChainSyncResponse(Vec::<Chain>::deserialize_pillar(&data[n..])?),
             21 => {
-                let _lower_len = u32::from_le_bytes(data[n..n+4].try_into().unwrap()) as usize; // expected 4
-                let lower = f32::from_le_bytes(data[n+4..n+8].try_into().unwrap());
-                let upper = f32::from_le_bytes(data[n+8..n+12].try_into().unwrap());
+                let lower = f32::from_le_bytes(data[n..n+4].try_into().unwrap());
+                let upper = f32::from_le_bytes(data[n+4..n+8].try_into().unwrap());
                 Message::PercentileFilteredPeerRequest(lower, upper)
             },
             22 => Message::PercentileFilteredPeerResponse(Vec::<Peer>::deserialize_pillar(&data[n..])?),
@@ -136,7 +163,14 @@ impl PillarSerialize for crate::primitives::messages::Message {
 }
 
 impl PillarSerialize for Block{
-
+    /// Serialize a `Block` as `[header][transactions...]`.
+    ///
+    /// - `header` is a fixed-size `BlockHeader` (Pod) serialized as raw bytes after `to_le()`.
+    /// - `transactions` uses the fixed-size vector encoding of `Transaction` (no length field);
+    ///   the item count must be inferred by the consumer from the total payload length.
+    ///
+    /// Safety: asserts that the header byte length is a multiple of 8 to preserve alignment
+    /// expectations across platforms.
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
         let mut bytes = self.header.serialize_pillar()?;
         assert!(bytes.len().is_multiple_of(8)); // ensure alignment
@@ -144,6 +178,11 @@ impl PillarSerialize for Block{
         Ok(bytes)
     }
 
+    /// Deserialize a `Block` from `[header][transactions...]`, consuming the entire slice.
+    ///
+    /// Because transactions use the fixed-size vector encoding, we pass the remainder of the
+    /// slice to `Vec::<Transaction>::deserialize_pillar`, which computes the count by dividing
+    /// by `size_of::<Transaction>()`. Ensure the slice length is exact.
     fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
         let nheader_bytes = size_of::<BlockHeader>();
         let header = BlockHeader::deserialize_pillar(&data[..nheader_bytes])?;
@@ -156,6 +195,9 @@ impl PillarSerialize for Block{
 }
 
 impl PillarSerialize for Chain {
+    /// Serialize a `Chain` as length-delimited sections followed by fixed fields:
+    /// `[blocks_len:u32][blocks_bytes][headers_len:u32][headers_bytes][depth:u64]
+    ///  [deepest_hash:32][leaves_len:u32][leaves_bytes]`.
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
         let mut buffer = vec![];
         // key pair hashmap
@@ -172,6 +214,7 @@ impl PillarSerialize for Chain {
         Ok(buffer)
     }
 
+    /// Inverse of `serialize_pillar` for `Chain`.
     fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
         let mut offset = 0;
 
@@ -199,8 +242,8 @@ impl PillarSerialize for Chain {
         let leaves = Vec::<StdByteArray>::deserialize_pillar(&data[offset..])?;
 
         Ok(Chain {
-            blocks,
-            headers,
+        blocks,
+        headers,
             depth,
             deepest_hash,
             leaves: leaves.into_iter().collect(),
@@ -211,6 +254,9 @@ impl PillarSerialize for Chain {
 }
 
 impl PillarSerialize for ChainShard {
+    /// Serialize a `ChainShard` as `[headers_len:u32][headers_bytes][leaves_len:u32][leaves_bytes]`.
+    /// `headers_bytes` is a map of `StdByteArray -> BlockHeader` (fixed-size values), and
+    /// `leaves_bytes` is a length-prefixed vector of 32-byte hashes.
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
         let header_bytes = self.headers.serialize_pillar()?;
         let leaves_bytes = self.leaves.iter().copied().collect::<Vec<_>>().serialize_pillar()?;
@@ -222,6 +268,7 @@ impl PillarSerialize for ChainShard {
         Ok(buffer)
     }
 
+    /// Inverse of `serialize_pillar` for `ChainShard`.
     fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
         let mut offset = 0;
         let header_len = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
@@ -241,6 +288,9 @@ impl PillarSerialize for ChainShard {
 }
 
 impl PillarSerialize for TransactionFilter {
+    /// Serialize a transaction filter as the concatenation of its three `Option` fields:
+    /// `[sender_opt:33][receiver_opt:33][amount_opt:9]`.
+    /// See `Option<T>` encoding in `pillar_serialize` for details.
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
         let mut buffer = self.sender.serialize_pillar()?;
         buffer.extend(self.receiver.serialize_pillar()?);
@@ -248,6 +298,7 @@ impl PillarSerialize for TransactionFilter {
         Ok(buffer)
     }
 
+    /// Deserialize a transaction filter using fixed offsets (33, 33, 9) for its three options.
     fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
         let mut offset = 0;
         let sender = Option::<StdByteArray>::deserialize_pillar(&data[offset..offset + 33])?;
@@ -260,6 +311,7 @@ impl PillarSerialize for TransactionFilter {
 }
 
 impl PillarNativeEndian for BlockHeader {
+    /// Convert native-endian fields to little-endian in-place for `BlockHeader`.
     fn to_le(&mut self) {
         self.nonce = self.nonce.to_le();
         self.timestamp = self.timestamp.to_le();
@@ -271,6 +323,7 @@ impl PillarNativeEndian for BlockHeader {
 }
 
 impl PillarNativeEndian for Transaction {
+    /// Convert native-endian fields to little-endian in-place for `Transaction` header.
     fn to_le(&mut self) {
         self.header.amount = self.header.amount.to_le();
         self.header.timestamp = self.header.timestamp.to_le();
@@ -283,12 +336,14 @@ impl PillarNativeEndian for TransactionStub {
 }
 
 impl PillarNativeEndian for Peer {
+    /// Convert native-endian fields to little-endian in-place for `Peer`.
     fn to_le(&mut self) {
         self.port = self.port.to_le();
     }
 }
 
 impl PillarNativeEndian for HeaderShard {
+    /// Convert native-endian fields to little-endian in-place for `HeaderShard`.
     fn to_le(&mut self) {
         self.depth = self.depth.to_le();
         self.timestamp = self.timestamp.to_le();
@@ -297,6 +352,10 @@ impl PillarNativeEndian for HeaderShard {
 }
 
 impl PillarSerialize for NodeHistory {
+    /// Serialize a node's history as `[public_key:32][blocks_mined_len:u32][blocks_mined_bytes][blocks_stamped...]`.
+    ///
+    /// `blocks_mined` is explicitly length-delimited. `blocks_stamped` uses the fixed-size vector
+    /// encoding (no internal length) and consumes the remainder of the slice.
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
         let mut buffer = vec![];
         buffer.extend(self.public_key.serialize_pillar()?);
@@ -307,6 +366,7 @@ impl PillarSerialize for NodeHistory {
         Ok(buffer)
     }
 
+    /// Inverse of `serialize_pillar` for `NodeHistory`.
     fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
         let mut offset = 0;
         let public_key = StdByteArray::deserialize_pillar(&data[offset..offset + STANDARD_ARRAY_LENGTH])?;
@@ -320,6 +380,7 @@ impl PillarSerialize for NodeHistory {
 }
 
 impl PillarSerialize for Account {
+    /// Serialize an account as `[address:32][balance:u64][nonce:u64][history:Option<NodeHistory>]`.
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
        let mut buffer = vec![];
        buffer.extend(self.address.serialize_pillar()?);
@@ -329,6 +390,7 @@ impl PillarSerialize for Account {
        Ok(buffer)
     }
 
+    /// Inverse of `serialize_pillar` for `Account`.
     fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
         let address = StdByteArray::deserialize_pillar(&data[0..STANDARD_ARRAY_LENGTH])?;
         let balance = u64::deserialize_pillar(&data[STANDARD_ARRAY_LENGTH..STANDARD_ARRAY_LENGTH + 8])?;
@@ -358,8 +420,8 @@ mod tests {
 
     #[test]
     fn test_block_alignment() {
-        // this is a fragile test because it relies on the exact memory layout of the Block struct
-        // this may differ between architectures
+    // this is a fragile test because it relies on the exact memory layout of the Block struct
+    // this may differ between architectures
         let previous_hash = [2; 32];
         let sender = [3; 32];
         let receiver = [4; 32];

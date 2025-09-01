@@ -1,3 +1,29 @@
+//! Pillar binary serialization primitives.
+//!
+//! This crate defines a minimal, explicit binary format used across the project.
+//! The goals are predictability and performance by keeping encodings close to the
+//! in-memory representation of fixed-size types while remaining portable via
+//! explicit little-endian conversion for integer fields.
+//!
+//! Core concepts:
+//! - `PillarNativeEndian`: converts a type's integer fields to little-endian in-place.
+//! - `PillarFixedSize`: marker trait indicating a type has a stable, fixed byte size.
+//! - `PillarSerialize`: encodes/decodes types to/from bytes.
+//!
+//! Fixed-size POD types (repr(C, align(8)) + `bytemuck::Pod` + `Zeroable` + `PillarFixedSize`)
+//! implement a blanket `PillarSerialize` that serializes raw bytes after applying `to_le()` on
+//! big-endian targets. Deserialization reads the exact number of bytes into the POD type and
+//! converts back to native-endian if needed.
+//!
+//! Collections:
+//! - `Vec<T>` has two encodings:
+//!   - If `T` is fixed-size (as above): concatenation of items with no length prefix; the count is
+//!     inferred by dividing the slice length by `size_of::<T>()`.
+//!   - Otherwise: `[len:u32][len(item1):u32][item1][len(item2):u32][item2]...`.
+//! - `Option<T>`: one marker byte (0=None, 1=Some) followed by `T` if present.
+//! - `HashMap<K,V>`: When key/value sizes are not fixed, we prefix with counts and per-entry sizes.
+//!   Specializations for `StdByteArray` keys and/or fixed-size values remove some length prefixes.
+//!
 #![feature(specialization)]
 use std::collections::HashMap;
 
@@ -6,15 +32,20 @@ use bytemuck::{bytes_of, Pod, Zeroable};
 const STANDARD_ARRAY_LENGTH: usize = 32;
 pub type StdByteArray = [u8; STANDARD_ARRAY_LENGTH];
 
+/// Convert integer fields of a type to little-endian in-place.
+///
+/// Implementations should not change the representation size.
 pub trait PillarNativeEndian {
     fn to_le(&mut self);
 }
 
+/// Serialize/deserialize a type using Pillar's binary format.
 pub trait PillarSerialize: Sized {
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error>;
     fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error>;
 }
 
+/// Marker trait for types with a fixed, stable byte size.
 pub trait PillarFixedSize {}
 
 
@@ -22,6 +53,8 @@ impl<T> PillarSerialize for T
 where 
     T: PillarNativeEndian + Pod + Zeroable + PillarFixedSize
 {
+    /// Serialize a fixed-size POD type as raw bytes, converting integer fields
+    /// to little-endian first on big-endian targets.
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
         let mut bytes = bytes_of(self);
 
@@ -34,6 +67,8 @@ where
         Ok(bytes.to_vec())
     }
 
+    /// Deserialize a fixed-size POD type from raw bytes, converting integer fields
+    /// back from little-endian on big-endian targets.
     fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
         if data.len() < size_of::<Self>() {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Insufficient data"));
@@ -87,7 +122,7 @@ impl<T> PillarSerialize for Vec<T>
 where
     T: PillarSerialize
 {
-    
+    /// Length-prefixed vector encoding for non-fixed-size elements.
     default fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
         let mut buffer = vec![];
         buffer.extend((self.len() as u32).to_le_bytes());
@@ -99,6 +134,7 @@ where
         Ok(buffer)
     }
 
+    /// Inverse of the length-prefixed vector encoding.
     default fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
         let mut items = Vec::new();
         let length = u32::from_le_bytes(data[..4].try_into().unwrap());
@@ -119,6 +155,7 @@ impl<T> PillarSerialize for Vec<T>
 where
     T: PillarSerialize + PillarNativeEndian + Pod + Zeroable + PillarFixedSize
 {
+    /// Tight concatenation encoding for fixed-size elements (no length prefix).
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
         let mut buffer = vec![];
         for item in self {
@@ -127,6 +164,7 @@ where
         Ok(buffer)
     }
 
+    /// Inverse of the tight concatenation encoding for fixed-size elements.
     fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
         let size = size_of::<T>();
         assert!(data.len().is_multiple_of(size));
@@ -146,6 +184,7 @@ impl<T> PillarSerialize for Option<T>
 where
     T: PillarSerialize
 {
+    /// Encode `Option<T>` as a one-byte tag (0=None, 1=Some) followed by `T` if present.
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
         match self {
             Some(value) => {
@@ -157,6 +196,7 @@ where
         }
     }
 
+    /// Decode `Option<T>` from its one-byte tag and optional payload.
     fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
         let marker = data.first().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "Data too short"))?;
         if marker == &0 {
@@ -173,6 +213,7 @@ where
     K: PillarSerialize + Eq + std::hash::Hash,
     V: PillarSerialize
 {
+    /// Length-prefixed key/value entries for generic `HashMap<K,V>`.
     default fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
         let mut buffer = vec![];
         buffer.extend((self.len() as u32).to_le_bytes());
@@ -187,6 +228,7 @@ where
         Ok(buffer)
     }
 
+    /// Inverse of the length-prefixed key/value encoding for `HashMap<K,V>`.
     default fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
         let mut offset = 0;
         let length = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
@@ -212,6 +254,7 @@ impl<V> PillarSerialize for HashMap<StdByteArray, V>
 where 
     V: PillarSerialize
 {
+    /// Specialized map encoding for 32-byte keys; value length is still prefixed.
     default fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
         let mut buffer = vec![];
         for (key, value) in self {
@@ -223,6 +266,7 @@ where
         Ok(buffer)
     }
 
+    /// Inverse of the specialized map encoding for 32-byte keys.
     default fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
         let mut offset = 0;
         let vsize = size_of::<V>();
@@ -246,6 +290,7 @@ impl<V> PillarSerialize for HashMap<StdByteArray, V>
 where 
     V: PillarSerialize + PillarNativeEndian + Zeroable + Pod
 {
+    /// Tight map encoding for 32-byte keys and fixed-size values (no per-entry length).
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
         let mut buffer = vec![];
         for (key, value) in self {
@@ -255,6 +300,7 @@ where
         Ok(buffer)
     }
 
+    /// Inverse of the tight map encoding for fixed-size values.
     fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
         let mut offset = 0;
         let vsize = size_of::<V>();
@@ -272,6 +318,7 @@ where
 }
 
 impl PillarSerialize for String {
+    /// UTF-8 string encoding as `[len:u32][bytes...]`.
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
         let bytes = self.as_bytes();
         let length = bytes.len() as u32;
@@ -281,6 +328,7 @@ impl PillarSerialize for String {
         Ok(buffer)
     }
 
+    /// Inverse of the UTF-8 string encoding.
     fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
         let length = u32::from_le_bytes(data[..4].try_into().unwrap()) as usize;
         let string = String::from_utf8(data[4..4 + length].to_vec())
