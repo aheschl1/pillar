@@ -51,6 +51,7 @@ The network and data flow are illustrated below, alongside how blocks are settle
 - `libs/pillar_core/` – Core protocol and logic
 - `libs/pillar_crypto/` – Cryptographic primitives
 - `libs/pillar_serialize/` – Lightweight serialization utilities used across crates.
+- `vm_mesh/` – VM Mesh framework for distributed testing and simulation
 
 ## Testing
 
