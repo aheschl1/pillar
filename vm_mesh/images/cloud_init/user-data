@@ -1,0 +1,31 @@
+#cloud-config
+manage_etc_hosts: true
+
+users:
+  - name: root
+    groups: sudo
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys:
+      - <ssh_pub_key>
+
+chpasswd:
+  list: |
+    root:toor
+  expire: False
+
+package_update: true
+packages:
+  - sudo
+  - curl
+  - vim
+  - openssh-server
+
+runcmd:
+  - mkdir -p /mnt/dataiso
+  - mount /dev/sr1 /mnt/dataiso
+  - mkdir -p /root/<repo_name> && cp -r /mnt/dataiso/* /root/<repo_name>/
+  - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+  - cd /root/<repo_name> && /root/.cargo/bin/cargo build --release
+  - echo 'export PATH=/root/.cargo/bin:$PATH:/root/<repo_name>/target/release:$PATH' >> /root/.bashrc
+  - touch /root/setup-complete

@@ -2,5 +2,5 @@
 /test_output
 /libs/*/test_output
 *.ai
-vm_matrix/images/overlays
+vm_mesh/images/overlays
 *.qcow2
