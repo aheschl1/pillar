@@ -1,5 +1,5 @@
 [package]
-name = "pillar"
+name = "pillar_core"
 version = "0.1.0"
 edition = "2024"
 

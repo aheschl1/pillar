@@ -776,6 +776,13 @@ dependencies = [
 name = "pillar"
 version = "0.1.0"
 dependencies = [
+ "pillar_core",
+]
+
+[[package]]
+name = "pillar_core"
+version = "0.1.0"
+dependencies = [
  "bytemuck",
  "byteorder",
  "bytes",

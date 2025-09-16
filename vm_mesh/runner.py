@@ -33,6 +33,7 @@ def build_repo_cdrom(
     repo_name: str,
     repo_url: str,
     branch_name: str,
+    arch: Literal["x86_64", "aarch64"] = "x86_64"
 ):
     """
     Clone a git repository and package it as a CD-ROM ISO image.
@@ -42,10 +43,20 @@ def build_repo_cdrom(
         "git", "clone", "--depth", "1", "--branch", branch_name,
         repo_url, str(root_dir / repo_name)
     ], check=True)
-    # genisoimage
+    # build release for the target
+    target = {
+        "x86_64": "x86_64-unknown-linux-gnu",
+        "aarch64": "aarch64-unknown-linux-gnu"
+    }[arch]
+    subprocess.run([
+        "cargo", "build", "--release", "--target", target,
+        "--manifest-path", str(root_dir / repo_name / "Cargo.toml")
+    ], check=True)
+    # genisoimage with the built executable
     iso_path = root_dir / "repo.iso"
     subprocess.run([
-        "genisoimage", "-o", str(iso_path), "-V", "REPO", "-r", "-J", str(root_dir / repo_name)
+        "genisoimage", "-o", str(iso_path), "-V", "REPO", "-r", "-J",
+        str(root_dir / repo_name / "target" / target / "release" / repo_name)
     ], check=True)
     return str(iso_path)
 
@@ -349,15 +360,15 @@ class Machine:
             "-m", str(self.ram),
             "-smp", str(self.cpu_cores),
             *accel_args.split(),
-            "-drive", f"file={image},if=virtio,format=qcow2",
             "-netdev", f"tap,id=net0,ifname={self.tap_name},script=no,downscript=no",
             "-device", f"{device},netdev=net0,mac={self.mac}",
-            "-drive", f"file={drive},media=cdrom,index=0",
-            "-drive", f"file={repo_iso},media=cdrom,index=1",
+            "-drive", f"file={image},if=virtio,format=qcow2,index=0,media=disk",
+            "-drive", f"file={drive},media=cdrom,index=1",
+            "-drive", f"file={repo_iso},media=cdrom,index=2",
         ]
         if self.arch == "aarch64":
             command.extend([
-                "-bios", "/usr/share/qemu-efi-aarch64/QEMU_EFI.fd"
+                "-bios", "/usr/share/AAVMF/AAVMF_CODE.fd"
             ])
         if self.daemonize:
             command.append("-daemonize")
@@ -602,11 +613,16 @@ def main():
     
 if __name__ == "__main__":
     # main()
+    cmnd = ' && '.join([
+        "cd /root/pillar",
+        "cargo build --release",
+        "cargo test"
+    ])
     with Network() as net:
         machine = Machine("x86_64", net, daemonize=False, attach_console=True)
         proc = machine.launch()
         machine.wait_setup_complete()
-        machine.act("touch /root/hello_from_host")
+        machine.act(cmnd)
         # proc.kill()
         proc.wait()
     

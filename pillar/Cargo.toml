@@ -1,0 +1,7 @@
+[package]
+name = "pillar"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+pillar_core = { path = "../libs/pillar_core" }
