@@ -456,7 +456,7 @@ class Mesh:
         self, 
         network: Network = None, 
         name: str = None, 
-        unified_cdrom: bool = True,
+        unified_cdrom: Literal["true", "false", "arch"] = "false",
         **kwargs
     ):
         """
@@ -468,7 +468,7 @@ class Mesh:
         self.processes: list[subprocess.Popen] = []
         self.network = network or Network()
         self.name = name
-        self.cdrom_path = None
+        self.cdrom_path = {"x86_64": None, "aarch64": None}
         self.unified_cdrom = unified_cdrom
         if self.name:
             self.root_dir = OVERLAY_IMAGES_ROOT / self.name
@@ -484,13 +484,24 @@ class Mesh:
         """
         if not self.network.is_up:
             self.network.up()
-        if self.unified_cdrom:
-            self.cdrom_path = build_repo_cdrom(
+        if self.unified_cdrom in ["true", "arch"]:
+            self.cdrom_path["x86_64"] = build_repo_cdrom(
                 root_dir=self.root_dir or OVERLAY_IMAGES_ROOT,
+                arch="x86_64",
                 repo_name=self.kwargs.get("repo_name", "pillar"),
                 repo_url=self.kwargs.get("repo_url", "https://github.com/example/pillar.git"),
                 branch_name=self.kwargs.get("branch_name", "main")
             )
+            if self.unified_cdrom == "arch":
+                self.cdrom_path["aarch64"] = build_repo_cdrom(
+                    root_dir=self.root_dir or OVERLAY_IMAGES_ROOT,
+                    arch="aarch64",
+                    repo_name=self.kwargs.get("repo_name", "pillar"),
+                    repo_url=self.kwargs.get("repo_url", "https://github.com/example/pillar.git"),
+                    branch_name=self.kwargs.get("branch_name", "main")
+                )
+            else:
+                self.cdrom_path["aarch64"] = self.cdrom_path["x86_64"]
         return self
 
     def __exit__(self, *_):
@@ -507,7 +518,7 @@ class Mesh:
         Add a new VM to the mesh, optionally using a unified repo ISO.
         Returns the created Machine instance.
         """
-        repo_cdrom = Path(self.cdrom_path) if self.unified_cdrom else None
+        repo_cdrom = Path(self.cdrom_path[arch]) if self.unified_cdrom in ["true", "arch"] else None
         machine = Machine(
             arch, 
             self.network, root_dir=self.root_dir, repo_cdrom=repo_cdrom, **kwargs)
@@ -598,7 +609,7 @@ def main():
     Main entry point for launching a mesh of VMs from command-line arguments.
     """
     args = parse_args()
-    with Mesh(name=args.name, unified_cdrom=True) as mesh:
+    with Mesh(name=args.name, unified_cdrom="arch") as mesh:
         for _ in range(args.n_x86):
             mesh.enroll_machine("x86_64")
         for _ in range(args.n_aarch):
@@ -614,12 +625,11 @@ def main():
 if __name__ == "__main__":
     # main()
     cmnd = ' && '.join([
-        "cd /root/pillar",
-        "cargo build --release",
-        "cargo test"
+        "cd /root",
+        "./pillar/pillar"
     ])
     with Network() as net:
-        machine = Machine("x86_64", net, daemonize=False, attach_console=True)
+        machine = Machine("aarch64", net, daemonize=False, attach_console=True)
         proc = machine.launch()
         machine.wait_setup_complete()
         machine.act(cmnd)
