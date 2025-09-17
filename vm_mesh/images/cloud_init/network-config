@@ -1,6 +1,6 @@
 version: 2
 ethernets:
-  ens3:
+  <net_device_name>:
     dhcp4: no
     addresses:
       - <ip_address>/24

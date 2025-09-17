@@ -15,6 +15,7 @@ Usage:
 """
 import argparse
 import os
+import shutil
 from typing import Literal
 import subprocess
 from pathlib import Path
@@ -270,6 +271,12 @@ class Machine:
             user_data = f.read().strip()
         with open(os.path.expanduser(self.git_ssh_key), 'r') as f:
             ssh_priv_key = f.read().strip()
+        
+        net_device_name = {
+            "x86_64": "ens3",
+            "aarch64": "eth0"
+        }[self.arch]
+        
         user_data = user_data.replace("<ssh_pub_key>", ssh_pub_key)
         user_data = user_data.replace("<ssh_priv_key>", ssh_priv_key)
         user_data = user_data.replace("<ip_address>", self.ip_address)
@@ -277,6 +284,7 @@ class Machine:
         user_data = user_data.replace("<repo_name>", self.repo_name)
         user_data = user_data.replace("<repo_url>", self.repo_url)
         user_data = user_data.replace("<branch_name>", self.branch_name)
+        user_data = user_data.replace("<net_device_name>", net_device_name)
         with open(output_path, 'w') as f:
             f.write(user_data)
         
@@ -351,7 +359,7 @@ class Machine:
         }[self.arch]
         net_device = {
             "x86_64": "virtio-net-pci",
-            "aarch64": "virtio-net-pci"
+            "aarch64": "virtio-net-device"
         }[self.arch]
 
         image, drive, repo_iso = self.build_image()
@@ -489,7 +497,10 @@ class Mesh:
         if self.name:
             self.root_dir = OVERLAY_IMAGES_ROOT / self.name
             if self.root_dir.exists():
-                raise FileExistsError(f"Mesh '{self.name}' already exists.")
+                override = input(f"Mesh '{self.name}' already exists. Override? (y/N): ")
+                if override.lower() != 'y':
+                    raise FileExistsError(f"Mesh '{self.name}' already exists.")
+                shutil.rmtree(self.root_dir)
             os.makedirs(self.root_dir, exist_ok=True)
         else:
             self.root_dir = None
@@ -501,18 +512,24 @@ class Mesh:
         if not self.network.is_up:
             self.network.up()
         if self.unified_cdrom in ["true", "arch"]:
+            root = (self.root_dir or OVERLAY_IMAGES_ROOT) / "x86_64"
+            os.makedirs(root, exist_ok=True)
             self.cdrom_path["x86_64"] = build_repo_cdrom(
-                root_dir=self.root_dir or OVERLAY_IMAGES_ROOT,
+                root_dir=root,
                 arch="x86_64",
                 repo_name=self.kwargs.get("repo_name", "pillar"),
-                branch_name=self.kwargs.get("branch_name", "main")
+                branch_name=self.kwargs.get("branch_name", "main"),
+                repo_url=self.kwargs.get("repo_url", "https://github.com/example/repo.git")
             )
             if self.unified_cdrom == "arch":
+                root = (self.root_dir or OVERLAY_IMAGES_ROOT) / "aarch64"
+                os.makedirs(root, exist_ok=True)
                 self.cdrom_path["aarch64"] = build_repo_cdrom(
-                    root_dir=self.root_dir or OVERLAY_IMAGES_ROOT,
+                    root_dir=root,
                     arch="aarch64",
                     repo_name=self.kwargs.get("repo_name", "pillar"),
-                    branch_name=self.kwargs.get("branch_name", "main")
+                    branch_name=self.kwargs.get("branch_name", "main"),
+                    repo_url=self.kwargs.get("repo_url", "https://github.com/example/repo.git")
                 )
             else:
                 self.cdrom_path["aarch64"] = self.cdrom_path["x86_64"]
@@ -563,6 +580,17 @@ class Mesh:
         for machine in self.machines:
             machine.wait_setup_complete(timeout=timeout - (time.time() - start_time))
 
+    def act_all(self, command: str):
+        """
+        Execute a shell command on all enrolled VMs via SSH.
+        Raises RuntimeError if any VM is not responsive.
+        Returns a list of subprocess.CompletedProcess results.
+        """
+        results = []
+        for machine in self.machines:
+            results.append(machine.act(command))
+        return results
+    
     def launch_all(self):
         """
         Launch all enrolled VMs and store their process handles.
@@ -616,6 +644,12 @@ def parse_args():
         default=None,
         help="Name for the mesh, used to create a dedicated directory"
     )
+    parser.add_argument(
+        "--action",
+        type=str,
+        default="cd /root && ./pillar/pillar",
+        help="Command to run machines"
+    )
     return parser.parse_args()
 
 def main():
@@ -623,7 +657,8 @@ def main():
     Main entry point for launching a mesh of VMs from command-line arguments.
     """
     args = parse_args()
-    with Mesh(name=args.name, unified_cdrom="arch") as mesh:
+
+    with Mesh(name=args.name, unified_cdrom="arch", repo_url="git@github.com:aheschl1/pillar.git") as mesh:
         for _ in range(args.n_x86):
             mesh.enroll_machine("x86_64")
         for _ in range(args.n_aarch):
@@ -631,22 +666,36 @@ def main():
         print(f"Launching {len(mesh.machines)} machines...")
         mesh.launch_all()
         print("Waiting for machines to become responsive...")
-        mesh.wait_responsive()
-        print("All machines are responsive.")
+        mesh.wait_setup_complete()
+        print("All machines are setup.")
+        # Trigger calls
+        if args.action:
+            if os.path.exists(args.action):
+                with open(args.action, 'r') as f:
+                    args.action = f.read().strip()
+            print(f"Running command on all machines:\n{args.action}")
+            results = mesh.act_all(args.action)
+            for i, result in enumerate(results):
+                print(f"--- Machine {i} ({mesh.machines[i].ip_address}) ---")
+                print(f"Return code: {result.returncode}")
+                print(result.stdout)
+                print(result.stderr)
+        else:
+            print("No command specified, skipping action phase.")
         mesh.terminate_all()
         print("All machines terminated.")
     
 if __name__ == "__main__":
-    # main()
-    cmnd = ' && '.join([
-        "cd /root",
-        "./pillar/pillar"
-    ])
-    with Network() as net:
-        machine = Machine("x86_64", net, daemonize=False, attach_console=True)
-        proc = machine.launch()
-        machine.wait_setup_complete()
-        machine.act(cmnd)
-        # proc.kill()
-        proc.wait()
+    main()
+    # cmnd = ' && '.join([
+    #     "cd /root",
+    #     "./pillar/pillar"
+    # ])
+    # with Network() as net:
+    #     machine = Machine("aarch64", net, daemonize=False, attach_console=True)
+    #     proc = machine.launch()
+    #     machine.wait_setup_complete()
+    #     machine.act(cmnd)
+    #     # proc.kill()
+    #     proc.wait()
     
