@@ -51,7 +51,10 @@ def build_repo_cdrom(
     subprocess.run([
         "cargo", "build", "--release", "--target", target,
         "--manifest-path", str(root_dir / repo_name / "Cargo.toml")
-    ], check=True)
+    ], check=True, env={
+        **os.environ,
+        "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER": "aarch64-linux-gnu-gcc"
+    } if arch == "aarch64" else os.environ)
     # genisoimage with the built executable
     iso_path = root_dir / "repo.iso"
     subprocess.run([
@@ -346,7 +349,7 @@ class Machine:
             "aarch64": "-cpu cortex-a57 -M virt -machine accel=tcg"
 
         }[self.arch]
-        device = {
+        net_device = {
             "x86_64": "virtio-net-pci",
             "aarch64": "virtio-net-device"
         }[self.arch]
@@ -361,14 +364,27 @@ class Machine:
             "-smp", str(self.cpu_cores),
             *accel_args.split(),
             "-netdev", f"tap,id=net0,ifname={self.tap_name},script=no,downscript=no",
-            "-device", f"{device},netdev=net0,mac={self.mac}",
+            "-device", f"{net_device},netdev=net0,mac={self.mac}",
             "-drive", f"file={image},if=virtio,format=qcow2,index=0,media=disk",
-            "-drive", f"file={drive},media=cdrom,index=1",
-            "-drive", f"file={repo_iso},media=cdrom,index=2",
         ]
-        if self.arch == "aarch64":
+
+        if self.arch == "x86_64":
+            # keep CD-ROM setup for x86_64 as before
             command.extend([
-                "-bios", "/usr/share/AAVMF/AAVMF_CODE.fd"
+                "-drive", f"file={drive},media=cdrom,index=1",
+                "-drive", f"file={repo_iso},media=cdrom,index=2",
+            ])
+        else:  # aarch64
+            command.extend([
+                "-bios", "/usr/share/AAVMF/AAVMF_CODE.fd",
+                # add virtio-scsi controller
+                "-device", "virtio-scsi-pci,id=scsi0",
+                # attach init ISO
+                "-drive", f"file={drive},if=none,format=raw,id=cdrom0,media=cdrom",
+                "-device", "scsi-cd,drive=cdrom0,bus=scsi0.0",
+                # attach repo ISO
+                "-drive", f"file={repo_iso},if=none,format=raw,id=cdrom1,media=cdrom",
+                "-device", "scsi-cd,drive=cdrom1,bus=scsi0.0",
             ])
         if self.daemonize:
             command.append("-daemonize")
@@ -489,7 +505,6 @@ class Mesh:
                 root_dir=self.root_dir or OVERLAY_IMAGES_ROOT,
                 arch="x86_64",
                 repo_name=self.kwargs.get("repo_name", "pillar"),
-                repo_url=self.kwargs.get("repo_url", "https://github.com/example/pillar.git"),
                 branch_name=self.kwargs.get("branch_name", "main")
             )
             if self.unified_cdrom == "arch":
@@ -497,7 +512,6 @@ class Mesh:
                     root_dir=self.root_dir or OVERLAY_IMAGES_ROOT,
                     arch="aarch64",
                     repo_name=self.kwargs.get("repo_name", "pillar"),
-                    repo_url=self.kwargs.get("repo_url", "https://github.com/example/pillar.git"),
                     branch_name=self.kwargs.get("branch_name", "main")
                 )
             else:
