@@ -48,13 +48,12 @@ def build_repo_cdrom(
         "x86_64": "x86_64-unknown-linux-gnu",
         "aarch64": "aarch64-unknown-linux-gnu"
     }[arch]
+    print(f"Building {repo_name} for target {target}...")
+    time.sleep(1)
     subprocess.run([
         "cargo", "build", "--release", "--target", target,
         "--manifest-path", str(root_dir / repo_name / "Cargo.toml")
-    ], check=True, env={
-        **os.environ,
-        "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER": "aarch64-linux-gnu-gcc"
-    } if arch == "aarch64" else os.environ)
+    ], check=True)
     # genisoimage with the built executable
     iso_path = root_dir / "repo.iso"
     subprocess.run([
@@ -291,7 +290,8 @@ class Machine:
             root_dir=self.root_dir,
             repo_name=self.repo_name,
             repo_url=self.repo_url,
-            branch_name=self.branch_name
+            branch_name=self.branch_name,
+            arch=self.arch
         )
     
     def build_init_iso(self):
@@ -351,7 +351,7 @@ class Machine:
         }[self.arch]
         net_device = {
             "x86_64": "virtio-net-pci",
-            "aarch64": "virtio-net-device"
+            "aarch64": "virtio-net-pci"
         }[self.arch]
 
         image, drive, repo_iso = self.build_image()
@@ -643,7 +643,7 @@ if __name__ == "__main__":
         "./pillar/pillar"
     ])
     with Network() as net:
-        machine = Machine("aarch64", net, daemonize=False, attach_console=True)
+        machine = Machine("x86_64", net, daemonize=False, attach_console=True)
         proc = machine.launch()
         machine.wait_setup_complete()
         machine.act(cmnd)
