@@ -678,8 +678,6 @@ def main():
             for i, result in enumerate(results):
                 print(f"--- Machine {i} ({mesh.machines[i].ip_address}) ---")
                 print(f"Return code: {result.returncode}")
-                print(result.stdout)
-                print(result.stderr)
         else:
             print("No command specified, skipping action phase.")
         mesh.terminate_all()
