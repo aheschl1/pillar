@@ -1,6 +1,7 @@
 
 use chrono::Local;
-use pillar_core::nodes::peer::Peer;
+use pillar_core::{accounting::wallet::Wallet, nodes::peer::Peer};
+use pillar_crypto::signing::SigFunction;
 use pillar_serialize::PillarSerialize;
 use clap::Parser;
 use tracing_subscriber::{filter::LevelFilter, fmt::{self, writer::BoxMakeWriter}, layer::SubscriberExt, util::SubscriberInitExt, Layer, Registry};
@@ -13,11 +14,17 @@ struct Config {
     /// Well-known peers to connect to on startup
     wkps: Vec<Peer>,
     ip_address: std::net::IpAddr,
+    wallet: Wallet
 }
 
 impl Config {
-    fn new(wkps: Vec<Peer>, ip_address: std::net::IpAddr) -> Self {
-        Config { wkps, ip_address }
+    fn new(wkps: Vec<Peer>, ip_address: std::net::IpAddr, wallet: Option<Wallet>) -> Self {
+        let wallet = if let Some(w) = wallet {
+            w
+        } else {
+            Wallet::generate_random()
+        };
+        Config { wkps, ip_address, wallet }
     }
 
     fn from_root(root: &PathBuf) -> Self {
@@ -38,11 +45,16 @@ impl Config {
 }
 
 impl PillarSerialize for Config {
+    // TODO optimize this serialization. Wallet is a fixed size, so we don't need to store its length
+    // Same for IP address, we can store it as 4 or 16 bytes depending on if it's IPv4 or IPv6
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
         let mut data = Vec::new();
         let wkps_ser = self.wkps.serialize_pillar()?;
         data.extend((wkps_ser.len() as u32).to_le_bytes());
         data.extend(wkps_ser);
+        let wallet_ser = self.wallet.serialize_pillar()?;
+        data.extend((wallet_ser.len() as u32).to_le_bytes());
+        data.extend(wallet_ser);
         data.extend(self.ip_address.to_string().serialize_pillar()?);
         Ok(data)
     }
@@ -50,8 +62,10 @@ impl PillarSerialize for Config {
     fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
         let wkps_len = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
         let wkps = Vec::<Peer>::deserialize_pillar(&data[4..4+wkps_len])?;
-        let ip_address = String::deserialize_pillar(&data[4+wkps_len..])?;
-        Ok(Config { wkps, ip_address: ip_address.parse().unwrap()})
+        let wallet_len = u32::from_le_bytes(data[4+wkps_len..8+wkps_len].try_into().unwrap()) as usize;
+        let wallet = Wallet::deserialize_pillar(&data[8+wkps_len..8+wkps_len+wallet_len])?;
+        let ip_address = String::deserialize_pillar(&data[8+wkps_len+wallet_len..])?;
+        Ok(Config { wkps, ip_address: ip_address.parse().unwrap(), wallet })
     }
 }
 
@@ -94,23 +108,24 @@ struct Args {
 
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), ()> {
     let args = Args::parse();
     println!("Starting pillar node with output root: {}", args.root.display());
     // create a run id
     let run_id = uuid::Uuid::new_v4();
-    println!("Run ID: {}", run_id);
+    tracing::info!("Run ID: {}", run_id);
     // setup a tracing subscriber
     setup_tracing(&args.root, run_id);
     let ip_address = args.ip_address.clone();
-    // sanitize ip
+    // sanitize ip address
     let ip_address = ip_address.parse::<std::net::IpAddr>().unwrap();
     // ensure not multicast
     if ip_address.is_multicast() {
-        panic!("Cannot bind to broadcast or multicast address");
+        tracing::error!("Cannot bind to broadcast or multicast address");
+        return Err(());
     }
-    let config = Config::new(vec![], ip_address);
-    // save config
+    let config = Config::new(vec![], ip_address, None);
     config.save(&args.root);
     launch_node(&config).await;
+    Ok(())
 }

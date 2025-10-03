@@ -21,7 +21,6 @@ import subprocess
 from pathlib import Path
 import datetime
 import time
-import sys
 
 from click import command
 

@@ -1,7 +1,10 @@
 //! Wallet wrapper around an ed25519 keypair with convenience methods.
-use pillar_crypto::{signing::{DefaultSigner, DefaultVerifier, SigFunction, SigVerFunction, Signable}, types::StdByteArray};
+use bytemuck::{Pod, Zeroable};
+use pillar_crypto::{signing::{DefaultSigner, DefaultVerifier, SigFunction, SigVerFunction, Signable}, types::{StdByteArray, STANDARD_ARRAY_LENGTH}};
+use pillar_serialize::PillarSerialize;
 
 /// A local wallet that can sign data and exposes its public address.
+#[derive(Clone)]
 pub struct Wallet{
     pub address: StdByteArray,
     signing_key: DefaultSigner,
@@ -23,6 +26,32 @@ impl Wallet {
     /// Return the private key bytes (32) of this wallet.
     pub fn get_private_key(&self) -> [u8; 32] {
         self.to_bytes()
+    }
+}
+
+impl PillarSerialize for Wallet {
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mut data = Vec::new();
+        data.extend(self.address.serialize_pillar()?);
+        data.extend(self.signing_key.to_bytes().serialize_pillar()?);
+        data.extend(self._balance.to_le_bytes());
+        data.extend(self.nonce.to_le_bytes());
+        Ok(data)
+    }
+
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        let address = StdByteArray::deserialize_pillar(&data[0..STANDARD_ARRAY_LENGTH])?;
+        let signing_key = DefaultSigner::new(
+            StdByteArray::deserialize_pillar(&data[STANDARD_ARRAY_LENGTH..2*STANDARD_ARRAY_LENGTH])?
+        );
+        let balance = u64::from_le_bytes(data[2*STANDARD_ARRAY_LENGTH..2*STANDARD_ARRAY_LENGTH+8].try_into().unwrap());
+        let nonce = u64::from_le_bytes(data[2*STANDARD_ARRAY_LENGTH+8..].try_into().unwrap());
+        Ok(Wallet {
+            address,
+            signing_key,
+            _balance: balance,
+            nonce,
+        })
     }
 }
 

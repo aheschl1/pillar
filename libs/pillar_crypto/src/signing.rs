@@ -84,6 +84,7 @@ pub trait SigVerFunction<const K: usize, const S: usize>{
 }
 
 /// Default ed25519 signing function.
+#[derive(Clone)]
 pub struct DefaultSigner{
     private_key: SigningKey
 }
