@@ -1,4 +1,0 @@
-[submodule "include/monorail"]
-	path = include/monorail
-	url = git@github.com:DiscordJim/monorail.git
-	branch = main
