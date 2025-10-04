@@ -648,7 +648,7 @@ def parse_args():
     parser.add_argument(
         "--action",
         type=str,
-        default="cd /root && ./pillar/pillar -- --ip-address={ip_address}",
+        default="cd /root && ./pillar/pillar --ip-address={ip_address}",
         help="Command to run machines"
     )
     return parser.parse_args()
