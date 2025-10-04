@@ -14,5 +14,6 @@ tracing-subscriber = "0.3.20"
 uuid = { version = "1.18.1", features = ["v4"] }
 flume = "0.11.1"
 tracing = "0.1.41"
-axum = "0.8.6"
 serde = { version = "1.0.228", features = ["derive"] }
+axum = { version = "0.8.6", features = ["ws"] }
+serde_json = "1.0.145"

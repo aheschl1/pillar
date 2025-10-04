@@ -5,3 +5,4 @@
 vm_mesh/images/overlays
 *.qcow2
 output
+work/

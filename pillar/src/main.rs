@@ -10,6 +10,7 @@ use std::{fs::File, path::PathBuf};
 use crate::run::launch_node;
 mod run;
 
+#[derive(Clone)]
 struct Config {
     /// Well-known peers to connect to on startup
     wkps: Vec<Peer>,
@@ -81,7 +82,7 @@ fn setup_tracing(root: &PathBuf, run_id: uuid::Uuid) {
     let console_layer = fmt::layer()
         .with_ansi(true)
         .with_level(true)
-        .with_filter(LevelFilter::WARN);
+        .with_filter(LevelFilter::INFO);
 
     let file_layer = fmt::layer()
         .with_writer(BoxMakeWriter::new(file))
@@ -100,7 +101,7 @@ fn setup_tracing(root: &PathBuf, run_id: uuid::Uuid) {
 #[derive(Parser, Debug)]
 #[command(version, about = "Pillar Node")]
 struct Args {
-    #[arg(short, long, help = "Root directory for output files")]
+    #[arg(short, long, help = "Root directory for output files", default_value = "./work")]
     root: PathBuf,
     #[arg(short, long, help = "IP address to bind the node to", default_value = "127.0.0.1")]
     ip_address: String,
@@ -126,6 +127,6 @@ async fn main() -> Result<(), ()> {
     }
     let config = Config::new(vec![], ip_address, None);
     config.save(&args.root);
-    launch_node(&config).await;
+    launch_node(config).await;
     Ok(())
 }

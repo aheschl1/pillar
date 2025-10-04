@@ -226,7 +226,6 @@ impl Node {
                     Ok(Err(e)) => tracing::error!(target: "node_serve", "Node failed to start: {:?}", e),
                     Err(e) => tracing::error!(target: "node_serve", "Failed to start node: {:?}", e),
                 }
-
             });
         }
         tracing::trace!("Node is now in state: {:?}", self.inner.state.read().await);
