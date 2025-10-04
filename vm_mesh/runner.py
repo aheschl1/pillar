@@ -464,6 +464,7 @@ class Machine:
         Raises RuntimeError if VM is not responsive.
         Returns the result of subprocess.run.
         """
+        command = command.replace("{ip_address}", self.ip_address)
         if not self.ping():
             raise RuntimeError(f"Machine {self.id} is not responsive.")
         # do not require verification
@@ -647,7 +648,7 @@ def parse_args():
     parser.add_argument(
         "--action",
         type=str,
-        default="cd /root && ./pillar/pillar",
+        default="cd /root && ./pillar/pillar -- {ip_address}",
         help="Command to run machines"
     )
     return parser.parse_args()
