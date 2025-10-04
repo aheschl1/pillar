@@ -16,7 +16,7 @@ Usage:
 import argparse
 import os
 import shutil
-from typing import Literal
+from typing import Literal, Union
 import subprocess
 from pathlib import Path
 import datetime
@@ -93,8 +93,8 @@ class Network:
         if ip == self.gateway:
             return False
         return 0 < int(ip.split(".")[-1]) < 255
-    
-    def allocate_device(self) -> str:
+
+    def allocate_device(self) -> tuple[str, str, str]:
         """
         Allocates an IP address, creates a tap device, and generates a MAC address for a VM.
         Returns a tuple (ip, tap_name, mac).
@@ -226,13 +226,13 @@ class Machine:
         repo_url: str = "git@github.com:aheschl1/pillar.git",
         branch_name: str = "main",
         git_ssh_key: str = "~/.ssh/id_rsa",
-        root_dir: Path = None,
-        repo_cdrom: Path = None,
+        root_dir: Path | None = None,
+        repo_cdrom: Path | None = None,
         daemonize: bool = True,
         attach_console: bool = False,
     ):
         self.ip_address, self.tap_name, self.mac = network.allocate_device()
-        self.arch = arch
+        self.arch: Literal["x86_64", "aarch64"] = arch
         self.ram = ram
         self.cpu_cores = cpu_cores
         self.network = network
@@ -407,7 +407,7 @@ class Machine:
         print(" \\\n  ".join(command))
         return command
     
-    def wait_responsive(self, timeout: int = 300):
+    def wait_responsive(self, timeout: float = 300):
         """
         Wait until the VM responds to ping, or timeout.
         Raises TimeoutError if not responsive in time.
@@ -420,7 +420,7 @@ class Machine:
                 break
             time.sleep(0.5)
             
-    def wait_ssh_responsive(self, timeout: int = 300):
+    def wait_ssh_responsive(self, timeout: float = 300):
         """
         Wait until the VM accepts SSH connections, or timeout.
         Raises TimeoutError if not responsive in time.
@@ -436,7 +436,7 @@ class Machine:
                 break
             time.sleep(0.5)
     
-    def wait_setup_complete(self, timeout: int = 600):
+    def wait_setup_complete(self, timeout: float = 600):
         """
         Wait until the VM setup is complete (setup-complete file exists), or timeout.
         Raises TimeoutError if not complete in time.
@@ -477,8 +477,8 @@ class Mesh:
     """
     def __init__(
         self, 
-        network: Network = None, 
-        name: str = None, 
+        network: Network | None = None, 
+        name: str | None = None, 
         unified_cdrom: Literal["true", "false", "arch"] = "false",
         **kwargs
     ):
@@ -491,7 +491,7 @@ class Mesh:
         self.processes: list[subprocess.Popen] = []
         self.network = network or Network()
         self.name = name
-        self.cdrom_path = {"x86_64": None, "aarch64": None}
+        self.cdrom_path: dict[str, Path | None] = {"x86_64": None, "aarch64": None}
         self.unified_cdrom = unified_cdrom
         if self.name:
             self.root_dir = OVERLAY_IMAGES_ROOT / self.name
@@ -513,7 +513,7 @@ class Mesh:
         if self.unified_cdrom in ["true", "arch"]:
             root = (self.root_dir or OVERLAY_IMAGES_ROOT) / "x86_64"
             os.makedirs(root, exist_ok=True)
-            self.cdrom_path["x86_64"] = build_repo_cdrom(
+            self.cdrom_path["x86_64"] = build_repo_cdrom( # type: ignore
                 root_dir=root,
                 arch="x86_64",
                 repo_name=self.kwargs.get("repo_name", "pillar"),
@@ -523,7 +523,7 @@ class Mesh:
             if self.unified_cdrom == "arch":
                 root = (self.root_dir or OVERLAY_IMAGES_ROOT) / "aarch64"
                 os.makedirs(root, exist_ok=True)
-                self.cdrom_path["aarch64"] = build_repo_cdrom(
+                self.cdrom_path["aarch64"] = build_repo_cdrom( # type: ignore
                     root_dir=root,
                     arch="aarch64",
                     repo_name=self.kwargs.get("repo_name", "pillar"),
@@ -531,7 +531,7 @@ class Mesh:
                     repo_url=self.kwargs.get("repo_url", "https://github.com/example/repo.git")
                 )
             else:
-                self.cdrom_path["aarch64"] = self.cdrom_path["x86_64"]
+                self.cdrom_path["aarch64"] = self.cdrom_path["x86_64"] # type: ignore
         return self
 
     def __exit__(self, *_):
@@ -548,7 +548,8 @@ class Mesh:
         Add a new VM to the mesh, optionally using a unified repo ISO.
         Returns the created Machine instance.
         """
-        repo_cdrom = Path(self.cdrom_path[arch]) if self.unified_cdrom in ["true", "arch"] else None
+        assert self.cdrom_path[arch] is not None, "Unified CD-ROM not built for this architecture."
+        repo_cdrom = Path(self.cdrom_path[arch]) if self.unified_cdrom in ["true", "arch"] else None # type: ignore
         machine = Machine(
             arch, 
             self.network, root_dir=self.root_dir, repo_cdrom=repo_cdrom, **kwargs)

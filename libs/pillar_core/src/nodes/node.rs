@@ -527,6 +527,10 @@ impl Node {
         }
     }
 
+    pub async fn lock_chain(&self) -> tokio::sync::MutexGuard<'_, Option<Chain>> {
+        self.inner.chain.lock().await
+    }
+
 }
 
 impl From<&Node> for Peer {

@@ -1,5 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use core::hash;
+use std::{collections::{HashMap, HashSet}, result};
 
+use lz4_flex::block;
 use pillar_crypto::{hashing::DefaultHash, signing::{DefaultVerifier, SigVerFunction}, types::StdByteArray};
 
 use tracing::instrument;
@@ -336,6 +338,52 @@ impl Chain {
         self.settle_new_block(block)?;
         Ok(())
     } 
+
+    /// Returns the hash of blocks which:
+    /// * are at least `min_depth` deep (if specified)
+    /// * are at most `max_depth` deep (if specified)
+    /// * limits the number of results to `limit` (if specified)
+    /// This will travel down all forks, starting at the deepest leaf.
+    /// DFS, so limit will perhaps cut out some forks entirely
+    /// 
+    /// The returned order is from deepest to shallowest
+    pub fn query_blocks(&self, min_depth: Option<u64>, max_depth: Option<u64>, limit: Option<usize>) -> Vec<StdByteArray> {
+        if self.depth < min_depth.unwrap_or(0) {
+            return vec![];
+        }
+
+        let deepest = &self.deepest_hash;
+        let mut stack: Vec<StdByteArray> = self.leaves.iter().filter(|x| {
+            let b = self.get_block(*x).unwrap();
+            x != &deepest && b.header.depth >= min_depth.unwrap_or(0)
+        }).cloned().collect();
+        stack.push(*deepest);
+        
+        let mut result = vec![];
+        let mut visited = HashSet::new();
+        while !stack.is_empty() && result.len() < limit.unwrap_or(usize::MAX) {
+            let block = stack.pop().unwrap();
+            if visited.contains(&block) {
+                continue;
+            }
+            visited.insert(block);
+            let b = self.get_block(&block);
+            if b.is_none() {
+                continue;
+            }
+            let b = b.unwrap();
+            if b.header.depth < min_depth.unwrap_or(0) {
+                continue;
+            }
+            stack.push(b.header.previous_hash);
+            // this block depth is 1 greater than previous
+            if b.header.depth+1 <= max_depth.unwrap_or(u64::MAX) {
+                result.push(block);
+            }
+
+        }
+        result
+    }
 }
 
 

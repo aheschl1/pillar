@@ -1,6 +1,6 @@
 
 mod run;
-mod handles;
+mod ws_handles;
 
 use pillar_core::{accounting::wallet::Wallet, nodes::peer::Peer};
 use pillar_crypto::signing::SigFunction;
