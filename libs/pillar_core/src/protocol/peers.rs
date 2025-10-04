@@ -44,6 +44,18 @@ pub async fn discover_peers(node: &mut Node) -> Result<(), std::io::Error> {
     Ok(())
 }
 
+pub async fn discover_peer(node: &mut Node, ip_address: std::net::IpAddr, port: u16) -> Result<Peer, std::io::Error> {
+    // send a message to the peer
+    let peer = Peer::new([0; 32], ip_address, port); // dummy public key is replaced by the real one in the response
+    let response = peer.communicate(&Message::DiscoveryRequest, &node.clone().into()).await?;
+    match response {
+        Message::DiscoveryResponse(peer) => {
+            Ok(peer)
+        }
+        _ => Err(std::io::Error::other("Invalid message received")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};

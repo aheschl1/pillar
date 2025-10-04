@@ -420,6 +420,9 @@ impl Node {
                     Ok(Message::ChainSyncResponse(vec![]))
                 }
             },
+            Message::DiscoveryRequest => {
+                Ok(Message::DiscoveryResponse(self.clone().into()))
+            },
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "Expected a request",

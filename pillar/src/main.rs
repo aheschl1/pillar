@@ -1,5 +1,7 @@
 
-use chrono::Local;
+mod run;
+mod handles;
+
 use pillar_core::{accounting::wallet::Wallet, nodes::peer::Peer};
 use pillar_crypto::signing::SigFunction;
 use pillar_serialize::PillarSerialize;
@@ -8,7 +10,7 @@ use tracing_subscriber::{filter::LevelFilter, fmt::{self, writer::BoxMakeWriter}
 use std::{fs::File, path::PathBuf};
 
 use crate::run::launch_node;
-mod run;
+
 
 #[derive(Clone)]
 struct Config {

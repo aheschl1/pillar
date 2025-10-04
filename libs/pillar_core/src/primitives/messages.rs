@@ -8,6 +8,11 @@ use pillar_serialize::PillarSerialize;
 pub enum Message {
     // dummy ping
     Ping,
+    // discovery
+    DiscoveryRequest,
+    // discovery response is simply a reponse with own peer
+    // used if someone knows ip address but not details like public key
+    DiscoveryResponse(Peer),
     // request full chain
     ChainRequest,
     // response with full chain
@@ -60,6 +65,8 @@ impl Message{
     pub fn name(&self) -> String {
         match self{
             Message::Ping => "Ping".to_string(),
+            Message::DiscoveryRequest => "DiscoveryRequest".to_string(),
+            Message::DiscoveryResponse(_) => "DiscoveryResponse".to_string(),
             Message::ChainRequest => "ChainRequest".to_string(),
             Message::ChainResponse(_) => "ChainResponse".to_string(),
             Message::PeerRequest => "PeerRequest".to_string(),
@@ -112,6 +119,8 @@ impl Message{
             Message::PercentileFilteredPeerRequest(_, _) => 21,
             Message::PercentileFilteredPeerResponse(_) => 22,
             Message::Error(_) => 23,
+            Message::DiscoveryRequest => 24,
+            Message::DiscoveryResponse(_) => 25,
         }
     }
 }
