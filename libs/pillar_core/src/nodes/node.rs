@@ -21,6 +21,8 @@ pub enum NodeState{
     ChainOutdated,
     ChainLoading,
     ChainSyncing,
+    FailedChainLoad,
+    FailedChainSync,
     Serving
 }
 
@@ -31,8 +33,8 @@ impl NodeState {
         // return true;
         matches!(self, 
             NodeState::ICD | 
-            NodeState::ChainSyncing | 
-            NodeState::ChainLoading | 
+            NodeState::ChainSyncing | NodeState::FailedChainSync |
+            NodeState::ChainLoading | NodeState::FailedChainLoad |
             NodeState::ChainOutdated 
         )
     }
@@ -43,8 +45,8 @@ impl NodeState {
         matches!(self,
             NodeState::ICD |
             NodeState::ChainOutdated | 
-            NodeState::ChainLoading | 
-            NodeState::ChainSyncing | 
+            NodeState::ChainLoading | NodeState::FailedChainLoad |
+            NodeState::ChainSyncing | NodeState::FailedChainSync |
             NodeState::Serving
         )
     }
@@ -242,7 +244,11 @@ impl Node {
                     },
                     Ok(Err(e)) => {
                         tracing::error!(target: "node_serve", "Node failed to initialize chain: {:?}", e);
-                        *self_clone.inner.state.write().await = state; // back to previous state
+                        *self_clone.inner.state.write().await = if state == NodeState::ChainSyncing {
+                            NodeState::FailedChainSync
+                        } else {
+                            NodeState::FailedChainLoad
+                        }; // back to previous state
                     },
                     Err(e) => tracing::error!(target: "node_serve", "Failed to start node: {:?}", e),
                 }
@@ -294,7 +300,7 @@ impl Node {
     ))]
     pub async fn serve_request(&mut self, message: &Message, _declared_peer: Peer) -> Result<Message, std::io::Error> {
         let state = self.inner.state.read().await.clone();
-        if state == NodeState::ICD || state == NodeState::ChainSyncing {
+        if state == NodeState::FailedChainSync || state == NodeState::FailedChainLoad {
             tracing::info!("Attempting to initialize chain since a peer was discovered.");
             self.initialize_chain().await;
         }

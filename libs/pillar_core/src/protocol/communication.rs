@@ -258,7 +258,7 @@ mod tests {
         let message: Message = read_standard_message(&mut peer_stream).await.unwrap();
         match message {
             Message::TransactionBroadcast(_) => {},
-            _ => panic!("Expected a TransactionRequest message"),
+            _ => panic!("Expected a TransactionRequest message. got {:?}", message),
         }
         // respond with ack
         let response = Message::TransactionAck;
