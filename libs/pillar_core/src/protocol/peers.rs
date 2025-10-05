@@ -7,7 +7,7 @@ use crate::{nodes::{node::Node, peer::Peer}, primitives::messages::Message};
 ///
 /// Args:
 /// node: &mut Node - The node to discover peers for
-pub async fn discover_peers(node: &mut Node) -> Result<(), std::io::Error> {
+pub async fn discover_peers(node: &Node) -> Result<(), std::io::Error> {
     let mut existing_peers = node
         .inner
         .peers

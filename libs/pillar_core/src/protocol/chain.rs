@@ -44,7 +44,7 @@ async fn query_block_from_peer(
 }
 
 /// Given a shard (validated) uses the node to get the chain
-async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, QueryError> {
+async fn shard_to_chain(node: &Node, shard: ChainShard) -> Result<Chain, QueryError> {
     let mut threads = Vec::new();
     // get many blocks simultaneously
     for (hash, _) in shard.headers{
@@ -91,9 +91,9 @@ async fn shard_to_chain(node: &mut Node, shard: ChainShard) -> Result<Chain, Que
 
 
 /// Discovery algorithm for the chain
-pub async fn dicover_chain(mut node: Node) -> Result<(), QueryError> {
+pub async fn discover_chain(node: Node) -> Result<(), QueryError> {
     // get the peers first
-    discover_peers(&mut node).await.map_err(
+    discover_peers(&node).await.map_err(
         QueryError::IOError
     )?;
     // broadcast the chain shard request to all peers
@@ -117,7 +117,7 @@ pub async fn dicover_chain(mut node: Node) -> Result<(), QueryError> {
     // find deepest out of peers
     let shard = deepest_shard(&chain_shards)?;
     // now we have valid shards
-    let chain = shard_to_chain(&mut node, shard.clone()).await?;
+    let chain = shard_to_chain(&node, shard.clone()).await?;
     node.inner.chain.lock().await.replace(chain);
     Ok(())
 }

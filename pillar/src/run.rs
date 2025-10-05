@@ -261,7 +261,6 @@ pub async fn launch_node(config: Config) {
         None,
         None
     );
-    node.serve().await;
     
     for peer in &config.wkps {
         tracing::info!("Configuring well-known peer: {}:{}", peer.ip_address, peer.port);
@@ -270,12 +269,15 @@ pub async fn launch_node(config: Config) {
         match discovered {
             Ok(peer) => {
                 node.maybe_update_peer(peer).await.ok();
+                tracing::info!("Discovered peer: {}:{}", peer.ip_address, peer.port);
             },
             Err(e) => {
                 tracing::error!("Failed to discover peer: {}:{} - {:?}", peer.ip_address, peer.port, e);
             }
         }
     }
+
+    node.serve().await;
 
 
     let state = AppState {

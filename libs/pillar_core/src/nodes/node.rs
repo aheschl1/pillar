@@ -9,7 +9,7 @@ use crate::{
     blockchain::chain::Chain,
     persistence::database::{Datastore, EmptyDatastore},
     primitives::{block::{Block, BlockHeader, Stamp}, messages::Message, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}},
-    protocol::{chain::{block_settle_consumer, dicover_chain, service_sync, sync_chain},
+    protocol::{chain::{block_settle_consumer, discover_chain, service_sync, sync_chain},
     communication::{broadcast_knowledge, serve_peers},
     reputation::{nth_percentile_peer, N_TRANSMISSION_SIGNATURES}},
 };
@@ -193,13 +193,30 @@ impl Node {
         let broadcast_killer = flume::bounded(1);
         let serve_killer = flume::bounded(1);
         let settle_killer = flume::bounded(1);
-    
+        
+        self.initialize_chain().await;
+       
+        let _ = tokio::spawn(serve_peers(self.clone(), Some(serve_killer.1.clone())));
+        let _ = tokio::spawn(broadcast_knowledge(self.clone(), Some(broadcast_killer.1.clone())));
+        let _ = tokio::spawn(block_settle_consumer(self.clone(), Some(settle_killer.1.clone())));
+        self.kill_broadcast = Some(broadcast_killer.0);
+        self.kill_serve = Some(serve_killer.0);
+        self.kill_settle = Some(settle_killer.0);
+        tracing::info!("Node processes finished launching. Broadcasting and serving threads are now running.");
+    }
+
+    #[instrument(skip_all, name = "Node::initialize_chain", fields(
+        public_key = ?self.inner.public_key,
+        ip_address = ?self.ip_address,
+        port = self.port
+    ))]
+    async fn initialize_chain(&self) {
         let state = self.inner.state.read().await.clone();
         let handle = match state {
             NodeState::ICD => {
                 tracing::info!("Starting ICD.");
                 *self.inner.state.write().await = NodeState::ChainLoading; // update state to chain loading
-                let handle = tokio::spawn(dicover_chain(self.clone()));
+                let handle = tokio::spawn(discover_chain(self.clone()));
                 Some(handle)
             },
             NodeState::ChainOutdated => {
@@ -209,7 +226,7 @@ impl Node {
                 Some(handle)
             },
             _ => {
-                panic!("Unexpected node state for startup: {:?}", self.inner.state);
+                panic!("Unexpected node state for initialization: {:?}", self.inner.state);
             }
         };
         if let Some(handle) = handle {
@@ -223,19 +240,15 @@ impl Node {
                         // update to serving
                         *state = NodeState::Serving;
                     },
-                    Ok(Err(e)) => tracing::error!(target: "node_serve", "Node failed to initialize chain: {:?}", e),
+                    Ok(Err(e)) => {
+                        tracing::error!(target: "node_serve", "Node failed to initialize chain: {:?}", e);
+                        *self_clone.inner.state.write().await = state; // back to previous state
+                    },
                     Err(e) => tracing::error!(target: "node_serve", "Failed to start node: {:?}", e),
                 }
             });
         }
         tracing::trace!("Node is now in state: {:?}", self.inner.state.read().await);
-        let _ = tokio::spawn(serve_peers(self.clone(), Some(serve_killer.1.clone())));
-        let _ = tokio::spawn(broadcast_knowledge(self.clone(), Some(broadcast_killer.1.clone())));
-        let _ = tokio::spawn(block_settle_consumer(self.clone(), Some(settle_killer.1.clone())));
-        self.kill_broadcast = Some(broadcast_killer.0);
-        self.kill_serve = Some(serve_killer.0);
-        self.kill_settle = Some(settle_killer.0);
-        tracing::info!("Node processes finished launching. Broadcasting and serving threads are now running.");
     }
 
     #[instrument(name = "Node::stop", skip(self), fields(
@@ -281,6 +294,10 @@ impl Node {
     ))]
     pub async fn serve_request(&mut self, message: &Message, _declared_peer: Peer) -> Result<Message, std::io::Error> {
         let state = self.inner.state.read().await.clone();
+        if state == NodeState::ICD || state == NodeState::ChainSyncing {
+            tracing::info!("Attempting to initialize chain since a peer was discovered.");
+            self.initialize_chain().await;
+        }
         match message {
             Message::PeerRequest => {
                 // send all peers

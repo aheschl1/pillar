@@ -4,6 +4,10 @@ use pillar_crypto::{hashing::{HashFunction, Hashable}, proofs::MerkleProof, type
 use pillar_serialize::PillarSerialize;
 
 
+/// ==============================================================
+/// When adding a new message, update protocol/serialization.rs
+/// ==============================================================
+
 #[derive( Debug, Clone)]
 pub enum Message {
     // dummy ping
