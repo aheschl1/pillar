@@ -52,7 +52,7 @@ pub async fn discover_peer(node: &mut Node, ip_address: std::net::IpAddr, port: 
         Message::DiscoveryResponse(peer) => {
             Ok(peer)
         }
-        _ => Err(std::io::Error::other("Invalid message received")),
+        _ => Err(std::io::Error::other(format!("Invalid message received: {:?}", response))),
     }
 }
 

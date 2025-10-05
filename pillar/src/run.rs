@@ -267,10 +267,13 @@ pub async fn launch_node(config: Config) {
         tracing::info!("Configuring well-known peer: {}:{}", peer.ip_address, peer.port);
         // we need to actually discover the peer to get its public key
         let discovered = discover_peer(&mut node, peer.ip_address.into(), peer.port).await;
-        if let Ok(peer) = discovered {
-            node.maybe_update_peer(peer).await.ok();
-        }else{
-            tracing::error!("Failed to discover peer: {}:{}", peer.ip_address, peer.port);
+        match discovered {
+            Ok(peer) => {
+                node.maybe_update_peer(peer).await.ok();
+            },
+            Err(e) => {
+                tracing::error!("Failed to discover peer: {}:{} - {:?}", peer.ip_address, peer.port, e);
+            }
         }
     }
 

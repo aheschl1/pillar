@@ -223,7 +223,7 @@ impl Node {
                         // update to serving
                         *state = NodeState::Serving;
                     },
-                    Ok(Err(e)) => tracing::error!(target: "node_serve", "Node failed to start: {:?}", e),
+                    Ok(Err(e)) => tracing::error!(target: "node_serve", "Node failed to initialize chain: {:?}", e),
                     Err(e) => tracing::error!(target: "node_serve", "Failed to start node: {:?}", e),
                 }
             });
