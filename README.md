@@ -4,8 +4,6 @@ Zero-trust decentralized ledger with a Proof of Reputation (PoR) trust layer. It
 
 ## Core cryptographic and data structures
 
-This project centers on a small set of transparent primitives.
-
 - Hashing (`pillar_crypto::hashing`)
   - Default: SHA3-256 via `DefaultHash`.
   - `Hashable` trait defines how a type contributes bytes to the hasher.
@@ -40,18 +38,17 @@ This project centers on a small set of transparent primitives.
 
 The network and data flow are illustrated below, alongside how blocks are settled and how components interact.
 
-- Network flow: `figures/net_flow.png`
-- Chain structure: `figures/structure.png`
-- Settle chart: `figures/settle_chart.png`
-
-![Network Flow](./figures/net_flow.png)
+- [Network flow](figures/net_flow.png)
+- [Chain structure](figures/structure.png)
+- [Settle chart](figures/settle_chart.png)
 
 ## Repository layout
 
-- `libs/pillar_core/` – Core protocol and logic
-- `libs/pillar_crypto/` – Cryptographic primitives
-- `libs/pillar_serialize/` – Lightweight serialization utilities used across crates.
-- `vm_mesh/` – VM Mesh framework for distributed testing and simulation
+- [`pillar/`](pillar/) – Entrpoint for managing a Pillar node
+- [`libs/pillar_core/`](libs/pillar_core/) – Core protocol and logic
+- [`libs/pillar_crypto/`](libs/pillar_crypto/) – Cryptographic primitives
+- [`libs/pillar_serialize/`](libs/pillar_serialize/) – Lightweight serialization utilities used across crates.
+- [`vm_mesh/`](vm_mesh/) – VM Mesh framework for distributed testing and simulation
 
 ## Testing
 
@@ -59,7 +56,7 @@ The network and data flow are illustrated below, alongside how blocks are settle
 cargo test
 ```
 
-Note: Tests log to `libs/pillar_core/test_output/{timestamp}/output.log`. Some log errors can occur; they don’t indicate failing tests.
+Note: Tests log to `./test_output/{timestamp}/output.log`. Some log errors can occur; they don’t indicate failing tests.
 
 ## Serialization and platform notes
 
@@ -67,9 +64,10 @@ Serialization works only for 64-bit targets but is endian-agnostic. Big-endian m
 
 ## VM Mesh: Distributed Testing and Simulation
 
-The VM Mesh framework enables distributed testing and simulation of the Pillar protocol across multiple virtual machines, supporting both x86_64 and aarch64 architectures. It automates the provisioning, networking, and orchestration of VMs using QEMU, with unified repository injection and cloud-init configuration.
+The VM Mesh framework enables distributed testing and simulation of the Pillar protocol across multiple virtual machines, supporting both x86_64 and aarch64 architectures. It automates the provisioning, networking, and orchestration of VMs using QEMU, with unified repository injection and cloud-init configuration. This is used for testing across different architectures, in order to assert serialization compatibility.
 
 ### Features
+
 - **Automated VM Provisioning:** Launch any number of VMs with isolated overlays and custom network bridges.
 - **Unified Codebase Injection:** Clones the repository and injects it into all VMs via a shared ISO, ensuring consistent test environments.
 - **Cloud-Init Integration:** Uses cloud-init to configure SSH keys, networking, and repository setup for each VM.
@@ -78,6 +76,7 @@ The VM Mesh framework enables distributed testing and simulation of the Pillar p
 - **Architecture Flexibility:** Supports both x86_64 and aarch64 VMs for cross-platform protocol validation.
 
 ### Usage
+
 To launch a mesh of VMs for distributed testing:
 
 ```bash
@@ -85,6 +84,7 @@ python vm_mesh/runner.py --n-x86 2 --n-aarch 1 --name test-mesh
 ```
 
 This will:
+
 - Create a dedicated directory for the mesh and overlays
 - Provision 2 x86_64 and 1 aarch64 VM, each with the Pillar repository injected
 - Set up a virtual network bridge for inter-VM communication
@@ -97,8 +97,21 @@ python vm_mesh/runner.py --n-x86 1 --name debug-vm
 ```
 
 ### Integration
+
 The VM Mesh is ideal for:
+
 - End-to-end protocol validation across multiple nodes
 - Simulating network conditions and consensus scenarios
 - Automated CI/CD pipelines for distributed ledger testing
 - Cross-architecture compatibility checks
+
+## Running a Pillar Node
+
+To run, using the Docker image is recommended:
+
+```bash
+./build.sh # builds the docker image
+./run.sh --work-dir=<WORK_DIR> --ip-address=<IP_ADDRESS> --wkps=<WKP_SERVERS> --name=<NODE_NAME> --config=<CONFIG_FILE>  # runs the node container. All arguments can be left blank, in which case a new wallet and random name will be generated. Node will listen on 0.0.0.0
+```
+
+For convenience, `./kill_all.sh` stops all running containers.
