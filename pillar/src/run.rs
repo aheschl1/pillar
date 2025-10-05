@@ -292,8 +292,8 @@ pub async fn launch_node(config: Config) {
         .route("/blocks", get(handle_block_list))
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await.unwrap();
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
 
-    tracing::info!("Listening on ws://127.0.0.1:3000");
+    tracing::info!("Listening on ws://0.0.0.0:3000");
     axum::serve(listener, app).await.unwrap();
 }

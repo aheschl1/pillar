@@ -72,8 +72,7 @@ impl PillarSerialize for Config {
     }
 }
 
-fn setup_tracing(root: &PathBuf, run_id: uuid::Uuid) {
-    let log_dir = root.join(run_id.to_string());
+fn setup_tracing(log_dir: &PathBuf, run_name: String) {
     let log_dir = log_dir.to_str().unwrap();
     std::fs::create_dir_all(log_dir).expect("failed to create log directory");
 
@@ -104,24 +103,28 @@ fn setup_tracing(root: &PathBuf, run_id: uuid::Uuid) {
 #[command(version, about = "Pillar Node")]
 struct Args {
     #[arg(short, long, help = "Root directory for output files", default_value = "./work")]
-    root: PathBuf,
-    #[arg(short, long, help = "IP address to bind the node to", default_value = "127.0.0.1")]
+    work_dir: PathBuf,
+    #[arg(short, long, help = "IP address to bind the node to", default_value = "0.0.0.0")]
     ip_address: String,
-    // list of well-known peers in the format <ip>. Public keys will be discovered automatically
     #[arg(short, long, help = "List of well-known peers in the format <ip>", num_args = 0.., value_delimiter = ',')]
     wkps: Vec<String>,
+    #[arg(short, long, help = "Name of the run (folders will be created with this name)")]
+    name: Option<String>,
+    #[arg(short, long, help = "Path to config binary file (if not provided, a new wallet will be generated)")]
+    config: Option<PathBuf>,
 }
 
 
 #[tokio::main]
 async fn main() -> Result<(), ()> {
     let args = Args::parse();
-    println!("Starting pillar node with output root: {}", args.root.display());
     // create a run id
-    let run_id = uuid::Uuid::new_v4();
-    tracing::info!("Run ID: {}", run_id);
+    let run_id = args.name.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    tracing::debug!("Run ID: {}", run_id);
+    let log_dir = args.work_dir.join(run_id.clone());
+    tracing::info!("Starting pillar node with output root: {}", args.work_dir.display());
     // setup a tracing subscriber
-    setup_tracing(&args.root, run_id);
+    setup_tracing(&log_dir, run_id);
     let ip_address = args.ip_address.clone();
     // sanitize ip address
     let ip_address = ip_address.parse::<std::net::IpAddr>().unwrap();
@@ -142,8 +145,13 @@ async fn main() -> Result<(), ()> {
             }
         }
     }).collect();
-    let config = Config::new(wkps, ip_address, None);
-    config.save(&args.root);
+    let config = if let Some(config_path) = args.config {
+        Config::from_file(&config_path)
+    }else{
+        let config = Config::new(wkps, ip_address, None);
+        config.save(&log_dir);
+        config
+    };
     launch_node(config).await;
     Ok(())
 }

@@ -215,20 +215,20 @@ impl Node {
     async fn initialize_chain(&self) {
         let state = self.inner.state.read().await.clone();
         let handle = match state {
-            NodeState::ICD => {
+            NodeState::ICD | NodeState::FailedChainLoad => {
                 tracing::info!("Starting ICD.");
                 *self.inner.state.write().await = NodeState::ChainLoading; // update state to chain loading
                 let handle = tokio::spawn(discover_chain(self.clone()));
                 Some(handle)
             },
-            NodeState::ChainOutdated => {
+            NodeState::ChainOutdated | NodeState::FailedChainSync => {
                 tracing::info!("Node has an outdated chain. Starting sync.");
                 *self.inner.state.write().await = NodeState::ChainSyncing; // update state to chain syncing
                 let handle = tokio::spawn(sync_chain(self.clone()));
                 Some(handle)
             },
             _ => {
-                panic!("Unexpected node state for initialization: {:?}", self.inner.state);
+                panic!("Unexpected node state for initialization: {:?}", state);
             }
         };
         if let Some(handle) = handle {
@@ -300,11 +300,7 @@ impl Node {
     ))]
     pub async fn serve_request(&mut self, message: &Message, _declared_peer: Peer) -> Result<Message, std::io::Error> {
         let state = self.inner.state.read().await.clone();
-        if state == NodeState::FailedChainSync || state == NodeState::FailedChainLoad {
-            tracing::info!("Attempting to initialize chain since a peer was discovered.");
-            self.initialize_chain().await;
-        }
-        match message {
+        let response = match message {
             Message::PeerRequest => {
                 // send all peers
                 let response = Message::PeerResponse(self.inner.peers.read().await.values().cloned().collect());
@@ -450,7 +446,14 @@ impl Node {
                 std::io::ErrorKind::InvalidInput,
                 "Expected a request",
             )),
+        };
+        if state == NodeState::FailedChainSync || state == NodeState::FailedChainLoad {
+            // triggers a chain load/sync attempt if we are in a failed state
+            // this is here since we may just have discovered a new peer, or a new one is active
+            tracing::info!("Attempting to initialize chain since a peer was discovered.");
+            self.initialize_chain().await;
         }
+        response
     }
 
     /// After receiving an unmined block, stamp/broadcast/maybe enqueue for mining.
