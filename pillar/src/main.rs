@@ -107,6 +107,9 @@ struct Args {
     root: PathBuf,
     #[arg(short, long, help = "IP address to bind the node to", default_value = "127.0.0.1")]
     ip_address: String,
+    // list of well-known peers in the format <ip>. Public keys will be discovered automatically
+    #[arg(short, long, help = "List of well-known peers in the format <ip>", num_args = 0.., value_delimiter = ',')]
+    wkps: Vec<String>,
 }
 
 
@@ -127,7 +130,11 @@ async fn main() -> Result<(), ()> {
         tracing::error!("Cannot bind to broadcast or multicast address");
         return Err(());
     }
-    let config = Config::new(vec![], ip_address, None);
+    let wkps: Vec<Peer> = args.wkps.iter().map(|ip| {
+        let ipaddr = ip.parse::<std::net::IpAddr>().unwrap();
+        Peer::new([0u8; 32], ipaddr, pillar_core::PROTOCOL_PORT) // public key will be discovered later
+    }).collect();
+    let config = Config::new(wkps, ip_address, None);
     config.save(&args.root);
     launch_node(config).await;
     Ok(())

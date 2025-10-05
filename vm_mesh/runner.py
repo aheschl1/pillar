@@ -589,7 +589,7 @@ class Mesh:
         """
         results = []
         for machine in self.machines:
-            results.append(machine.act(command))
+            results.append(machine.act(command.replace("{mesh_peers}", ",".join([m.ip_address for m in self.machines if m != machine]))))
         return results
     
     def launch_all(self):
@@ -648,7 +648,7 @@ def parse_args():
     parser.add_argument(
         "--action",
         type=str,
-        default="cd /root && ./pillar/pillar --ip-address={ip_address}",
+        default="cd /root && ./pillar/pillar --ip-address={ip_address} --wkps={mesh_peers}",
         help="Command to run machines"
     )
     return parser.parse_args()

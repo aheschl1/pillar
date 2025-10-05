@@ -154,10 +154,15 @@ pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
 async fn send_error_message(stream: &mut TcpStream, e: impl std::error::Error) {
     // write message size
     let serialized = package_standard_message(&Message::Error(e.to_string())).unwrap();
-    stream
+    let r = stream
         .write_all(&serialized)
-        .await
-        .unwrap();
+        .await;
+    
+    if let Err(e) = r {
+        tracing::error!("Failed to send error message: {}", e);
+        return;
+    }
+
     tracing::debug!("Sent {} bytes to peer", serialized.len());
 }
 

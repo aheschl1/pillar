@@ -257,12 +257,23 @@ pub async fn launch_node(config: Config) {
         config.wallet.get_private_key(),
         config.ip_address,
         pillar_core::PROTOCOL_PORT,
-        config.wkps.clone(),
+        vec![],
         None,
         None
     );
-
     node.serve().await;
+    
+    for peer in &config.wkps {
+        tracing::info!("Configuring well-known peer: {}:{}", peer.ip_address, peer.port);
+        // we need to actually discover the peer to get its public key
+        let discovered = discover_peer(&mut node, peer.ip_address.into(), peer.port).await;
+        if let Ok(peer) = discovered {
+            node.maybe_update_peer(peer).await.ok();
+        }else{
+            tracing::error!("Failed to discover peer: {}:{}", peer.ip_address, peer.port);
+        }
+    }
+
 
     let state = AppState {
         node,
