@@ -130,9 +130,17 @@ async fn main() -> Result<(), ()> {
         tracing::error!("Cannot bind to broadcast or multicast address");
         return Err(());
     }
-    let wkps: Vec<Peer> = args.wkps.iter().map(|ip| {
-        let ipaddr = ip.parse::<std::net::IpAddr>().unwrap();
-        Peer::new([0u8; 32], ipaddr, pillar_core::PROTOCOL_PORT) // public key will be discovered later
+    let wkps: Vec<Peer> = args.wkps.iter().filter_map(|ip| {
+        let ipaddr = ip.parse::<std::net::IpAddr>();
+        match ipaddr {
+            Err(e) => {
+                tracing::error!("Invalid IP address in well-known peers: {}", e);
+                None
+            },
+            Ok(addr) => {
+                Some(Peer::new([0u8; 32], addr, pillar_core::PROTOCOL_PORT)) // public key will be discovered later
+            }
+        }
     }).collect();
     let config = Config::new(wkps, ip_address, None);
     config.save(&args.root);
