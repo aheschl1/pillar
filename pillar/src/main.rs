@@ -104,9 +104,9 @@ fn setup_tracing(log_dir: &PathBuf, run_name: String) {
 struct Args {
     #[arg(short, long, help = "Root directory for output files", default_value = "./work")]
     work_dir: PathBuf,
-    #[arg(short, long, help = "IP address to bind the node to", default_value = "0.0.0.0")]
+    #[arg(short, long, help = "IP address to bind the node to", required = true)]
     ip_address: String,
-    #[arg(short, long, help = "List of well-known peers in the format <ip>", num_args = 0.., value_delimiter = ',')]
+    #[arg(short, long, help = "List of well-known peers in the form of <ipa>,<ipb>,...", num_args = 0.., value_delimiter = ',')]
     wkps: Vec<String>,
     #[arg(short, long, help = "Name of the run (folders will be created with this name)")]
     name: Option<String>,
@@ -129,8 +129,8 @@ async fn main() -> Result<(), ()> {
     // sanitize ip address
     let ip_address = ip_address.parse::<std::net::IpAddr>().unwrap();
     // ensure not multicast
-    if ip_address.is_multicast() {
-        tracing::error!("Cannot bind to broadcast or multicast address");
+    if ip_address.is_multicast() || ip_address.is_unspecified() {
+        tracing::error!("Cannot bind to broadcast or multicast address, or unspecified address.");
         return Err(());
     }
     let wkps: Vec<Peer> = args.wkps.iter().filter_map(|ip| {

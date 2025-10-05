@@ -111,7 +111,8 @@ To run, using the Docker image is recommended:
 
 ```bash
 ./build.sh # builds the docker image
-./run.sh --work-dir=<WORK_DIR> --ip-address=<IP_ADDRESS> --wkps=<WKP_SERVERS> --name=<NODE_NAME> --config=<CONFIG_FILE>  # runs the node container. All arguments can be left blank, in which case a new wallet and random name will be generated. Node will listen on 0.0.0.0
+# Runs the node container. All arguments can be left blank, in which case a new wallet and random name will be generated. Node will listen on 0.0.0.0
+./run.sh --work-dir=<WORK_DIR> --ip-address=<IP_ADDRESS> --wkps=<WKP_SERVERS> --name=<NODE_NAME> --config=<CONFIG_FILE>  
 ```
 
 For convenience, `./kill_all.sh` stops all running containers.
