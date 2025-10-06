@@ -50,13 +50,6 @@ CID=$(docker run -d --rm --init \
 
 sleep 0.5
 
-# it may have crashed already, so check
-
-if ! docker ps -q --filter "name=$CID" | grep -q .; then
-    echo "Container failed to start. Check logs in work/<id>/output.log" >&2
-    exit 1
-fi
-
 # success
 IP=$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CID")
 echo "Container started: $CID"

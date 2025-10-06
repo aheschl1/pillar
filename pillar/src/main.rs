@@ -1,6 +1,7 @@
 
 mod run;
 mod ws_handles;
+mod log_stream;
 
 use pillar_core::{accounting::wallet::Wallet, nodes::peer::Peer};
 use pillar_crypto::signing::SigFunction;
@@ -9,7 +10,7 @@ use clap::Parser;
 use tracing_subscriber::{filter::LevelFilter, fmt::{self, writer::BoxMakeWriter}, layer::SubscriberExt, util::SubscriberInitExt, Layer, Registry};
 use std::{fs::File, path::PathBuf};
 
-use crate::run::launch_node;
+use crate::{log_stream::BroadcastWriter, run::launch_node};
 
 
 #[derive(Clone)]
@@ -72,7 +73,7 @@ impl PillarSerialize for Config {
     }
 }
 
-fn setup_tracing(log_dir: &PathBuf, run_name: String) {
+fn setup_tracing(log_dir: &PathBuf) {
     let log_dir = log_dir.to_str().unwrap();
     std::fs::create_dir_all(log_dir).expect("failed to create log directory");
 
@@ -91,10 +92,15 @@ fn setup_tracing(log_dir: &PathBuf, run_name: String) {
         .with_level(true)
         .with_filter(LevelFilter::DEBUG);
 
+    let ws_layer = fmt::layer()
+        .with_writer(BoxMakeWriter::new(BroadcastWriter))
+        .with_filter(LevelFilter::INFO);
+
     // === Combined subscriber ===
     Registry::default()
         .with(file_layer)
         .with(console_layer)
+        .with(ws_layer)
         .try_init()
         .expect("Failed to initialize tracing subscriber");
 }
@@ -106,7 +112,7 @@ struct Args {
     work_dir: PathBuf,
     #[arg(short, long, help = "IP address to bind the node to", required = true)]
     ip_address: String,
-    #[arg(short, long, help = "List of well-known peers in the form of <ipa>,<ipb>,...", num_args = 0.., value_delimiter = ',')]
+    #[arg(long, help = "List of well-known peers in the form of <ipa>,<ipb>,...", num_args = 0.., value_delimiter = ',')]
     wkps: Vec<String>,
     #[arg(short, long, help = "Name of the run (folders will be created with this name)")]
     name: Option<String>,
@@ -124,7 +130,7 @@ async fn main() -> Result<(), ()> {
     let log_dir = args.work_dir.join(run_id.clone());
     tracing::info!("Starting pillar node with output root: {}", args.work_dir.display());
     // setup a tracing subscriber
-    setup_tracing(&log_dir, run_id);
+    setup_tracing(&log_dir);
     let ip_address = args.ip_address.clone();
     // sanitize ip address
     let ip_address = ip_address.parse::<std::net::IpAddr>().unwrap();

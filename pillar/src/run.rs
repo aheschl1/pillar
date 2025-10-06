@@ -3,7 +3,8 @@ use pillar_core::{nodes::{node::Node, peer::Peer}, protocol::peers::discover_pee
 use pillar_crypto::types::StdByteArray;
 use serde::{Deserialize, Serialize};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use crate::{ws_handles::{handle_transaction_post, TransactionPost}, Config};
+use crate::{log_stream::ws_logs, ws_handles::{handle_transaction_post, TransactionPost}, Config};
+use tower_http::cors::{CorsLayer, Any};
 
 
 #[derive(Clone)]
@@ -148,6 +149,25 @@ async fn handle_peer_post(
 }
 
 #[derive(Serialize, Deserialize)]
+struct PeerResponse {
+    public_key: StdByteArray,
+    ip_address: String,
+    port: u16,
+}
+
+async fn handle_peer_get(
+    State(state): State<AppState>,
+) -> Json<StatusResponse<Vec<PeerResponse>>> {
+    let peers = state.node.inner.peers.read().await.clone();
+    let peer_responses: Vec<PeerResponse> = peers.into_iter().map(|(_, peer)| PeerResponse {
+        public_key: peer.public_key,
+        ip_address: peer.ip_address.to_string(),
+        port: peer.port,
+    }).collect();
+    Json(StatusResponse::success(peer_responses))
+}
+
+#[derive(Serialize, Deserialize)]
 struct HeaderResponse {
     previous: StdByteArray,
     merkle_root: StdByteArray,
@@ -280,20 +300,36 @@ pub async fn launch_node(config: Config) {
     node.serve().await;
 
 
+    let api_address = format!("{}:3000", config.ip_address);
+    let logs_address = format!("{}:3001", config.ip_address);
     let state = AppState {
         node,
         config
     };
-    let app = Router::new()
+    let cors = CorsLayer::new()
+        .allow_origin(Any)      // allow all origins
+        .allow_methods(Any)     // allow all HTTP methods
+        .allow_headers(Any);    // allow all headers
+    let app_api = Router::new()
         .route("/ws", get(ws_route))
         .route("/peer/{public_key}", post(handle_peer_post)) // allow with public key
         .route("/peer", post(handle_peer_post)) // allow without public key
+        .route("/peers", get(handle_peer_get))
         .route("/block/{hash}", get(handle_block_get))
         .route("/blocks", get(handle_block_list))
-        .with_state(state);
+        .with_state(state)
+        .layer(cors);
+    
+    let app_logs = Router::new().route("/logs", get(ws_logs));
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    let api_listener = tokio::net::TcpListener::bind(api_address.clone()).await.unwrap();
+    let logs_listener = tokio::net::TcpListener::bind(logs_address.clone()).await.unwrap();
 
-    tracing::info!("Listening on ws://0.0.0.0:3000");
-    axum::serve(listener, app).await.unwrap();
+    tracing::info!("Listening on {}", api_address);
+    tracing::info!("Listening for log requests on {}", logs_address);
+
+    let _ = tokio::join!(
+        axum::serve(api_listener, app_api),
+        axum::serve(logs_listener, app_logs)
+    );
 }
