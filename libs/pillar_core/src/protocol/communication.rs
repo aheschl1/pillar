@@ -37,7 +37,7 @@ pub async fn broadcast_knowledge(node: Node, stop_signal: Option<flume::Receiver
             }
         }
         let mut i = 0;
-        while i < 10 && let Some(broadcast) = node.inner.broadcast_queue.dequeue() {
+        while i < 10 && let Some((broadcast, exclude_peer)) = node.inner.broadcast_queue.dequeue() {
             // receive the transaction from the sender
             let hash = broadcast.hash(&mut hasher).unwrap();
             // do not broadcast if already broadcasted
@@ -48,7 +48,12 @@ pub async fn broadcast_knowledge(node: Node, stop_signal: Option<flume::Receiver
                 }
                 broadcasted_already.insert(hash);
             }
-            node.broadcast(&broadcast).await?;
+            // broadcast the message, excluding the peer if specified
+            if let Some(exclude) = exclude_peer {
+                node.broadcast_with_exclude(&broadcast, &exclude).await?;
+            } else {
+                node.broadcast(&broadcast).await?;
+            }
             // add the message to the broadcasted list
             i += 1; // We want to make sure we check back at the mining pool
         }
@@ -244,28 +249,18 @@ mod tests {
         let message = Message::TransactionBroadcast(t);
         stream.write_all(&package_standard_message(&message).unwrap()).await.unwrap();
 
-        // Verify the message was broadcasted back
-
-        let (mut peer_stream, _) = listener.accept().await.unwrap();
+        // With the new exclude logic, the message should NOT be broadcasted back to the sender
+        // We verify by attempting to accept with a timeout. If the timeout occurs, the test passes.
         
-        // receive peer declaration from node
-        let declaration: Message = read_standard_message(&mut peer_stream).await.unwrap();
-        match declaration {
-            Message::Declaration(_) => {},
-            _ => panic!("Expected a Declaration message"),
-        }
-
-        let message: Message = read_standard_message(&mut peer_stream).await.unwrap();
-        match message {
-            Message::TransactionBroadcast(_) => {},
-            _ => panic!("Expected a TransactionRequest message. got {:?}", message),
-        }
-        // respond with ack
-        let response = Message::TransactionAck;
-        // send bytes then message
-        let response_serialized = package_standard_message(&response).unwrap();
-        peer_stream.write_all(&response_serialized).await.unwrap();
+        let accept_result = tokio::time::timeout(
+            tokio::time::Duration::from_millis(500),
+            listener.accept()
+        ).await;
         
+        // The broadcast should NOT happen (timeout should occur)
+        assert!(accept_result.is_err(), "Expected no broadcast back to sender, but got a connection");
+        
+        // Verify the message was added to the broadcasted list
         let broadcasted = node.inner.broadcasted_already.read().await;
         let mut hasher = DefaultHash::new();
         let message_hash = message.hash(&mut hasher).unwrap();
