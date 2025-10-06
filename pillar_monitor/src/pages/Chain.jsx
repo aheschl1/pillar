@@ -1,95 +1,17 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useServer } from '../contexts/serverContext';
+import React, { useState } from 'react';
+import { useBlocks } from '../hooks/useBlocks';
 import BlockComponent from '../components/BlockComponent';
-import { toHex } from '../api/utils';
 import './Chain.css';
 
 const Chain = () => {
-    const { ipAddress, httpPort, isConnected } = useServer();
+    const { blocks, loading, fetchingBlocks, error, fetchBlockHashes } = useBlocks();
     const [minDepth, setMinDepth] = useState('');
     const [maxDepth, setMaxDepth] = useState('');
     const [limit, setLimit] = useState('10');
-    const [blockHashes, setBlockHashes] = useState([]);
-    const [blocks, setBlocks] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState(null);
-    const [fetchingBlocks, setFetchingBlocks] = useState(false);
 
-    const fetchBlockHashes = async () => {
-        if (!isConnected) {
-            setError('Not connected to server');
-            return;
-        }
-
-        setLoading(true);
-        setError(null);
-
-        try {
-            const params = new URLSearchParams();
-            if (minDepth) params.append('min_depth', minDepth);
-            if (maxDepth) params.append('max_depth', maxDepth);
-            if (limit) params.append('limit', limit);
-            
-            const endpoint = `/blocks${params.toString() ? `?${params.toString()}` : ''}`;
-            const response = await fetch(`http://${ipAddress}:${httpPort}${endpoint}`);
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            const result = await response.json();
-            if (result.success && result.body !== undefined) {
-                setBlockHashes(result.body || []);
-                setBlocks([]);
-            } else {
-                throw new Error(result.error || 'Failed to fetch block hashes');
-            }
-        } catch (e) {
-            console.error('Failed to fetch block hashes:', e);
-            setError(e.message);
-        } finally {
-            setLoading(false);
-        }
+    const handleFetchBlocks = () => {
+        fetchBlockHashes(minDepth, maxDepth, limit);
     };
-
-    const fetchBlockDetails = useCallback(async () => {
-        if (blockHashes.length === 0 || !isConnected) return;
-        
-        setFetchingBlocks(true);
-        try {
-            const blockPromises = blockHashes.map(async (hash) => {
-                const hexHash = toHex(hash);
-                try {
-                    const response = await fetch(`http://${ipAddress}:${httpPort}/block/${hexHash}`);
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-                    const result = await response.json();
-                    if (result.success && result.body !== undefined) {
-                        return result.body;
-                    } else {
-                        throw new Error(result.error || 'Failed to fetch block');
-                    }
-                } catch (e) {
-                    console.error(`Failed to fetch block ${hexHash}:`, e);
-                    return null;
-                }
-            });
-            
-            const fetchedBlocks = await Promise.all(blockPromises);
-            setBlocks(fetchedBlocks.filter(b => b !== null));
-        } catch (e) {
-            console.error('Failed to fetch block details:', e);
-        } finally {
-            setFetchingBlocks(false);
-        }
-    }, [blockHashes, ipAddress, httpPort, isConnected]);
-
-    useEffect(() => {
-        if (blockHashes.length > 0) {
-            fetchBlockDetails();
-        }
-    }, [blockHashes, fetchBlockDetails]);
 
     return (
         <div className="chain-container">
@@ -132,7 +54,7 @@ const Chain = () => {
                     </div>
                     <button 
                         className="fetch-button" 
-                        onClick={fetchBlockHashes}
+                        onClick={handleFetchBlocks}
                         disabled={loading}
                     >
                         {loading ? 'Loading...' : 'Fetch Blocks'}
@@ -158,10 +80,7 @@ const Chain = () => {
                         </div>
                     </>
                 )}
-                {!fetchingBlocks && blocks.length === 0 && blockHashes.length > 0 && (
-                    <p className="info-message">No blocks found.</p>
-                )}
-                {blockHashes.length === 0 && (
+                {!fetchingBlocks && blocks.length === 0 && !loading && (
                     <p className="info-message">Use the form above to query blocks from the blockchain.</p>
                 )}
             </div>
