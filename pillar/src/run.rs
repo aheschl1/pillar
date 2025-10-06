@@ -1,5 +1,7 @@
+use std::sync::Arc;
+
 use axum::{extract::{Path, Query, State}, http::HeaderMap, response::IntoResponse, routing::{get, post}, Json, Router};
-use pillar_core::{nodes::{node::Node, peer::Peer}, protocol::peers::discover_peer};
+use pillar_core::{nodes::{node::Node, peer::Peer}, persistence::database::GenesisDatastore, protocol::peers::discover_peer};
 use pillar_crypto::types::StdByteArray;
 use serde::{Deserialize, Serialize};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -271,14 +273,35 @@ async fn handle_block_list(
     Json(response)
 }
 
-pub async fn launch_node(config: Config) {
+#[derive(Serialize, Deserialize)]
+struct NodeInfo {
+    public_key: StdByteArray,
+    ip_address: String,
+    port: u16,
+    peer_count: usize,
+}
+
+async fn handle_node_get(
+    State(state): State<AppState>,
+) -> Json<StatusResponse<NodeInfo>> {
+    let peer_count = state.node.inner.peers.read().await.len();
+    let response = NodeInfo {
+        public_key: state.config.wallet.address,
+        ip_address: state.node.ip_address.to_string(),
+        port: state.node.port,
+        peer_count,
+    };
+    Json(StatusResponse::success(response))
+}
+
+pub async fn launch_node(config: Config, genesis: bool) {
     let mut node = Node::new(
         config.wallet.address,
         config.wallet.get_private_key(),
         config.ip_address,
         pillar_core::PROTOCOL_PORT,
         vec![],
-        None,
+        if genesis { Some(Arc::new(GenesisDatastore::new())) } else { None },
         None
     );
     
@@ -317,6 +340,7 @@ pub async fn launch_node(config: Config) {
         .route("/peers", get(handle_peer_get))
         .route("/block/{hash}", get(handle_block_get))
         .route("/blocks", get(handle_block_list))
+        .route("/node", get(handle_node_get))
         .with_state(state)
         .layer(cors);
     

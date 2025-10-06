@@ -212,7 +212,7 @@ impl Node {
         ip_address = ?self.ip_address,
         port = self.port
     ))]
-    async fn initialize_chain(&self) {
+    pub(crate) async fn initialize_chain(&self) {
         let state = self.inner.state.read().await.clone();
         let handle = match state {
             NodeState::ICD | NodeState::FailedChainLoad => {
@@ -223,7 +223,8 @@ impl Node {
             },
             NodeState::ChainOutdated | NodeState::FailedChainSync => {
                 tracing::info!("Node has an outdated chain. Starting sync.");
-                *self.inner.state.write().await = NodeState::ChainSyncing; // update state to chain syncing
+                let mut state = self.inner.state.write().await;
+                *state = NodeState::ChainSyncing; // update state to chain syncing
                 let handle = tokio::spawn(sync_chain(self.clone()));
                 Some(handle)
             },
@@ -300,7 +301,7 @@ impl Node {
     ))]
     pub async fn serve_request(&mut self, message: &Message, _declared_peer: Peer) -> Result<Message, std::io::Error> {
         let state = self.inner.state.read().await.clone();
-        let response = match message {
+        match message {
             Message::PeerRequest => {
                 // send all peers
                 let response = Message::PeerResponse(self.inner.peers.read().await.values().cloned().collect());
@@ -446,14 +447,7 @@ impl Node {
                 std::io::ErrorKind::InvalidInput,
                 "Expected a request",
             )),
-        };
-        if state == NodeState::FailedChainSync || state == NodeState::FailedChainLoad {
-            // triggers a chain load/sync attempt if we are in a failed state
-            // this is here since we may just have discovered a new peer, or a new one is active
-            tracing::info!("Attempting to initialize chain since a peer was discovered.");
-            self.initialize_chain().await;
         }
-        response
     }
 
     /// After receiving an unmined block, stamp/broadcast/maybe enqueue for mining.

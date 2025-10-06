@@ -1,0 +1,66 @@
+.peers-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    overflow: hidden;
+}
+
+.peers-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 20px;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.peers-header h2 {
+    margin: 0;
+}
+
+.search-bar {
+    padding: 8px 12px;
+    border-radius: 5px;
+    border: 1px solid #ccc;
+    font-size: 14px;
+}
+
+.peers-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+    padding: 20px;
+    overflow-y: auto;
+    flex-grow: 1;
+}
+
+.peer-card {
+    background-color: #f9f9f9;
+    border: 1px solid #e0e0e0;
+    border-radius: 5px;
+    padding: 15px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.peer-info {
+    margin-bottom: 10px;
+    word-wrap: break-word;
+}
+
+.peer-info strong {
+    display: block;
+    margin-bottom: 5px;
+    color: #555;
+}
+
+.peer-pk {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 12px;
+}
+
+.error-message {
+    color: #d9534f;
+    padding: 20px;
+}

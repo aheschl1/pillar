@@ -6,4 +6,4 @@ pub mod accounting;
 pub mod reputation;
 pub mod persistence;
 
-pub const PROTOCOL_PORT: u16 = 42069;
+pub const PROTOCOL_PORT: u16 = 13000;

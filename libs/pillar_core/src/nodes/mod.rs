@@ -20,7 +20,7 @@ mod tests {
     use crate::{
         accounting::wallet::Wallet, nodes::{
             miner::{Miner, MAX_TRANSACTION_WAIT_TIME}, node::{self, NodeState}, peer::Peer
-        }, persistence::database::GenesisDatastore, primitives::{messages::Message, pool::MinerPool, transaction::Transaction}, protocol::{difficulty::get_reward_from_depth_and_stampers, peers::discover_peers, transactions::{get_transaction_proof, submit_transaction}}
+        }, persistence::database::GenesisDatastore, primitives::{messages::Message, pool::MinerPool, transaction::Transaction}, protocol::{difficulty::get_reward_from_depth_and_stampers, peers::{discover_peer, discover_peers}, transactions::{get_transaction_proof, submit_transaction}}
     };
 
     use super::node::Node;
@@ -1840,6 +1840,117 @@ mod tests {
         assert_eq!(chain_a.as_ref().unwrap().depth, 2); // 3 blocks
         // assert_eq!(chain_a.as_ref().unwrap().blocks.len(), 3); //
         drop(chain_a);
+    }
+
+    #[tokio::test]
+    async fn test_connect_wkps() {
+        let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 20));
+        let port_a = 8010;
+        let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 21));
+        let port_b = 8011;
+        let (mut node_b, _) = create_empty_node_genisis(
+            ip_address_b,
+            port_b,
+            vec![],
+            true,
+            Some(MinerPool::new()),
+        )
+        .await;
+        let (mut node_a, wallet_a) = create_empty_node_genisis(
+            ip_address_a,
+            port_a,
+            vec![],
+            true,
+            None,
+        )
+        .await;
+
+        node_a.serve().await;
+
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await; // wait for the nodes to start
+
+        let peer = discover_peer(&mut node_b, ip_address_a, port_a).await.unwrap();
+
+        // assert that the peer is correct
+        assert_eq!(peer.public_key, wallet_a.address);
+        assert_eq!(peer.ip_address, ip_address_a.into());
+        assert_eq!(peer.port, port_a);
+
+        node_b.serve().await;
+
+    }
+
+
+    #[tokio::test]
+    async fn test_connect_wkps_2() {
+        let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 20));
+        let port_a = 8010;
+        let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 21));
+        let port_b = 8011;
+        let ip_address_c = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 22));
+        let port_c = 8012;
+        let (mut node_c, wallet_c) = create_empty_node_genisis(
+            ip_address_c,
+            port_c,
+            vec![],
+            false,
+            None,
+        )
+        .await;
+
+        let (mut node_b, wallet_b) = create_empty_node_genisis(
+            ip_address_b,
+            port_b,
+            vec![],
+            true,
+            None,
+        )
+        .await;
+        let (mut node_a, wallet_a) = create_empty_node_genisis(
+            ip_address_a,
+            port_a,
+            vec![],
+            false,
+            None,
+        )
+        .await;
+
+        node_a.serve().await;
+
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await; // wait for the nodes to start
+
+        let peer = discover_peer(&mut node_b, ip_address_a, port_a).await.unwrap();
+        node_b.maybe_update_peer(peer).await.unwrap();
+
+        node_b.serve().await;
+
+        // assert that the peer is correct
+        assert_eq!(peer.public_key, wallet_a.address);
+        assert_eq!(peer.ip_address, ip_address_a.into());
+        assert_eq!(peer.port, port_a);
+
+        let peer2 = discover_peer(&mut node_c, ip_address_a, port_a).await.unwrap();
+        // assert that the peer is correct
+        assert_eq!(peer2.public_key, wallet_a.address);
+        assert_eq!(peer2.ip_address, ip_address_a.into());
+        assert_eq!(peer2.port, port_a);
+        node_c.maybe_update_peer(peer2).await.unwrap();
+        node_c.serve().await;
+
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await; // wait for the nodes to start
+
+        let nodeapeers = node_a.inner.peers.read().await;
+        assert!(nodeapeers.contains_key(&wallet_c.address));
+        assert!(nodeapeers.contains_key(&wallet_b.address));
+        drop(nodeapeers);
+        // other nodes states
+        assert_eq!(*node_b.inner.state.read().await, NodeState::Serving);
+        assert_eq!(*node_c.inner.state.read().await, NodeState::Serving);
+        node_a.initialize_chain().await;
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await; // wait for the nodes to start
+        // node a is in serving state
+        assert_eq!(*node_a.inner.state.read().await, NodeState::Serving);
+
     }
 
 }

@@ -118,6 +118,8 @@ struct Args {
     name: Option<String>,
     #[arg(short, long, help = "Path to config binary file (if not provided, a new wallet will be generated)")]
     config: Option<PathBuf>,
+    #[arg(long, help = "Start with genesis block (only for testing, do not use in production)")]
+    genesis: bool,
 }
 
 
@@ -158,6 +160,6 @@ async fn main() -> Result<(), ()> {
         config.save(&log_dir);
         config
     };
-    launch_node(config).await;
+    launch_node(config, args.genesis).await;
     Ok(())
 }
