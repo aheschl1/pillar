@@ -1,9 +1,89 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { useBlocks } from '../hooks/useBlocks';
+import BlockComponent from '../components/BlockComponent';
+import './Chain.css';
 
 const Chain = () => {
+    const { blocks, loading, fetchingBlocks, error, fetchBlockHashes } = useBlocks();
+    const [minDepth, setMinDepth] = useState('');
+    const [maxDepth, setMaxDepth] = useState('');
+    const [limit, setLimit] = useState('10');
+
+    const handleFetchBlocks = () => {
+        fetchBlockHashes(minDepth, maxDepth, limit);
+    };
+
     return (
-        <div>
-            <h2>Chain</h2>
+        <div className="chain-container">
+            <div className="chain-header">
+                <h2>Blockchain Explorer</h2>
+            </div>
+            
+            <div className="query-form">
+                <h3>Query Parameters</h3>
+                <div className="form-fields">
+                    <div className="form-field">
+                        <label htmlFor="minDepth">Min Depth:</label>
+                        <input
+                            id="minDepth"
+                            type="number"
+                            placeholder="Optional"
+                            value={minDepth}
+                            onChange={(e) => setMinDepth(e.target.value)}
+                        />
+                    </div>
+                    <div className="form-field">
+                        <label htmlFor="maxDepth">Max Depth:</label>
+                        <input
+                            id="maxDepth"
+                            type="number"
+                            placeholder="Optional"
+                            value={maxDepth}
+                            onChange={(e) => setMaxDepth(e.target.value)}
+                        />
+                    </div>
+                    <div className="form-field">
+                        <label htmlFor="limit">Limit:</label>
+                        <input
+                            id="limit"
+                            type="number"
+                            placeholder="10"
+                            value={limit}
+                            onChange={(e) => setLimit(e.target.value)}
+                        />
+                    </div>
+                    <button 
+                        className="fetch-button" 
+                        onClick={handleFetchBlocks}
+                        disabled={loading}
+                    >
+                        {loading ? 'Loading...' : 'Fetch Blocks'}
+                    </button>
+                </div>
+                {error && <p className="error-message">Error: {error}</p>}
+            </div>
+
+            <div className="chain-visualization">
+                {fetchingBlocks && <p className="loading-message">Loading block details...</p>}
+                {blocks.length > 0 && (
+                    <>
+                        <h3>Block Chain ({blocks.length} blocks)</h3>
+                        <div className="blocks-graph">
+                            {blocks.map((block, index) => (
+                                <div key={index} className="block-with-arrow">
+                                    <BlockComponent block={block} />
+                                    {index < blocks.length - 1 && (
+                                        <div className="arrow">↓</div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </>
+                )}
+                {!fetchingBlocks && blocks.length === 0 && !loading && (
+                    <p className="info-message">Use the form above to query blocks from the blockchain.</p>
+                )}
+            </div>
         </div>
     );
 };

@@ -1,0 +1,133 @@
+.chain-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    overflow: hidden;
+}
+
+.chain-header {
+    padding: 15px 20px;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.chain-header h2 {
+    margin: 0;
+}
+
+.query-form {
+    padding: 20px;
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.query-form h3 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    color: #333;
+}
+
+.form-fields {
+    display: flex;
+    gap: 15px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+}
+
+.form-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.form-field label {
+    font-weight: 600;
+    font-size: 14px;
+    color: #555;
+}
+
+.form-field input {
+    padding: 8px 12px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    font-size: 14px;
+    width: 150px;
+}
+
+.form-field input:focus {
+    outline: none;
+    border-color: #007bff;
+}
+
+.fetch-button {
+    padding: 8px 20px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.fetch-button:hover:not(:disabled) {
+    background-color: #0056b3;
+}
+
+.fetch-button:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+}
+
+.error-message {
+    color: #d9534f;
+    margin-top: 10px;
+    font-size: 14px;
+}
+
+.loading-message {
+    color: #007bff;
+    padding: 20px;
+    text-align: center;
+    font-size: 16px;
+}
+
+.info-message {
+    color: #666;
+    padding: 20px;
+    text-align: center;
+    font-size: 14px;
+}
+
+.chain-visualization {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 20px;
+}
+
+.chain-visualization h3 {
+    margin-top: 0;
+    margin-bottom: 20px;
+    color: #333;
+}
+
+.blocks-graph {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+}
+
+.block-with-arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.arrow {
+    font-size: 24px;
+    color: #007bff;
+    margin: 5px 0;
+}
