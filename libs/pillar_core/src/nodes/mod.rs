@@ -1884,11 +1884,11 @@ mod tests {
     #[tokio::test]
     async fn test_connect_wkps_2() {
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 20));
-        let port_a = 8010;
+        let port_a = 9010;
         let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 21));
-        let port_b = 8011;
+        let port_b = 9011;
         let ip_address_c = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 22));
-        let port_c = 8012;
+        let port_c = 9012;
         let (mut node_c, wallet_c) = create_empty_node_genisis(
             ip_address_c,
             port_c,
@@ -1947,7 +1947,7 @@ mod tests {
         assert_eq!(*node_b.inner.state.read().await, NodeState::Serving);
         assert_eq!(*node_c.inner.state.read().await, NodeState::Serving);
         node_a.initialize_chain().await;
-        tokio::time::sleep(std::time::Duration::from_secs(10)).await; // wait for the nodes to start
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await; // wait for the nodes to start
         // node a is in serving state
         assert_eq!(*node_a.inner.state.read().await, NodeState::Serving);
 
