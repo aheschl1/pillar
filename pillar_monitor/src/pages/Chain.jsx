@@ -1,19 +1,29 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useApiCall } from '../hooks/useApiCall';
+import { useServer } from '../contexts/serverContext';
 import BlockComponent from '../components/BlockComponent';
 import { toHex } from '../api/utils';
 import './Chain.css';
 
 const Chain = () => {
-    const { call, loading, error } = useApiCall();
+    const { ipAddress, httpPort, isConnected } = useServer();
     const [minDepth, setMinDepth] = useState('');
     const [maxDepth, setMaxDepth] = useState('');
     const [limit, setLimit] = useState('10');
     const [blockHashes, setBlockHashes] = useState([]);
     const [blocks, setBlocks] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
     const [fetchingBlocks, setFetchingBlocks] = useState(false);
 
     const fetchBlockHashes = async () => {
+        if (!isConnected) {
+            setError('Not connected to server');
+            return;
+        }
+
+        setLoading(true);
+        setError(null);
+
         try {
             const params = new URLSearchParams();
             if (minDepth) params.append('min_depth', minDepth);
@@ -21,24 +31,45 @@ const Chain = () => {
             if (limit) params.append('limit', limit);
             
             const endpoint = `/blocks${params.toString() ? `?${params.toString()}` : ''}`;
-            const hashes = await call(endpoint);
-            setBlockHashes(hashes || []);
-            setBlocks([]);
+            const response = await fetch(`http://${ipAddress}:${httpPort}${endpoint}`);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const result = await response.json();
+            if (result.success && result.body !== undefined) {
+                setBlockHashes(result.body || []);
+                setBlocks([]);
+            } else {
+                throw new Error(result.error || 'Failed to fetch block hashes');
+            }
         } catch (e) {
             console.error('Failed to fetch block hashes:', e);
+            setError(e.message);
+        } finally {
+            setLoading(false);
         }
     };
 
     const fetchBlockDetails = useCallback(async () => {
-        if (blockHashes.length === 0) return;
+        if (blockHashes.length === 0 || !isConnected) return;
         
         setFetchingBlocks(true);
         try {
             const blockPromises = blockHashes.map(async (hash) => {
                 const hexHash = toHex(hash);
                 try {
-                    const block = await call(`/block/${hexHash}`);
-                    return block;
+                    const response = await fetch(`http://${ipAddress}:${httpPort}/block/${hexHash}`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    const result = await response.json();
+                    if (result.success && result.body !== undefined) {
+                        return result.body;
+                    } else {
+                        throw new Error(result.error || 'Failed to fetch block');
+                    }
                 } catch (e) {
                     console.error(`Failed to fetch block ${hexHash}:`, e);
                     return null;
@@ -52,7 +83,7 @@ const Chain = () => {
         } finally {
             setFetchingBlocks(false);
         }
-    }, [blockHashes, call]);
+    }, [blockHashes, ipAddress, httpPort, isConnected]);
 
     useEffect(() => {
         if (blockHashes.length > 0) {
