@@ -351,4 +351,73 @@ mod tests {
         assert!(elapsed.as_secs() < 3, "Server did not stop in time");
     }
 
+    #[tokio::test]
+    async fn test_broadcast_excludes_sender() {
+        // Test that when a message is forwarded, it's not sent back to the original sender
+        let ip_address = IpAddr::V4(Ipv4Addr::from_str("127.0.0.1").unwrap());
+        
+        // Create 3 nodes: A (8095), B (8096), C (8097)
+        let node_a = Node::new([1; 32], [2; 32], ip_address, 8095, vec![], None, None);
+        let node_b = Node::new([3; 32], [4; 32], ip_address, 8096, vec![], None, None);
+        let node_c = Node::new([5; 32], [6; 32], ip_address, 8097, vec![], None, None);
+
+        // Add B and C as peers of A
+        let peer_b = Peer::new([3; 32], ip_address, 8096);
+        let peer_c = Peer::new([5; 32], ip_address, 8097);
+        node_a.maybe_update_peer(peer_b).await.unwrap();
+        node_a.maybe_update_peer(peer_c).await.unwrap();
+
+        // Set up listeners for B and C BEFORE starting servers to avoid port conflicts
+        let listener_b = TcpListener::bind(format!("{}:{}", ip_address, 8096)).await.unwrap();
+        let listener_c = TcpListener::bind(format!("{}:{}", ip_address, 8097)).await.unwrap();
+
+        // Start servers and broadcast services
+        tokio::spawn(serve_peers(node_a.clone(), None));
+        tokio::spawn(broadcast_knowledge(node_a.clone(), None));
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // B sends a transaction to A
+        let mut stream_b_to_a = TcpStream::connect(format!("{ip_address}:8095")).await.unwrap();
+        
+        let declaration_b = Message::Declaration(peer_b);
+        stream_b_to_a.write_all(&package_standard_message(&declaration_b).unwrap()).await.unwrap();
+
+        let t = Transaction::new([0; 32], [0; 32], 0, 0, 0, &mut DefaultHash::new());
+        let message = Message::TransactionBroadcast(t);
+        stream_b_to_a.write_all(&package_standard_message(&message).unwrap()).await.unwrap();
+
+        // A should broadcast to C, but NOT back to B
+        
+        // Try to receive on B (should timeout - no broadcast back)
+        let result_b = tokio::time::timeout(
+            tokio::time::Duration::from_millis(500),
+            listener_b.accept()
+        ).await;
+        assert!(result_b.is_err(), "Expected no broadcast back to B (sender), but got a connection");
+
+        // C should receive the broadcast
+        let result_c = tokio::time::timeout(
+            tokio::time::Duration::from_millis(500),
+            listener_c.accept()
+        ).await;
+        
+        assert!(result_c.is_ok(), "Expected C to receive broadcast");
+        let (mut stream_c, _) = result_c.unwrap().unwrap();
+
+        // Verify C receives declaration and message
+        let declaration: Message = read_standard_message(&mut stream_c).await.unwrap();
+        match declaration {
+            Message::Declaration(_) => {},
+            _ => panic!("Expected Declaration from A to C"),
+        }
+
+        let received_msg: Message = read_standard_message(&mut stream_c).await.unwrap();
+        match received_msg {
+            Message::TransactionBroadcast(_) => {},
+            _ => panic!("Expected TransactionBroadcast to C, got {:?}", received_msg),
+        }
+    }
+
 }
+
