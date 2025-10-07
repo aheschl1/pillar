@@ -201,7 +201,7 @@ mod tests {
         tail.collapse();
         assert_eq!(tail.n_stamps(), 4);
         // make sure the empty space is at the end
-        assert_eq!(tail.stamps[3].signature, [4; 64]);
+        assert_eq!(tail.stamps[3].signature, [1; 64]);
     }
 
     #[test]
@@ -229,11 +229,11 @@ mod tests {
         };
         tail.collapse();
         assert_eq!(tail.n_stamps(), 5);
-        assert_eq!(tail.stamps[0].signature, [1; 64]);
-        assert_eq!(tail.stamps[1].signature, [2; 64]);
+        assert_eq!(tail.stamps[0].signature, [5; 64]);
+        assert_eq!(tail.stamps[1].signature, [4; 64]);
         assert_eq!(tail.stamps[2].signature, [3; 64]);
-        assert_eq!(tail.stamps[3].signature, [4; 64]);
-        assert_eq!(tail.stamps[4].signature, [5; 64]);
+        assert_eq!(tail.stamps[3].signature, [2; 64]);
+        assert_eq!(tail.stamps[4].signature, [1; 64]);
     }
 
     #[test]
@@ -253,8 +253,8 @@ mod tests {
         };
         tail.collapse();
         assert_eq!(tail.n_stamps(), 2);
-        assert_eq!(tail.stamps[0].address, [1; 32]);
-        assert_eq!(tail.stamps[1].address, [2; 32]);
+        assert_eq!(tail.stamps[1].address, [1; 32]);
+        assert_eq!(tail.stamps[0].address, [2; 32]);
     }
 
     #[test]

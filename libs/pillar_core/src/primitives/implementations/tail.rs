@@ -19,22 +19,17 @@ impl BlockTail {
     /// remove duplicate signatures
     pub fn collapse(&mut self){
         let mut seen: HashSet<StdByteArray> = HashSet::new();
-        let mut empty = VecDeque::new();
         for i in 0..N_TRANSMISSION_SIGNATURES {
-            if self.stamps[i].address == [0; 32] {
-                empty.push_back(i);
-            }else{
-                if seen.contains(&self.stamps[i].address) {
-                    // if the address is already seen, remove it
-                    self.stamps[i] = Stamp::default();
-                    empty.push_back(i);
-                } else if !empty.is_empty() {
-                    self.stamps.swap(i, empty.pop_front().unwrap());
-                    empty.push_back(i);
-                }
+            if seen.contains(&self.stamps[i].address) {
+                // if the address is already seen, remove it
+                self.stamps[i] = Stamp::default();
+            } else {
                 seen.insert(self.stamps[i].address); // record the address
-            }
+            } 
         }
+        self.stamps.sort_by(|a, b| {
+            b.signature.cmp(&a.signature)
+        });
     }
 
 
