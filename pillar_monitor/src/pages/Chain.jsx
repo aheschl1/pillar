@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import PanZoom from 'react-easy-panzoom';
 import { useBlocks } from '../hooks/useBlocks';
 import BlockComponent from '../components/BlockComponent';
 import './Chain.css';
@@ -16,9 +17,14 @@ const Chain = () => {
     return (
         <div className="chain-container">
             <div className="chain-header">
-                <h2>Blockchain Explorer</h2>
+                {
+                    blocks.length > 0 && <h2>Blockchain Explorer ({blocks.length} blocks)</h2>
+                }
+                {
+                    !blocks.length && <h2>Blockchain Explorer</h2>
+                }
             </div>
-            
+
             <div className="query-form">
                 <h3>Query Parameters</h3>
                 <div className="form-fields">
@@ -63,26 +69,35 @@ const Chain = () => {
                 {error && <p className="error-message">Error: {error}</p>}
             </div>
 
-            <div className="chain-visualization">
-                {fetchingBlocks && <p className="loading-message">Loading block details...</p>}
-                {blocks.length > 0 && (
-                    <>
-                        <h3>Block Chain ({blocks.length} blocks)</h3>
-                        <div className="blocks-graph">
-                            {blocks.map((block, index) => (
-                                <div key={index} className="block-with-arrow">
-                                    <BlockComponent block={block} />
-                                    {index < blocks.length - 1 && (
-                                        <div className="arrow">↓</div>
-                                    )}
+            <div className="chain-viewport">
+                <PanZoom
+                    minZoom={0.5}
+                    maxZoom={2}
+                    autoCenter
+                    enableBoundingBox
+                    style={{ width: '100%', height: '80vh', background: '#f9f9f9' }}
+                >
+                    <div className="chain-visualization">
+                        {fetchingBlocks && <p className="loading-message">Loading block details...</p>}
+                        {blocks.length > 0 && (
+                            <>
+                                <div className="blocks-graph">
+                                    {blocks.map((block, index) => (
+                                        <div key={index} className="block-with-arrow">
+                                            <BlockComponent block={block} />
+                                            {index < blocks.length - 1 && (
+                                                <div className="arrow">↓</div>
+                                            )}
+                                        </div>
+                                    ))}
                                 </div>
-                            ))}
-                        </div>
-                    </>
-                )}
-                {!fetchingBlocks && blocks.length === 0 && !loading && (
-                    <p className="info-message">Use the form above to query blocks from the blockchain.</p>
-                )}
+                            </>
+                        )}
+                        {!fetchingBlocks && blocks.length === 0 && !loading && (
+                            <p className="info-message">Use the form above to query blocks from the blockchain.</p>
+                        )}
+                    </div>
+                </PanZoom>
             </div>
         </div>
     );

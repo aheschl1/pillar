@@ -13,6 +13,14 @@
     align-items: center;
 }
 
+.server-bar-info {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center; /* Vertically center the public key */
+    min-width: 450px; /* Reserve space for the public key */
+    height: 30px; /* Match the approximate height of the controls */
+}
+
 .server-bar-item {
     margin-right: 15px;
     display: flex;
@@ -36,6 +44,25 @@
     cursor: not-allowed;
 }
 
+.connect-button {
+    padding: 4px 12px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: all 0.2s ease-in-out;
+    background-color: #28a745; /* Green for connect */
+    color: white;
+}
+
+.connect-button:hover {
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+
+.connect-button.disconnect {
+    background-color: #dc3545; /* Red for disconnect */
+}
+
 .status-dot {
     height: 10px;
     width: 10px;
@@ -49,55 +76,6 @@
     background-color: #444;
     padding: 3px 6px;
     border-radius: 3px;
-}
-
-/* The switch - the box around the slider */
-.switch {
-    position: relative;
-    display: inline-block;
-    width: 50px;
-    height: 24px;
-    margin-right: 10px;
-}
-
-/* Hide default HTML checkbox */
-.switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-}
-
-/* The slider */
-.slider {
-    position: absolute;
-    cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: #ccc;
-    -webkit-transition: .4s;
-    transition: .4s;
-}
-
-.slider:before {
-    position: absolute;
-    content: "";
-    height: 16px;
-    width: 16px;
-    left: 4px;
-    bottom: 4px;
-    background-color: white;
-    -webkit-transition: .4s;
-    transition: .4s;
-}
-
-input:checked + .slider {
-    background-color: #2196F3;
-}
-
-input:focus + .slider {
-    box-shadow: 0 0 1px #2196F3;
 }
 
 input:checked + .slider:before {

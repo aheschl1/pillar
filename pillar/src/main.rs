@@ -120,6 +120,8 @@ struct Args {
     config: Option<PathBuf>,
     #[arg(long, help = "Start with genesis block (only for testing, do not use in production)")]
     genesis: bool,
+    #[arg(long, help = "Start node as a miner")]
+    miner: bool, 
 }
 
 
@@ -160,6 +162,6 @@ async fn main() -> Result<(), ()> {
         config.save(&log_dir);
         config
     };
-    launch_node(config, args.genesis).await;
+    launch_node(config, args.genesis, args.miner).await;
     Ok(())
 }

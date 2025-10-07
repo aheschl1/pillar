@@ -1,0 +1,58 @@
+.wallet-container {
+    padding: 20px;
+}
+.wallet-header { display:flex; align-items:center; justify-content:space-between }
+.refresh { padding:6px 10px; border-radius:6px; background:#007bff; color:white; border:none }
+
+/* Algorithmic panel style */
+.wallet-card {
+    margin-top: 20px;
+    width: 900px;
+    max-width: calc(100% - 40px);
+    background: #0b1220; /* subtle dark background for technical look */
+    color: #dbe9ff;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 6px 20px rgba(8,12,20,0.6);
+    border: 1px solid rgba(255,255,255,0.03);
+    font-family: 'SFMono-Regular', Menlo, Monaco, 'Courier New', monospace;
+}
+
+.card-top { display:flex; justify-content:space-between; align-items:center }
+.card-balance { font-weight:700; font-size:16px; color:#9fd1ff }
+
+.card-body { margin-top:14px; display:grid; grid-template-columns: 220px 1fr; gap:12px 18px; align-items:center }
+.card-row { display: contents; }
+.card-row .label { color: #91a7c4; padding:6px 0 }
+.card-row .value { padding:6px 0; display:flex; gap:8px; align-items:center }
+.card-row .value code { background: rgba(255,255,255,0.02); padding:6px 8px; border-radius:6px; color:#dbe9ff; font-size:13px }
+
+.private { display:flex; gap:8px; align-items:center; flex-wrap:wrap }
+.private code.blur { filter: blur(6px); color: rgba(219,233,255,0.7); background: rgba(255,255,255,0.02) }
+.private code.reveal { filter: none }
+.private-actions { display:flex; gap:8px }
+.private-actions .toggle, .private-actions .copy { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.02); color:#cfe6ff; padding:6px 8px; border-radius:6px; cursor:pointer }
+
+/* responsive tweaks */
+@media (max-width: 880px) {
+    .wallet-card { width: auto; padding: 16px }
+    .card-body { grid-template-columns: 1fr; }
+}
+
+/* Toast */
+.wallet-toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: rgba(15,23,36,0.95);
+    color: #e6eef8;
+    padding: 10px 14px;
+    border-radius: 8px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.4);
+    z-index: 60;
+    font-family: monospace;
+}
+.private code.reveal { filter: none }
+.private-actions { display:flex; gap:8px }
+.private-actions .toggle, .private-actions .copy { background: rgba(255,255,255,0.06); border: none; color: #cfe6ff; padding:6px 8px; border-radius:6px; cursor:pointer }
+

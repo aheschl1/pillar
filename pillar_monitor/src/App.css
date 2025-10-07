@@ -16,7 +16,7 @@ html, body, #root {
 
 .main-content {
   flex-grow: 1;
-  /* This is where other components will go */
+  overflow: hidden; /* This is critical to prevent children from affecting the flex layout */
 }
 
 .log-view-wrapper {

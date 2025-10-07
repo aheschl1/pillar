@@ -49,9 +49,7 @@
 
 .dashboard-content {
     flex-grow: 1;
-    padding: 20px;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 20px;
-    overflow-y: auto;
+    padding: 0; /* Remove padding to allow child to fill space */
+    overflow: hidden; /* Prevent double scrollbars */
+    position: relative; /* For child positioning */
 }

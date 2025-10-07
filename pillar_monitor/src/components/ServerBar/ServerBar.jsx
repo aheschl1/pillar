@@ -13,25 +13,25 @@ const ServerBar = () => {
 
     const { nodeData, error: nodeError } = useNodeData();
 
-    const [localIp, setLocalIp] = useState(ipAddress);
-    const [localHttp, setLocalHttp] = useState(httpPort);
-    const [localLogWs, setLocalLogWs] = useState(logWsPort);
-
-    useEffect(() => {
-        setLocalIp(ipAddress);
-        setLocalHttp(httpPort);
-        setLocalLogWs(logWsPort);
-    }, [ipAddress, httpPort, logWsPort]);
-
-    const handleConnectToggle = () => {
+    const handleConnectToggle = (event) => {
         if (isConnected) {
             setIsConnected(false);
         } else {
-            setIpAddress(localIp);
-            setHttpPort(localHttp);
-            setLogWsPort(localLogWs);
+            // On connect, we read the values directly from the form fields
+            const form = event.currentTarget.closest('.server-bar-controls');
+            const newIp = form.querySelector('#ipAddressInput').value;
+            const newHttp = form.querySelector('#httpPortInput').value;
+            const newLogWs = form.querySelector('#logWsPortInput').value;
+
+            setIpAddress(newIp);
+            setHttpPort(newHttp);
+            setLogWsPort(newLogWs);
             setIsConnected(true);
         }
+    };
+
+    const handleDisconnect = () => {
+        setIsConnected(false);
     };
 
     const httpStatusColor = isConnected && nodeData && !nodeError ? 'green' : 'red';
@@ -43,9 +43,9 @@ const ServerBar = () => {
                 <div className="server-bar-item">
                     <label>IP Address:</label>
                     <input 
+                        id="ipAddressInput"
                         type="text" 
-                        value={localIp}
-                        onChange={(e) => setLocalIp(e.target.value)}
+                        defaultValue={ipAddress}
                         disabled={isConnected} 
                     />
                 </div>
@@ -53,9 +53,9 @@ const ServerBar = () => {
                     <span className="status-dot" style={{ backgroundColor: httpStatusColor }}></span>
                     <label>HTTP Port:</label>
                     <input 
+                        id="httpPortInput"
                         type="text" 
-                        value={localHttp}
-                        onChange={(e) => setLocalHttp(e.target.value)}
+                        defaultValue={httpPort}
                         disabled={isConnected} 
                     />
                 </div>
@@ -63,18 +63,18 @@ const ServerBar = () => {
                     <span className="status-dot" style={{ backgroundColor: wsStatusColor }}></span>
                     <label>Log WS Port:</label>
                     <input 
+                        id="logWsPortInput"
                         type="text" 
-                        value={localLogWs}
-                        onChange={(e) => setLocalLogWs(e.target.value)}
+                        defaultValue={logWsPort}
                         disabled={isConnected} 
                     />
                 </div>
                 <div className="server-bar-item">
-                    <label className="switch">
-                        <input type="checkbox" checked={isConnected} onChange={handleConnectToggle} />
-                        <span className="slider round"></span>
-                    </label>
-                    <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
+                    {isConnected ? (
+                        <button onClick={handleDisconnect} className="connect-button disconnect">Disconnect</button>
+                    ) : (
+                        <button onClick={handleConnectToggle} className="connect-button">Connect</button>
+                    )}
                 </div>
             </div>
             <div className="server-bar-info">

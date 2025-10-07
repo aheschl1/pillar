@@ -1,8 +1,9 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, NavLink } from 'react-router-dom';
-import Overview from '../../pages/Overview';
 import Peers from '../../pages/Peers';
 import Chain from '../../pages/Chain';
+import AddTransaction from '../../pages/AddTransaction';
+import Wallet from '../../pages/Wallet';
 import './Dashboard.css';
 
 const Dashboard = () => {
@@ -11,15 +12,18 @@ const Dashboard = () => {
             <div className="dashboard-container">
                 <nav className="dashboard-nav">
                     <ul>
-                        <li><NavLink to="/" className={({ isActive }) => isActive ? "active-link" : ""}>Overview</NavLink></li>
                         <li><NavLink to="/peers" className={({ isActive }) => isActive ? "active-link" : ""}>Peers</NavLink></li>
+                        <li><NavLink to="/add-transaction" className={({ isActive }) => isActive ? "active-link" : ""}>Add Transaction</NavLink></li>
+                        <li><NavLink to="/wallet" className={({ isActive }) => isActive ? "active-link" : ""}>Wallet</NavLink></li>
                         <li><NavLink to="/chain" className={({ isActive }) => isActive ? "active-link" : ""}>Chain</NavLink></li>
                     </ul>
                 </nav>
                 <div className="dashboard-content">
                     <Routes>
-                        <Route path="/" element={<Overview />} />
+                        <Route path="/" element={<Peers />} />
                         <Route path="/peers" element={<Peers />} />
+                        <Route path="/add-transaction" element={<AddTransaction />} />
+                        <Route path="/wallet" element={<Wallet />} />
                         <Route path="/chain" element={<Chain />} />
                     </Routes>
                 </div>

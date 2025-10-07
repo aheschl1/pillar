@@ -1,12 +1,13 @@
 .chain-container {
     display: flex;
     flex-direction: column;
-    height: 100%;
+    height: 100%; /* or 100% if parent already controls height */
+    width: 100%;
     background-color: #fff;
     border-radius: 8px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    overflow: hidden;
 }
+
 
 .chain-header {
     padding: 15px 20px;
@@ -98,18 +99,38 @@
     color: #666;
     padding: 20px;
     text-align: center;
-    font-size: 14px;
+}
+
+.chain-viewport {
+    flex: 1;               /* fills remaining vertical space */
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    overflow: hidden;      /* prevent double scrollbars */
+}
+
+.react-transform-wrapper,
+.react-transform-component {
+    width: 100vw;
+    height: 10vh;
+}
+
+.react-transform-component {
+    display: flex;
+    justify-content: center;
+    align-items: center; /* optional, adjust as needed */
 }
 
 .chain-visualization {
     flex-grow: 1;
-    overflow-y: auto;
-    padding: 20px;
+    /* allow the pan/zoom wrapper to control panning; remove nested scroll */
+    padding: 10px;
+    width: 100%;
+    height: 100%;
 }
 
 .chain-visualization h3 {
     margin-top: 0;
-    margin-bottom: 20px;
     color: #333;
 }
 

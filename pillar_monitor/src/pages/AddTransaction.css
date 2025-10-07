@@ -1,0 +1,47 @@
+.add-tx-container {
+    padding: 20px;
+}
+.add-tx-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 480px;
+}
+.add-tx-form input[type="text"], .add-tx-form input[type="number"] {
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+}
+.add-tx-form .form-actions {
+    margin-top: 8px;
+}
+.add-tx-form button {
+    padding: 8px 12px;
+    background: #007bff;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+}
+.ws-logs pre { margin:0; font-family: monospace; font-size: 12px }
+.small { font-size: 0.9em; color: #666 }
+
+.ws-logs {
+    margin-top: 20px;
+}
+
+.log-scroll {
+    background: #0b1220;
+    color: #d6deeb;
+    border-radius: 6px;
+    padding: 12px;
+    max-height: 240px;
+    overflow-y: auto;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
+}
+
+.log-scroll ul { list-style: none; padding: 0; margin: 0; }
+.log-line { display: flex; gap: 8px; align-items: flex-start; padding: 4px 0; }
+.log-line pre { margin: 0; white-space: pre-wrap; word-break: break-word; color: #d6deeb }
+.prompt { color: #7ae582; font-weight: 700; margin-right: 6px; }
+

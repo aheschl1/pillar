@@ -1,10 +1,11 @@
-use std::sync::Arc;
+use std::sync::{Arc};
 
 use axum::{extract::{Path, Query, State}, http::HeaderMap, response::IntoResponse, routing::{get, post}, Json, Router};
-use pillar_core::{nodes::{node::Node, peer::Peer}, persistence::database::GenesisDatastore, protocol::peers::discover_peer};
+use pillar_core::{accounting::{account, wallet::{self, Wallet}}, nodes::{miner::Miner, node::Node, peer::Peer}, persistence::database::GenesisDatastore, primitives::pool::MinerPool, protocol::peers::discover_peer};
 use pillar_crypto::types::StdByteArray;
 use serde::{Deserialize, Serialize};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use tokio::sync::RwLock;
 use crate::{log_stream::ws_logs, ws_handles::{handle_transaction_post, TransactionPost}, Config};
 use tower_http::cors::{CorsLayer, Any};
 
@@ -12,7 +13,7 @@ use tower_http::cors::{CorsLayer, Any};
 #[derive(Clone)]
 struct AppState {
     node: Node,
-    config: Config
+    config: Arc<RwLock<Config>>
 }
 
 #[derive(Serialize, Deserialize)]
@@ -67,7 +68,13 @@ async fn handle_ws_connection(mut socket: WebSocket, headers: HeaderMap, mut sta
             tracing::debug!("Received WebSocket message: {:?}", msg);
             match serde_json::from_str::<ClientMessage>(msg.to_text().unwrap_or("")) {
                 Ok(ClientMessage::TransactionPost(tx)) => {
-                    handle_transaction_post(&mut socket, tx, &mut state.node, &mut state.config.wallet).await;
+                    let wallet = &mut state.config.write().await.wallet;
+                    handle_transaction_post(
+                        &mut socket, 
+                        tx,
+                        &mut state.node, 
+                        wallet
+                    ).await;
                     Ok(())
                 }
                 Err(e) => {
@@ -139,12 +146,13 @@ async fn handle_peer_post(
         publickey_array.unwrap()
     };
 
-    tracing::info!("Handling peer post");
+    tracing::info!("Handling peer post for peer {} at {}:{}", hex::encode(public_key), request.ip_address, request.port);
 
     let result = state.node.maybe_update_peer(Peer::new(public_key, ipaddr, request.port)).await;
     let response = if let Err(e) = result {
         StatusResponse::error(format!("Failed to add peer: {:?}", e))
     }else{
+        tracing::info!("Successfully added peer {} at {}:{}", hex::encode(public_key), request.ip_address, request.port);
         StatusResponse::success("success".to_string())
     };
     Json(response)
@@ -286,7 +294,7 @@ async fn handle_node_get(
 ) -> Json<StatusResponse<NodeInfo>> {
     let peer_count = state.node.inner.peers.read().await.len();
     let response = NodeInfo {
-        public_key: state.config.wallet.address,
+        public_key: state.config.read().await.wallet.address,
         ip_address: state.node.ip_address.to_string(),
         port: state.node.port,
         peer_count,
@@ -294,7 +302,53 @@ async fn handle_node_get(
     Json(StatusResponse::success(response))
 }
 
-pub async fn launch_node(config: Config, genesis: bool) {
+#[derive(Serialize, Deserialize)]
+struct WalletInfo {
+    private_key: String,
+    public_key: StdByteArray,
+    balance: u64,
+    nonce: u64
+}
+
+async fn handle_wallet_get(
+    State(state): State<AppState>,
+) -> Json<StatusResponse<WalletInfo>> {
+    let wallet = &state.config.read().await.wallet;
+
+    let chain = state.node
+        .lock_chain()
+        .await;
+
+    if chain.is_none() {
+        return Json(StatusResponse::error("Node has no chain".to_string()));
+    }
+    let chain = chain.as_ref().unwrap();
+
+    let state_root = chain.get_state_root();
+    if let None = state_root {
+        return Json(StatusResponse::error("Node has no state root".to_string()));
+    }
+    let state_root = state_root.unwrap();
+
+    let account = chain
+        .state_manager
+        .get_account(&wallet.address, state_root);
+
+    if let None = account {
+        return Json(StatusResponse::error("Failed to get account data from the chain (have you used it yet?)".to_string()));
+    }
+    let account = account.unwrap();
+
+    let response = WalletInfo {
+        private_key: hex::encode(wallet.get_private_key()),
+        public_key: wallet.address,
+        balance: account.balance,
+        nonce: account.nonce
+    };
+    Json(StatusResponse::success(response))
+}
+
+pub async fn launch_node(config: Config, genesis: bool, miner: bool) {
     let mut node = Node::new(
         config.wallet.address,
         config.wallet.get_private_key(),
@@ -302,7 +356,7 @@ pub async fn launch_node(config: Config, genesis: bool) {
         pillar_core::PROTOCOL_PORT,
         vec![],
         if genesis { Some(Arc::new(GenesisDatastore::new())) } else { None },
-        None
+        if miner { Some(MinerPool::new()) } else { None }
     );
     
     for peer in &config.wkps {
@@ -320,14 +374,19 @@ pub async fn launch_node(config: Config, genesis: bool) {
         }
     }
 
-    node.serve().await;
+    if miner {
+        let mut miner = Miner::new(node.clone()).expect("Failed to create miner");
+        miner.serve().await;
+    }else{
+        node.serve().await;
+    }
 
 
     let api_address = format!("{}:3000", config.ip_address);
     let logs_address = format!("{}:3001", config.ip_address);
     let state = AppState {
         node,
-        config
+        config: Arc::new(RwLock::new(config))
     };
     let cors = CorsLayer::new()
         .allow_origin(Any)      // allow all origins
@@ -341,6 +400,7 @@ pub async fn launch_node(config: Config, genesis: bool) {
         .route("/block/{hash}", get(handle_block_get))
         .route("/blocks", get(handle_block_list))
         .route("/node", get(handle_node_get))
+        .route("/wallet", get(handle_wallet_get))
         .with_state(state)
         .layer(cors);
     

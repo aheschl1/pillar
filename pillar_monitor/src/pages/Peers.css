@@ -36,6 +36,57 @@
     flex-grow: 1;
 }
 
+/* Hanging add toggle button under header */
+/* Header controls layout */
+.header-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Discrete inline Add toggle in header */
+.add-toggle-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: #007bff;
+    cursor: pointer;
+    font-size: 0.9em;
+    transition: background-color 150ms ease, color 150ms ease, transform 120ms ease;
+}
+
+.add-toggle-inline .arrow {
+    display: inline-block;
+    transform-origin: center;
+    transition: transform 200ms ease;
+}
+
+.add-toggle-inline.open {
+    color: #0056b3;
+    background: rgba(0,123,255,0.06);
+}
+
+.add-toggle-inline.open .arrow {
+    transform: rotate(180deg);
+}
+
+/* Slide down panel that contains the AddPeerForm */
+.add-panel {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 300ms ease, padding 300ms ease;
+    padding: 0 20px;
+}
+
+.add-panel.open {
+    max-height: 400px; /* enough to show the form */
+    padding: 20px;
+}
+
 .peer-card {
     background-color: #f9f9f9;
     border: 1px solid #e0e0e0;
@@ -60,7 +111,74 @@
     font-size: 12px;
 }
 
+.add-peer-card {
+    background-color: white;
+    border-radius: 8px;
+    padding: 15px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    margin: 0 20px 20px;
+}
+
+.add-peer-form h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    font-size: 1.2em;
+}
+
+.form-group {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.form-group input {
+    flex: 1;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    font-size: 0.9em;
+    transition: border-color 0.2s;
+}
+
+.form-group input:focus {
+    outline: none;
+    border-color: #007bff;
+    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+.form-actions {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.add-peer-form button {
+    padding: 10px 15px;
+    border: none;
+    border-radius: 5px;
+    background-color: #007bff;
+    color: white;
+    cursor: pointer;
+    font-size: 0.9em;
+    transition: background-color 0.2s;
+}
+
+.add-peer-form button:disabled {
+    background-color: #a0cfff;
+    cursor: not-allowed;
+}
+
+.add-peer-form button:hover:not(:disabled) {
+    background-color: #0056b3;
+}
+
+.success-message {
+    color: #28a745;
+    font-weight: bold;
+    margin: 0;
+}
+
 .error-message {
-    color: #d9534f;
-    padding: 20px;
+    color: #dc3545;
+    margin-top: 10px;
 }
