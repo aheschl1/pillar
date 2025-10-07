@@ -11,11 +11,13 @@
   },
   "dependencies": {
     "ansi-to-html": "^0.7.2",
+    "elkjs": "^0.11.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-easy-panzoom": "^0.4.4",
     "react-router-dom": "^7.9.3",
-    "react-zoom-pan-pinch": "^3.7.0"
+    "react-zoom-pan-pinch": "^3.7.0",
+    "reactflow": "^11.11.4"
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",

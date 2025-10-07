@@ -116,3 +116,13 @@ To run, using the Docker image is recommended:
 ```
 
 For convenience, `./kill_all.sh` stops all running containers.
+
+### Frontend
+
+To access a dashboard, first launch a node and then:
+
+```bash
+cd pillar_monitor
+npm i
+npm run dev
+```
