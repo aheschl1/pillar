@@ -125,3 +125,31 @@
     gap: 5px;
     padding-left: 10px;
 }
+
+.transactions-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-left: 10px;
+}
+
+.transaction-link {
+    color: #007bff;
+    text-decoration: none;
+    padding: 6px 8px;
+    border-radius: 4px;
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    transition: all 0.2s ease;
+    display: inline-block;
+}
+
+.transaction-link:hover {
+    background-color: #007bff;
+    color: white;
+    border-color: #007bff;
+}
+
+.transaction-link .monospace {
+    background-color: transparent;
+}

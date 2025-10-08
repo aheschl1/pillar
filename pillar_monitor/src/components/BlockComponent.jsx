@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { toHex } from '../api/utils';
 import './BlockComponent.css';
 
@@ -95,6 +96,26 @@ const BlockComponent = ({ block }) => {
                                     <div key={idx} className="monospace small">
                                         {toHex(stamper)}
                                     </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {transaction_hashs && transaction_hashs.length > 0 && (
+                        <div className="block-field">
+                            <strong>Transactions:</strong>
+                            <div className="transactions-list">
+                                {transaction_hashs.map((txHash, idx) => (
+                                    <Link 
+                                        key={idx} 
+                                        to={`/transaction/${toHex(txHash)}`}
+                                        className="transaction-link"
+                                        onClick={(e) => e.stopPropagation()}
+                                    >
+                                        <span className="monospace small">
+                                            {toHex(txHash)}
+                                        </span>
+                                    </Link>
                                 ))}
                             </div>
                         </div>

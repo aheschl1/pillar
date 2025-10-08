@@ -1,0 +1,110 @@
+.transaction-container {
+    padding: 20px;
+}
+
+.transaction-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+}
+
+.back-link {
+    padding: 8px 16px;
+    background: #007bff;
+    color: white;
+    text-decoration: none;
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+.back-link:hover {
+    background: #0056b3;
+}
+
+.error-message {
+    color: #ff6b6b;
+    padding: 12px;
+    background: rgba(255, 107, 107, 0.1);
+    border-radius: 6px;
+    border: 1px solid rgba(255, 107, 107, 0.3);
+}
+
+.transaction-card {
+    background: #0b1220;
+    color: #dbe9ff;
+    border-radius: 8px;
+    padding: 24px;
+    box-shadow: 0 6px 20px rgba(8, 12, 20, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.03);
+    max-width: 900px;
+}
+
+.transaction-section {
+    margin-bottom: 30px;
+}
+
+.transaction-section:last-child {
+    margin-bottom: 0;
+}
+
+.transaction-section h3 {
+    color: #9fd1ff;
+    font-size: 18px;
+    margin-bottom: 16px;
+    font-weight: 600;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 8px;
+}
+
+.transaction-field {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 16px;
+    padding: 12px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.transaction-field:last-child {
+    border-bottom: none;
+}
+
+.transaction-field strong {
+    color: #91a7c4;
+    font-weight: 500;
+}
+
+.transaction-field span {
+    color: #dbe9ff;
+    word-break: break-all;
+}
+
+.monospace {
+    font-family: 'SFMono-Regular', Menlo, Monaco, 'Courier New', monospace;
+    font-size: 13px;
+    background: rgba(255, 255, 255, 0.02);
+    padding: 6px 8px;
+    border-radius: 4px;
+}
+
+.signature {
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.amount {
+    font-weight: 600;
+    color: #7ae582;
+    font-size: 16px;
+}
+
+@media (max-width: 768px) {
+    .transaction-field {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+    
+    .transaction-card {
+        padding: 16px;
+    }
+}

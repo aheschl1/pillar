@@ -4,6 +4,7 @@ import Peers from '../../pages/Peers';
 import Chain from '../../pages/Chain';
 import AddTransaction from '../../pages/AddTransaction';
 import Wallet from '../../pages/Wallet';
+import Transaction from '../../pages/Transaction';
 import './Dashboard.css';
 
 const Dashboard = () => {
@@ -25,6 +26,7 @@ const Dashboard = () => {
                         <Route path="/add-transaction" element={<AddTransaction />} />
                         <Route path="/wallet" element={<Wallet />} />
                         <Route path="/chain" element={<Chain />} />
+                        <Route path="/transaction/:hash" element={<Transaction />} />
                     </Routes>
                 </div>
             </div>
