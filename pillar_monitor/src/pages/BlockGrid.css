@@ -1,0 +1,101 @@
+/* Grid and transaction card styles for Block page */
+
+.block-grid {
+  display: flex;
+  gap: 16px;
+}
+
+.block-left {
+  flex: 1 1 40%;
+}
+
+.block-right {
+  flex: 1 1 60%;
+  display: flex;
+  flex-direction: column;
+  max-height: 80vh; /* allow right pane to scroll if too tall */
+}
+
+.tx-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  align-content: start;
+  padding: 8px 0;
+  overflow: auto;
+}
+
+.tx-card {
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--card-border, #ddd);
+  padding: 10px;
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+  display: flex;
+  flex-direction: column;
+}
+
+.tx-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tx-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.monospace {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', 'Courier New', monospace;
+  background: transparent;
+}
+
+.signature-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.signature-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.signature-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  display: inline-block;
+}
+
+.signature-text.expanded {
+  white-space: pre-wrap;
+  overflow: auto;
+}
+
+.sig-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.copy-btn, .toggle-btn {
+  border: 1px solid var(--btn-border, #ccc);
+  background: var(--btn-bg, #f7f7f7);
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.copy-btn:hover, .toggle-btn:hover {
+  filter: brightness(0.97);
+}
+
+.small { font-size: 0.9rem; }
+
+.error { color: #b00020; }

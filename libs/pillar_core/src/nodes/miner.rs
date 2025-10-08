@@ -121,7 +121,6 @@ async fn monitor_block_pool(miner: Miner) {
                 .headers
                 .get(&block.header.previous_hash)
                 .expect("Previous header must exist");
-            
             let state_root = chain
                 .state_manager
                 .branch_from_block_internal(&block, prev_block, &miner.node.inner.public_key);

@@ -60,7 +60,6 @@ pub async fn mine(
 ){
     // the block is already pupulated
     let (difficulty, _) = get_difficulty_for_block(&block.header, &reputations);
-
     block.header.nonce = 0;
     block.header.completion = HeaderCompletion::new(
         [255u8; 32],

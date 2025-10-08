@@ -104,7 +104,11 @@ impl BlockHeader {
         }
         // check that all the signatures work in the tail
         let tail = &mut self.tail.clone();
+        let tail_hash_before = tail.hash(hasher).unwrap();
         tail.collapse();
+        if tail.hash(hasher).unwrap() != tail_hash_before {
+            return Err(BlockValidationError::UncollapsedTail(*tail));
+        }
         for i in 0..tail.n_stamps() {
             let stamp = tail.stamps[i];
             let sigver = DefaultVerifier::from_bytes(&stamp.address);

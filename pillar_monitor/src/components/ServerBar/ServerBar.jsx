@@ -1,6 +1,7 @@
 import React, { useContext, useState, useEffect } from 'react';
 import { ServerContext, useServer } from '../../contexts/serverContext';
 import { useNodeData } from '../../hooks/useNodeData';
+import { useHttp } from '../../hooks/useHttp';
 import './ServerBar.css';
 
 const ServerBar = () => {
@@ -12,6 +13,7 @@ const ServerBar = () => {
     } = useServer();
 
     const { nodeData, error: nodeError } = useNodeData();
+    const { post } = useHttp();
 
     const handleConnectToggle = (event) => {
         if (isConnected) {
@@ -82,6 +84,29 @@ const ServerBar = () => {
                     <div className="server-bar-item">
                         <label>Public Key:</label>
                         <span className="public-key">{nodeData.public_key}</span>
+                        <div className="server-bar-item">
+                            <label style={{marginLeft: '8px'}}>Node State:</label>
+                            <span
+                                className="public-key clickable"
+                                title="Click to initialize chain"
+                                onClick={async () => {
+                                    const ok = window.confirm('This will initialize the chain on the node. Are you sure?');
+                                    if (!ok) return;
+                                    try {
+                                        const res = await post(`/init`, {});
+                                        if (res && res.success) {
+                                            window.alert('Init triggered successfully');
+                                        } else {
+                                            window.alert('Init failed: ' + (res.error || 'unknown'));
+                                        }
+                                    } catch (err) {
+                                        window.alert('Init failed: ' + err.message);
+                                    }
+                                }}
+                            >
+                                {nodeData.state}
+                            </span>
+                        </div>
                     </div>
                 )}
             </div>

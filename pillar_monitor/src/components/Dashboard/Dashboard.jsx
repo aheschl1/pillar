@@ -5,6 +5,7 @@ import Chain from '../../pages/Chain';
 import AddTransaction from '../../pages/AddTransaction';
 import Wallet from '../../pages/Wallet';
 import './Dashboard.css';
+import Block from '../../pages/Block';
 
 const Dashboard = () => {
     return (
@@ -16,6 +17,7 @@ const Dashboard = () => {
                         <li><NavLink to="/add-transaction" className={({ isActive }) => isActive ? "active-link" : ""}>Add Transaction</NavLink></li>
                         <li><NavLink to="/wallet" className={({ isActive }) => isActive ? "active-link" : ""}>Wallet</NavLink></li>
                         <li><NavLink to="/chain" className={({ isActive }) => isActive ? "active-link" : ""}>Chain</NavLink></li>
+                        <li><NavLink to="/block" className={({ isActive }) => isActive ? "active-link" : ""}>Block</NavLink></li>
                     </ul>
                 </nav>
                 <div className="dashboard-content">
@@ -25,6 +27,7 @@ const Dashboard = () => {
                         <Route path="/add-transaction" element={<AddTransaction />} />
                         <Route path="/wallet" element={<Wallet />} />
                         <Route path="/chain" element={<Chain />} />
+                        <Route path="/block" element={<Block />} />
                     </Routes>
                 </div>
             </div>

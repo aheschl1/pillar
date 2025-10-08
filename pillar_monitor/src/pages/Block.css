@@ -1,0 +1,42 @@
+/* Basic layout for Block page */
+.block-page {
+    padding: 12px;
+}
+
+.block-search {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.block-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.block-right {
+    background: var(--panel-bg, #fafafa);
+    border: 1px solid #e6e6e6;
+    padding: 12px;
+    border-radius: 6px;
+    overflow: auto;
+}
+
+.tx-list {
+    list-style: none;
+    padding: 0;
+}
+
+.tx-item {
+    border-bottom: 1px solid #eee;
+    padding: 8px 0;
+}
+
+.monospace {
+    font-family: monospace, monospace;
+}
+
+.small { font-size: 0.9rem; }
+
+.error { color: #b00020; }

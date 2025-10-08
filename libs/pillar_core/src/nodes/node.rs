@@ -61,6 +61,20 @@ impl NodeState {
     }
 }
 
+impl Into<String> for NodeState {
+    fn into(self) -> String {
+        match self {
+            NodeState::ChainLoading => "ChainLoading",
+            NodeState::ChainOutdated => "ChainOutdated",
+            NodeState::ChainSyncing => "ChainSyncing",
+            NodeState::FailedChainLoad => "FailedChainLoad",
+            NodeState::FailedChainSync => "FailedChainSync",
+            NodeState::Serving => "Serving",
+            NodeState::ICD => "ICD"
+        }.into()
+    }
+}
+
 fn get_initial_state(datastore: &dyn Datastore) -> (NodeState, Option<Chain>) {
     // check if the datastore has a chain
     if datastore.latest_chain().is_some() {
@@ -212,7 +226,7 @@ impl Node {
         ip_address = ?self.ip_address,
         port = self.port
     ))]
-    pub(crate) async fn initialize_chain(&self) {
+    pub async fn initialize_chain(&self) {
         let state = self.inner.state.read().await.clone();
         let handle = match state {
             NodeState::ICD | NodeState::FailedChainLoad => {

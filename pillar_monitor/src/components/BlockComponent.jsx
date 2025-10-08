@@ -8,8 +8,8 @@ const ShortHash = ({ hash }) => {
     return <span className="monospace">{shortHash}</span>;
 };
 
-const BlockComponent = ({ block }) => {
-    const [isExpanded, setIsExpanded] = useState(false);
+const BlockComponent = ({ block, forceExpanded = false }) => {
+    const [isExpanded, setIsExpanded] = useState(!!forceExpanded);
 
     if (!block) {
         return null;
@@ -19,6 +19,7 @@ const BlockComponent = ({ block }) => {
 
     const toggleExpand = (e) => {
         e.stopPropagation();
+        if (forceExpanded) return; // don't allow toggling when forced
         setIsExpanded(!isExpanded);
     };
 

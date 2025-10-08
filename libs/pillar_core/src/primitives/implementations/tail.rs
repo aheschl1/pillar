@@ -1,6 +1,6 @@
 use std::collections::{HashSet, VecDeque};
 
-use pillar_crypto::{signing::{DefaultVerifier, SigVerFunction, Signable}, types::StdByteArray};
+use pillar_crypto::{hashing::Hashable, signing::{DefaultVerifier, SigVerFunction, Signable}, types::StdByteArray};
 
 use crate::{primitives::block::{BlockTail, Stamp}, protocol::reputation::N_TRANSMISSION_SIGNATURES};
 
@@ -78,5 +78,15 @@ impl BlockTail {
     // iter stamps
     pub fn iter_stamps(&self) -> impl Iterator<Item = &Stamp> {
         self.stamps.iter().filter(|s| s.signature != [0; 64])
+    }
+}
+
+impl Hashable for BlockTail {
+    fn hash(&self, hasher: &mut impl pillar_crypto::hashing::HashFunction) -> Result<StdByteArray, std::io::Error>{
+        for i in 0..self.stamps.len() {
+            hasher.update(self.stamps[i].signature);
+            hasher.update(self.stamps[i].address);
+        }
+        Ok(hasher.digest().unwrap())
     }
 }

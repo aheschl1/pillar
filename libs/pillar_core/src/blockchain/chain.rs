@@ -7,7 +7,7 @@ use pillar_crypto::{hashing::DefaultHash, signing::{DefaultVerifier, SigVerFunct
 use tracing::instrument;
 
 use crate::{
-    accounting::{account::Account, state::StateManager}, primitives::{block::{Block, BlockHeader}, errors::BlockValidationError, transaction::Transaction}, protocol::{chain::get_genesis_block, pow::get_difficulty_for_block, reputation::get_current_reputations_for_stampers}
+    accounting::{account::Account, state::StateManager}, primitives::{block::{Block, BlockHeader}, errors::BlockValidationError, transaction::Transaction}, protocol::{chain::get_genesis_block, pow::get_difficulty_for_block, reputation::{get_current_reputations_for_stampers, get_current_reputations_for_stampers_from_state}}
 };
 
 use super::TrimmableChain;
@@ -317,6 +317,25 @@ impl Chain {
             tracing::info!("Chain depth expanded to {}", block.header.depth);
             self.deepest_hash = block.header.completion.as_ref().unwrap().hash;
             self.depth = block.header.depth;
+        } else if block.header.depth == self.depth {
+            // take the block which is stamped with the most reputation
+            let current_deepest = self.get_top_block().unwrap();
+            let existing_reputation: f64 = get_current_reputations_for_stampers_from_state(
+                &self.state_manager, 
+                self.headers.get(&current_deepest.header.previous_hash).unwrap(),
+                &current_deepest.header
+            ).values().sum();
+            let new_reputation: f64 = get_current_reputations_for_stampers_from_state(
+                &self.state_manager, 
+                self.headers.get(&block.header.previous_hash).unwrap(),
+                &block.header
+            ).values().sum();
+            if new_reputation > existing_reputation || (
+                new_reputation == existing_reputation && block.header.tail.n_stamps() > current_deepest.header.tail.n_stamps()
+            ){
+                tracing::info!("Chain depth fork replaced deepest block with higher reputation fork");
+                self.deepest_hash = block.header.completion.as_ref().unwrap().hash;
+            }
         }
         Ok(())
     }

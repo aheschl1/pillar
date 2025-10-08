@@ -78,6 +78,11 @@
     border-radius: 3px;
 }
 
+.public-key.clickable {
+    cursor: pointer;
+    text-decoration: underline dotted rgba(255,255,255,0.3);
+}
+
 input:checked + .slider:before {
     -webkit-transform: translateX(26px);
     -ms-transform: translateX(26px);

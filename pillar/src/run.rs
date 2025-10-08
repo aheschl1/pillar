@@ -1,7 +1,7 @@
 use std::sync::{Arc};
 
 use axum::{extract::{Path, Query, State}, http::HeaderMap, response::IntoResponse, routing::{get, post}, Json, Router};
-use pillar_core::{accounting::{account, wallet::{self, Wallet}}, nodes::{miner::Miner, node::Node, peer::Peer}, persistence::database::GenesisDatastore, primitives::pool::MinerPool, protocol::peers::discover_peer};
+use pillar_core::{accounting::{account, wallet::{self, Wallet}}, nodes::{miner::Miner, node::Node, peer::Peer}, persistence::database::GenesisDatastore, primitives::pool::MinerPool, protocol::peers::discover_peer, reputation::history::NodeHistory};
 use pillar_crypto::types::StdByteArray;
 use serde::{Deserialize, Serialize};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -287,17 +287,20 @@ struct NodeInfo {
     ip_address: String,
     port: u16,
     peer_count: usize,
+    state: String
 }
 
 async fn handle_node_get(
     State(state): State<AppState>,
 ) -> Json<StatusResponse<NodeInfo>> {
     let peer_count = state.node.inner.peers.read().await.len();
+    let node_state = state.node.inner.state.read().await.clone();
     let response = NodeInfo {
         public_key: state.config.read().await.wallet.address,
         ip_address: state.node.ip_address.to_string(),
         port: state.node.port,
         peer_count,
+        state: node_state.into()
     };
     Json(StatusResponse::success(response))
 }
@@ -346,6 +349,156 @@ async fn handle_wallet_get(
         nonce: account.nonce
     };
     Json(StatusResponse::success(response))
+}
+
+#[derive(Serialize, Deserialize)]
+struct TransactionResponse {
+    signature: String,
+    sender: StdByteArray,
+    receiver: StdByteArray,
+    amount: u64,
+    timestamp: u64,
+    nonce: u64,
+    hash: StdByteArray
+}
+
+async fn handle_transaction_get(
+    Path((block_hash, hash)): Path<(String, String)>,
+    State(state): State<AppState>,
+) -> Json<StatusResponse<TransactionResponse>> {
+    let block_hash_bytes = match hex::decode(&block_hash) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return Json(StatusResponse::error("Invalid block hash".to_string()));
+        }
+    };
+    if block_hash_bytes.len() != 32 {
+        return Json(StatusResponse::error("Block hash must be 32 bytes".to_string()));
+    }
+    let block_hash_array: [u8; 32] = block_hash_bytes.as_slice().try_into().unwrap();
+
+    let hash_bytes = match hex::decode(&hash) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return Json(StatusResponse::error("Invalid transaction hash".to_string()));
+        }
+    };
+    if hash_bytes.len() != 32 {
+        return Json(StatusResponse::error("Transaction hash must be 32 bytes".to_string()));
+    }
+    let hash_array: [u8; 32] = hash_bytes.as_slice().try_into().unwrap();
+
+    let chain = state.node.lock_chain().await;
+    let block = match &*chain {
+        Some(chain) => chain.get_block(&block_hash_array),
+        None => {
+            return Json(StatusResponse::error("Node has no chain".to_string()));
+        }
+    };
+    match block {
+        None => {
+            return Json(StatusResponse::error("Block not found".to_string()));
+        }
+        Some(block) => {
+            let transaction = block.transactions.iter().find(|tx| tx.hash == hash_array);
+            match transaction {
+                None => {
+                    return Json(StatusResponse::error("Transaction not found in block".to_string()));
+                }
+                Some(tx) => {
+                    let response = TransactionResponse {
+                        signature: hex::encode(tx.signature),
+                        sender: tx.header.sender,
+                        receiver: tx.header.receiver,
+                        amount: tx.header.amount,
+                        timestamp: tx.header.timestamp,
+                        nonce: tx.header.nonce,
+                        hash: tx.hash
+                    };
+                    return Json(StatusResponse::success(response));
+                }
+            }
+        },
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct AccountInfo {
+    address: StdByteArray,
+    balance: u64,
+    reputation: f64,
+    nonce: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct StateResponse {
+    root: StdByteArray,
+    accounts: Vec<AccountInfo>,
+}
+
+async fn handle_state_get(
+    Path(block_hash): Path<String>,
+    State(state): State<AppState>,
+) -> Json<StatusResponse<StateResponse>> {
+    let block_hash_bytes = match hex::decode(&block_hash) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return Json(StatusResponse::error("Invalid block hash".to_string()));
+        }
+    };
+    if block_hash_bytes.len() != 32 {
+        return Json(StatusResponse::error("Block hash must be 32 bytes".to_string()));
+    }
+    let block_hash_array: [u8; 32] = block_hash_bytes.as_slice().try_into().unwrap();
+
+    let chain = state.node.lock_chain().await;
+    let block = match &*chain {
+        Some(chain) => chain.get_block(&block_hash_array),
+        None => {
+            return Json(StatusResponse::error("Node has no chain".to_string()));
+        }
+    };
+    match block {
+        None => {
+            return Json(StatusResponse::error("Block not found".to_string()));
+        }
+        Some(block) => {
+            let state_root = match &block.header.completion.as_ref() {
+                Some(completion) => completion.state_root,
+                None => {
+                    return Json(StatusResponse::error("Block is not completed yet".to_string()));
+                }
+            };
+            let time = block.header.timestamp;
+            let accounts_map = chain.as_ref().unwrap().state_manager.get_all_accounts(state_root);
+            let accounts: Vec<AccountInfo> = accounts_map.iter().map(|account| {
+                let history = account.history.as_ref();
+                AccountInfo {
+                    address: account.address,
+                    balance: account.balance,
+                    reputation: if let Some(history) = history {
+                        history.compute_reputation(time)
+                    } else {
+                        0.0
+                    },
+                    nonce: account.nonce,
+                }
+            }).collect();
+            let response = StateResponse {
+                root: state_root,
+                accounts,
+            };
+            return Json(StatusResponse::success(response));
+        }
+    }
+}
+
+async fn handle_init_download(
+    State(state): State<AppState>,
+) -> Json<StatusResponse<()>> {
+    tracing::info!("Triggering chain init.");
+    state.node.initialize_chain().await;
+    Json(StatusResponse { success: true, error: None, body: None })
 }
 
 pub async fn launch_node(config: Config, genesis: bool, miner: bool) {
@@ -398,9 +551,12 @@ pub async fn launch_node(config: Config, genesis: bool, miner: bool) {
         .route("/peer", post(handle_peer_post)) // allow without public key
         .route("/peers", get(handle_peer_get))
         .route("/block/{hash}", get(handle_block_get))
+        .route("/transaction/{block_hash}/{hash}", get(handle_transaction_get))
+        .route("/state/{block_hash}", get(handle_state_get))
         .route("/blocks", get(handle_block_list))
         .route("/node", get(handle_node_get))
         .route("/wallet", get(handle_wallet_get))
+        .route("/init", post(handle_init_download))
         .with_state(state)
         .layer(cors);
     

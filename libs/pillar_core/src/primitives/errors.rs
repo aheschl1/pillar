@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use pillar_crypto::types::StdByteArray;
 
-use crate::primitives::block::BlockHeader;
+use crate::primitives::block::{BlockHeader, BlockTail};
 
 #[derive(Debug)]
 pub enum BlockValidationError {
@@ -40,6 +40,8 @@ pub enum BlockValidationError {
     TransactionInvalidSignature,
     // merkle gen
     MerkleGenerationFailed,
+    // invalid tail
+    UncollapsedTail(BlockTail),
     // other
     Other(String),
 }
@@ -100,6 +102,9 @@ impl Display for BlockValidationError {
             },
             BlockValidationError::MerkleGenerationFailed => {
                 write!(f, "Failed to generate Merkle tree")
+            },
+            BlockValidationError::UncollapsedTail(header) => {
+                write!(f, "Block has an uncollapsed tail: {header:?}")
             }
         }
     }
