@@ -9,7 +9,7 @@ pub struct Wallet{
     pub address: StdByteArray,
     signing_key: DefaultSigner,
     _balance: u64,
-    pub nonce: u64,
+    nonce: u64,
 }
 
 impl Wallet {
@@ -26,6 +26,14 @@ impl Wallet {
     /// Return the private key bytes (32) of this wallet.
     pub fn get_private_key(&self) -> [u8; 32] {
         self.to_bytes()
+    }
+
+    pub fn nonce(&self) -> u64 {
+        self.nonce
+    }
+
+    pub fn nonce_mut(&mut self) -> &mut u64 {
+        &mut self.nonce
     }
 }
 

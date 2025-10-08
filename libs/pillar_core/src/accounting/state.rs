@@ -117,6 +117,9 @@ impl StateManager{
                     
                 }
             };
+            sender.balance -= transaction.header.amount;
+            sender.nonce += 1;
+            state_updates.insert(sender.address, sender);
             // may need to make a new public account for the receiver under the established public key
             let mut receiver = match state_updates.get(&transaction.header.receiver){
                 Some(account) => account.clone(),
@@ -125,10 +128,7 @@ impl StateManager{
                 },
             };
             // update balances
-            sender.balance -= transaction.header.amount;
-            sender.nonce += 1;
             receiver.balance += transaction.header.amount;
-            state_updates.insert(sender.address, sender);
             state_updates.insert(receiver.address, receiver);
         }
         // add the miner reward. this reward will be based upon the blocks difficulty, and the number of stamps.

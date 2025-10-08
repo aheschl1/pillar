@@ -26,7 +26,8 @@ pub async fn submit_transaction(
     register_completion_callback: bool,
     timestamp: Option<u64>
 ) -> Result<(Option<Receiver<BlockHeader>>, Transaction), QueryError> {
-    let nonce = wallet.nonce; wallet.nonce += 1;
+    let wallet_nonce = wallet.nonce_mut();
+    let nonce = *wallet_nonce; *wallet_nonce += 1;
 
     let timestamp = match timestamp{
         Some(t) => t,

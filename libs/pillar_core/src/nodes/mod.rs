@@ -18,7 +18,7 @@ mod tests {
     };
 
     use crate::{
-        accounting::wallet::Wallet, nodes::{
+        accounting::{account, wallet::Wallet}, nodes::{
             miner::{Miner, MAX_TRANSACTION_WAIT_TIME}, node::{self, NodeState}, peer::Peer
         }, persistence::database::GenesisDatastore, primitives::{messages::Message, pool::MinerPool, transaction::Transaction}, protocol::{difficulty::get_reward_from_depth_and_stampers, peers::{discover_peer, discover_peers}, transactions::{get_transaction_proof, submit_transaction}}
     };
@@ -28,7 +28,7 @@ mod tests {
     use std::{
         fs::File,
         net::{IpAddr, Ipv4Addr},
-        sync::Arc,
+        sync::Arc, time::Duration,
     };
 
     // always setup tracing first
@@ -1269,6 +1269,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_self_transaction() {
+        let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 8));
+        let port_a = 7957;
+        let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 8));
+        let port_b = 7958;
+        
+        let (mut node_a, mut wallet_a) = create_empty_node_genisis(
+            ip_address_a,
+            port_a, 
+            vec![],
+            true,
+            Some(MinerPool::new()),
+        ).await;
+
+        let (mut node_b, _ ) = create_empty_node_genisis(
+            ip_address_b,
+            port_b, 
+            vec![node_a.clone().into()],
+            true,
+            Some(MinerPool::new()),
+        ).await;
+
+        let mut miner_a = Miner::new(node_a.clone()).unwrap();
+        miner_a.serve().await;
+        node_b.serve().await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        discover_peers(&node_b).await.unwrap();
+
+        let address_a = wallet_a.address;
+        let _ = submit_transaction(
+            &mut node_a, 
+            &mut wallet_a, 
+            address_a, 
+            0, 
+            false, 
+            None
+        ).await.unwrap();
+        tokio::time::sleep(Duration::from_secs(10)).await;
+
+        let state_root = node_a
+            .inner
+            .chain
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .get_state_root()
+            .unwrap();
+        let account_a = node_a
+            .inner
+            .chain
+            .lock()
+            .await
+            .as_mut()
+            .unwrap()
+            .state_manager
+            .get_account(&wallet_a.address, state_root)
+            .unwrap();
+
+        assert_eq!(account_a.nonce, 1);
+
+    }
+
+    #[tokio::test]
     async fn test_50_transactions(){
         // make 2 nodes
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 10));
@@ -1366,6 +1430,8 @@ mod tests {
             .unwrap();
         let b_balance = account_b.balance;
         assert_eq!(b_balance, get_reward_from_depth_and_stampers(1, 2));
+        // check b nonce
+        assert_eq!(account_b.nonce, 0);
         drop(account_b);
         // do it on the other side 
         let state_root = node_a
@@ -1390,6 +1456,27 @@ mod tests {
         let balance_b = acc.balance;
         assert_eq!(balance_b, get_reward_from_depth_and_stampers(1, 2));
         drop(acc);
+        // check account a nonce
+        let state_root = node_a
+            .inner
+            .chain
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .get_state_root()
+            .unwrap();
+        let acc = node_a
+            .inner
+            .chain
+            .lock()
+            .await
+            .as_mut()
+            .unwrap()
+            .state_manager
+            .get_account(&wallet_a.address, state_root)
+            .unwrap();
+        assert_eq!(acc.nonce, 10);
         // now, b will send some of its money to a
 
         for i in 0..10 {
@@ -1447,6 +1534,7 @@ mod tests {
             .unwrap();
         let a_balance = account_a.balance;
         assert_eq!(a_balance, 100); // 100 is the initial balance
+        assert_eq!(account_a.nonce, 10);
         drop(account_a);
         // do it on the other side
         let state_root = node_b
@@ -1493,6 +1581,7 @@ mod tests {
             .unwrap();
         let b_balance = account_b.balance;
         assert_eq!(b_balance, get_reward_from_depth_and_stampers(1, 2) + get_reward_from_depth_and_stampers(2, 2) - 100); // 0 is the balance after sending 10 * 10 = 100
+        assert_eq!(account_b.nonce, 10);
         drop(account_b);
         // do it on the other side
         let state_root = node_a
@@ -1745,7 +1834,7 @@ mod tests {
             Some(MinerPool::new()),
         )
         .await;
-        let (mut node_a, mut wallet_a) = create_empty_node_genisis(
+        let (mut node_a, wallet_a) = create_empty_node_genisis(
             ip_address_a,
             port_a,
             vec![],
