@@ -303,6 +303,70 @@ async fn handle_node_get(
 }
 
 #[derive(Serialize, Deserialize)]
+struct TransactionResponse {
+    hash: StdByteArray,
+    header: TransactionHeaderResponse,
+    signature: Vec<u8>
+}
+
+#[derive(Serialize, Deserialize)]
+struct TransactionHeaderResponse {
+    sender: StdByteArray,
+    receiver: StdByteArray,
+    amount: u64,
+    timestamp: u64,
+    nonce: u64
+}
+
+async fn handle_transaction_get(
+    Path(hash): Path<String>,
+    State(state): State<AppState>,
+) -> Json<StatusResponse<TransactionResponse>> {
+    let hash_bytes = match hex::decode(&hash) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return Json(StatusResponse::error("Invalid transaction hash".to_string()));
+        }
+    };
+    if hash_bytes.len() != 32 {
+        return Json(StatusResponse::error("Transaction hash must be 32 bytes".to_string()));
+    }
+    let hash_array: [u8; 32] = hash_bytes.as_slice().try_into().unwrap();
+
+    let chain = state.node.lock_chain().await;
+    match &*chain {
+        Some(chain) => {
+            // Search through all blocks to find the transaction
+            for block in chain.get_block_headers() {
+                if let Some(block_data) = chain.get_block(&block.completion.as_ref().unwrap().hash) {
+                    for tx in &block_data.transactions {
+                        if tx.hash == hash_array {
+                            let header_response = TransactionHeaderResponse {
+                                sender: tx.header.sender,
+                                receiver: tx.header.receiver,
+                                amount: tx.header.amount,
+                                timestamp: tx.header.timestamp,
+                                nonce: tx.header.nonce,
+                            };
+                            let response = TransactionResponse {
+                                hash: tx.hash,
+                                header: header_response,
+                                signature: tx.signature.to_vec(),
+                            };
+                            return Json(StatusResponse::success(response));
+                        }
+                    }
+                }
+            }
+            Json(StatusResponse::error("Transaction not found".to_string()))
+        },
+        None => {
+            Json(StatusResponse::error("Node has no chain".to_string()))
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 struct WalletInfo {
     private_key: String,
     public_key: StdByteArray,
@@ -399,6 +463,7 @@ pub async fn launch_node(config: Config, genesis: bool, miner: bool) {
         .route("/peers", get(handle_peer_get))
         .route("/block/{hash}", get(handle_block_get))
         .route("/blocks", get(handle_block_list))
+        .route("/transaction/{hash}", get(handle_transaction_get))
         .route("/node", get(handle_node_get))
         .route("/wallet", get(handle_wallet_get))
         .with_state(state)
