@@ -1,47 +1,155 @@
-.add-tx-container {
-    padding: 20px;
+.add-tx-layout {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 24px;
+    flex-wrap: wrap; /* allows stacking on smaller screens */
+    font-family: Inter, sans-serif;
 }
+
+.add-tx-left {
+    flex: 1 1 400px;
+    max-width: 500px;
+}
+
+.add-tx-right {
+    flex: 1 1 300px;
+}
+
+h2 {
+    margin-bottom: 10px;
+}
+
+.connection-status {
+    font-size: 0.95em;
+    color: #666;
+    margin-bottom: 16px;
+}
+
+.status-open {
+    color: #22bb33;
+}
+.status-closed {
+    color: #bb2222;
+}
+
 .add-tx-form {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    max-width: 480px;
+    gap: 12px;
+    background: #f9fafb;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 16px;
 }
-.add-tx-form input[type="text"], .add-tx-form input[type="number"] {
-    padding: 8px;
+
+.add-tx-form input[type="text"],
+.add-tx-form input[type="number"] {
+    padding: 8px 10px;
     border-radius: 6px;
     border: 1px solid #ccc;
+    font-family: monospace;
+    font-size: 14px;
 }
-.add-tx-form .form-actions {
-    margin-top: 8px;
+
+.checkbox-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.9em;
 }
+
+.form-actions {
+    margin-top: 12px;
+    text-align: right;
+}
+
 .add-tx-form button {
-    padding: 8px 12px;
+    padding: 8px 14px;
     background: #007bff;
     color: #fff;
     border: none;
     border-radius: 6px;
     cursor: pointer;
+    font-weight: 500;
+    transition: background 0.2s;
 }
-.ws-logs pre { margin:0; font-family: monospace; font-size: 12px }
-.small { font-size: 0.9em; color: #666 }
+.add-tx-form button:hover {
+    background: #005fcc;
+}
 
+/* --- Logs --- */
 .ws-logs {
-    margin-top: 20px;
+    background: #0b1220;
+    color: #d6deeb;
+    border-radius: 8px;
+    padding: 12px;
+    border: 1px solid #1e2a4a;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+    height: 100%;
+    max-height: 400px;
+    display: flex;
+    flex-direction: column;
+}
+
+.ws-logs h3 {
+    margin: 0 0 10px 0;
+    font-size: 1.05em;
+    color: #a0b8ff;
 }
 
 .log-scroll {
-    background: #0b1220;
-    color: #d6deeb;
-    border-radius: 6px;
-    padding: 12px;
-    max-height: 240px;
+    flex: 1;
     overflow-y: auto;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
+    padding-right: 4px;
+    padding-bottom: 20px;
 }
 
-.log-scroll ul { list-style: none; padding: 0; margin: 0; }
-.log-line { display: flex; gap: 8px; align-items: flex-start; padding: 4px 0; }
-.log-line pre { margin: 0; white-space: pre-wrap; word-break: break-word; color: #d6deeb }
-.prompt { color: #7ae582; font-weight: 700; margin-right: 6px; }
+.log-scroll ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
 
+.log-line {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+.log-line pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: monospace;
+    font-size: 12px;
+    overflow-x: auto;
+}
+
+.prompt {
+    color: #7ae582;
+    font-weight: 700;
+    margin-right: 4px;
+}
+
+.empty-log {
+    color: #777;
+    font-size: 0.9em;
+    text-align: center;
+    padding: 8px;
+}
+
+@media (max-width: 800px) {
+    .add-tx-layout {
+        flex-direction: column;
+    }
+
+    .add-tx-right {
+        width: 100%;
+        max-width: none;
+    }
+}

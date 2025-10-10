@@ -164,5 +164,3 @@ const TreeView = ({ blocks }) => {
         </div>
     );
 };
-
-// End of file - TreeView-only Chain

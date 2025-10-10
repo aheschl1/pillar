@@ -53,3 +53,12 @@
     overflow: hidden; /* Prevent double scrollbars */
     position: relative; /* For child positioning */
 }
+
+.dashboard-content {
+    flex-grow: 1;
+    padding: 0;
+    overflow-y: auto; /* allow scroll */
+    overflow-x: hidden;
+    position: relative;
+    background-color: #f4f7f6;
+}

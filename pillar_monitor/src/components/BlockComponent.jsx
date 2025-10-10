@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { toHex } from '../api/utils';
+import { useNavigate } from 'react-router-dom'; // import this
 import './BlockComponent.css';
 
 const ShortHash = ({ hash }) => {
@@ -10,6 +11,7 @@ const ShortHash = ({ hash }) => {
 
 const BlockComponent = ({ block, forceExpanded = false }) => {
     const [isExpanded, setIsExpanded] = useState(!!forceExpanded);
+    const navigate = useNavigate(); // for programmatic navigation
 
     if (!block) {
         return null;
@@ -23,9 +25,16 @@ const BlockComponent = ({ block, forceExpanded = false }) => {
         setIsExpanded(!isExpanded);
     };
 
+    const handleViewInExplorer = (e) => {
+        e.stopPropagation();
+        const hexHash = toHex(hash);
+        navigate(`/block?hash=${hexHash}`);
+    };
+
     return (
         <div className={`block-card ${isExpanded ? 'expanded' : ''}`} onClick={toggleExpand}>
             <span className="expand-indicator">{isExpanded ? '−' : '+'}</span>
+
             {!isExpanded ? (
                 <div className="block-content-collapsed">
                     <div className="block-field-vital">
@@ -100,6 +109,16 @@ const BlockComponent = ({ block, forceExpanded = false }) => {
                             </div>
                         </div>
                     )}
+
+                    {/* Add this button at the bottom */}
+                    <div className="view-explorer-container">
+                        <button
+                            className="view-explorer-btn"
+                            onClick={handleViewInExplorer}
+                        >
+                            View in Explorer
+                        </button>
+                    </div>
                 </div>
             )}
         </div>
