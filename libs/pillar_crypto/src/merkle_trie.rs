@@ -4,7 +4,7 @@
 //! into nibbles (0-15). Values are serialized using `PillarSerialize`. The
 //! structure supports multiple roots for branching state (e.g., competing
 //! chain tips) while sharing unchanged subtrees.
-use std::{collections::{HashMap, HashSet, VecDeque}, fmt::Debug, marker::PhantomData};
+use std::{collections::{HashMap, HashSet, VecDeque}, fmt::Debug, hash::Hash, marker::PhantomData};
 
 
 use pillar_serialize::{PillarFixedSize, PillarNativeEndian, PillarSerialize};
@@ -355,55 +355,69 @@ impl<K: PillarSerialize + Hashable, V: PillarSerialize> PillarSerialize for Merk
         let mut buffer = Vec::new();
         buffer.extend((self.nodes.len() as u32).to_le_bytes());
         for (key, node) in &self.nodes {
-            let mut internal_buffer = vec![];
-            // key
-            internal_buffer.extend(key.serialize_pillar()?); // always 8
-            // references
-            internal_buffer.extend(node.references.to_le_bytes()); // always 2
-            // value
-            let vbuff = node.value.serialize_pillar()?;
-            internal_buffer.extend((vbuff.len() as u32).to_le_bytes());
-            internal_buffer.extend(vbuff);
-            // children
-            let d = node.children.serialize_pillar()?;
-            internal_buffer.extend((d.len() as u32).to_le_bytes());
-            internal_buffer.extend(d);
-
-            // give length and add
-            buffer.extend((internal_buffer.len() as u32).to_le_bytes());
-            buffer.extend(internal_buffer);
+           buffer.extend(key.serialize_pillar()?);
+           buffer.extend(node.references.serialize_pillar()?);
+           let vbuff = node.value.serialize_pillar()?;
+           buffer.extend((vbuff.len() as u32).to_le_bytes());
+           buffer.extend(vbuff);
+        }
+        for (_, node) in &self.nodes {
+            // do children now
+            let cbuff = node.children.serialize_pillar()?;
+            buffer.extend((cbuff.len() as u32).to_le_bytes());
+            buffer.extend(cbuff);
         }
         buffer.extend(self.roots.serialize_pillar()?);
         Ok(buffer)
     }
 
     fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        let mut key_map: HashMap<NodeKey, NodeKey> = HashMap::new();
         let n = u32::from_le_bytes(data[0..4].try_into().unwrap());
         let mut offset = 4;
-        let nodes = SlotMap::new();
+        let mut nodes = SlotMap::with_key();
+        let mut order = vec![];
         for _ in 0..n {
             let key = NodeKey::deserialize_pillar(&data[offset..offset + 8])?;
-            offset += 8;
-            let references = u16::from_le_bytes(data[offset..offset + 2].try_into().unwrap());
+            offset+=8;
+            let references = u16::from_le_bytes(data[offset..offset+2].try_into().unwrap());
             offset += 2;
-            let value_size = u32::from_le_bytes(data[offset..offset+4].try_into().unwrap()) as usize;
+            let vlength = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
             offset += 4;
-            let values: Option<Vec<u8>> = Option::<Vec::<u8>>::deserialize_pillar(&data[offset.. offset + value_size])?;
-            offset += value_size;
-            let children_size = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
-            offset += 4;
-            let children: [Option<NodeKey>; 16] = <[Option<NodeKey>; 16]>::deserialize_pillar(&data[offset.. offset + children_size])?;
-            offset += children_size;
-            let node = TrieNode{
-                references: references,
-                children: children,
-                value: values,
-                _phantum: PhantomData
-            };
-            nodes.insert(value)
+            let value = Option::<Vec::<u8>>::deserialize_pillar(&data[offset..offset + vlength])?;
+            offset += vlength;
+            let mut node: TrieNode<V> = TrieNode::new();
+            node.value = value;
+            node.references = references;
+            let new_key = nodes.insert(node);
+            key_map.insert(key, new_key);
+            order.push(new_key);
+        }
+        
+        for i in 0..n {
+            let length = u32::from_le_bytes(data[offset..offset+4].try_into().unwrap()) as usize;
+            let children: [Option<NodeKey>; 16] = <[Option<NodeKey>; 16]>::deserialize_pillar(&data[offset..offset + length])?
+                .map(|old_key: Option<NodeKey>|{
+                    match old_key {
+                        None => None,
+                        Some(key) => key_map.get(&key).cloned()
+                    }
+                });
+            offset += length;
+            let node = nodes.get_mut(*order.get(i as usize).unwrap()).unwrap();
+            node.children = children;
         }
 
-        todo!();
+        let mut roots: HashMap<StdByteArray, NodeKey> = HashMap::<StdByteArray, NodeKey>::deserialize_pillar(&data[offset..])?;
+        for (k, v) in roots.clone() {
+            roots.insert(k.clone(), key_map.get(&v).cloned().unwrap());
+        }
+
+        Ok(MerkleTrie {
+            roots: roots,
+            _phantum: PhantomData,
+            nodes: nodes
+        })
     }
 }
 
