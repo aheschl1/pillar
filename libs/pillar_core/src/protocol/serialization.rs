@@ -165,6 +165,21 @@ impl PillarSerialize for crate::primitives::messages::Message {
 
 }
 
+impl PillarSerialize for StateManager {
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mut bytes = vec![];
+        let reputation_bytes = self.reputations.serialize_pillar()?;
+        bytes.extend((reputation_bytes.len() as u32).to_le_bytes());
+        bytes.extend(reputation_bytes);
+        
+        Ok(bytes)
+    }
+
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        todo!()
+    }
+}
+
 impl PillarSerialize for Block{
     /// Serialize a `Block` as `[header][transactions...]`.
     ///
@@ -214,6 +229,7 @@ impl PillarSerialize for Chain {
         buffer.extend(self.deepest_hash.serialize_pillar()?);
         // TODO maybe big clone
         buffer.extend(self.leaves.iter().cloned().collect::<Vec<_>>().serialize_pillar()?);
+        // 
         Ok(buffer)
     }
 
@@ -245,8 +261,8 @@ impl PillarSerialize for Chain {
         let leaves = Vec::<StdByteArray>::deserialize_pillar(&data[offset..])?;
 
         Ok(Chain {
-        blocks,
-        headers,
+            blocks,
+            headers,
             depth,
             deepest_hash,
             leaves: leaves.into_iter().collect(),

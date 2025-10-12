@@ -20,11 +20,8 @@ impl ChainShard{
     /// ensures the hashs are good, and the depths work
     pub fn validate(&self) -> Result<(), BlockValidationError>{
         let mut genesis_found = false;
-        let state_manager = StateManager::new();
+        let mut state_manager = StateManager::new();
         let state_root = state_manager.state_trie
-            .lock()
-            .as_mut()
-            .unwrap()
             .create_genesis([0; 32], Account::default()).unwrap();
 
         for (declared_hash, header) in &self.headers {

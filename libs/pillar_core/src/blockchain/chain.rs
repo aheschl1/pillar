@@ -1,13 +1,11 @@
-use core::hash;
-use std::{collections::{HashMap, HashSet}, result};
+use std::{collections::{HashMap, HashSet}};
 
-use lz4_flex::block;
 use pillar_crypto::{hashing::DefaultHash, signing::{DefaultVerifier, SigVerFunction}, types::StdByteArray};
 
 use tracing::instrument;
 
 use crate::{
-    accounting::{account::Account, state::StateManager}, primitives::{block::{Block, BlockHeader}, errors::BlockValidationError, transaction::Transaction}, protocol::{chain::get_genesis_block, pow::get_difficulty_for_block, reputation::{get_current_reputations_for_stampers, get_current_reputations_for_stampers_from_state}}
+    accounting::{account::Account, state::StateManager}, persistence::{ Persistable}, primitives::{block::{Block, BlockHeader}, errors::BlockValidationError, transaction::Transaction}, protocol::{chain::get_genesis_block, pow::get_difficulty_for_block, reputation::{get_current_reputations_for_stampers, get_current_reputations_for_stampers_from_state}}
 };
 
 use super::TrimmableChain;
@@ -33,12 +31,9 @@ pub struct Chain {
 impl Chain {
     /// Creates a new blockchain with a genesis block.
     pub fn new_with_genesis() -> Self {
-        let state_manager = StateManager::new();
+        let mut state_manager = StateManager::new();
         let state_root = state_manager
             .state_trie
-            .lock()
-            .as_mut()
-            .unwrap()
             .create_genesis([0; 32], Account::default())
             .expect("Failed to create genesis state root");
 
@@ -66,11 +61,12 @@ impl Chain {
     }
 
     /// Create a chain without a genesis block.
+    /// Does NOT set state manager
     #[instrument(
         skip_all,
         name = "Chain::new_from_blocks",
     )]
-    pub fn new_from_blocks(blocks: HashMap<StdByteArray, Block>) -> Self{
+    pub(crate) unsafe fn new_from_blocks(blocks: HashMap<StdByteArray, Block>) -> Self{
         let mut headers = HashMap::new();
         let mut deepest_hash = [0; 32];
         let mut depth = 0;
@@ -116,7 +112,7 @@ impl Chain {
         // get all reputations according to previous block
         let reputations = get_current_reputations_for_stampers(self, &block.header).values().cloned().collect::<Vec<f64>>();
 
-        let (expected_target, is_por) = get_difficulty_for_block(&block.header, &reputations);
+        let (expected_target, _is_por) = get_difficulty_for_block(&block.header, &reputations);
 
         if block.header.completion.is_none() || expected_target != block.header.completion.as_ref().unwrap().difficulty_target {
             tracing::info!("Block difficulty target is invalid - Failing");
@@ -935,5 +931,50 @@ mod tests {
         // Verify the main chain remains intact
         assert!(chain.blocks.contains_key(&main_hash));
         assert_eq!(chain.leaves.len(), 1); // Only the main chain remains
+    }
+
+    #[tokio::test]
+    async fn test_new_from_blocks(){
+        let mut chain = Chain::new_with_genesis();
+        let mut signing_key = DefaultSigner::generate_random();
+        // public
+        let sender = signing_key.get_verifying_function().to_bytes();
+
+        let mut parent_hash = chain.deepest_hash;
+        let genesis_hash = parent_hash;
+
+        // Build a main chain of depth 5
+        for depth in 1..=5 {
+            let time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth;
+            let mut transaction = Transaction::new(sender, [2; 32], 0, time, depth-1, &mut DefaultHash::new());
+            transaction.sign(&mut signing_key);
+            let mut block = Block::new(
+                parent_hash,
+                0,
+                time,
+                vec![transaction],
+                None,
+                BlockTail::default().stamps,
+                depth,
+                None,
+                None,
+                &mut DefaultHash::new(),
+            );
+            let prev_header = chain.headers.get(&block.header.previous_hash)
+                .expect("Previous block header not found");
+            let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
+            mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
+            parent_hash = block.header.completion.as_ref().unwrap().hash;
+            chain.add_new_block(block).unwrap();
+        }
+
+        let blocks: HashMap<StdByteArray, Block> = chain.blocks.clone();
+        let new_chain = unsafe { Chain::new_from_blocks(blocks) };
+        assert_eq!(new_chain.depth, chain.depth);
+        assert_eq!(new_chain.leaves, chain.leaves);
+        assert_eq!(new_chain.blocks, chain.blocks);
+        assert_eq!(new_chain.headers, chain.headers);
+        assert_eq!(new_chain.deepest_hash, chain.deepest_hash);
+
     }
 }

@@ -12,9 +12,9 @@ pub type ReputationMap = HashMap<StdByteArray, NodeHistory>;
 #[derive(Clone, Default)]
 pub struct StateManager{
     // The mapping from address to account
-    pub state_trie: Arc<Mutex<MerkleTrie<StdByteArray, Account>>>,
+    pub state_trie: MerkleTrie<StdByteArray, Account>,
     /// mapping of reputations for peers
-    pub reputations: Arc<Mutex<ReputationMap>>,
+    pub reputations: ReputationMap,
 }
 
 impl Debug for StateManager {
@@ -36,32 +36,29 @@ impl StateManager{
     /// Create a new state manager with an empty trie and no reputations.
     pub fn new() -> Self {
         StateManager {
-            state_trie: Arc::new(Mutex::new(MerkleTrie::new())),
-            reputations: Arc::new(Mutex::new(HashMap::new())),
+            state_trie: MerkleTrie::new(),
+            reputations: HashMap::new(),
         }
     }
 
     /// Get an account by address at a specific `state_root` (if present).
     pub fn get_account(&self, address: &StdByteArray, state_root: StdByteArray) -> Option<Account> {
-        let state_trie = self.state_trie.lock().expect("Failed to lock state trie");
-        state_trie.get(address, state_root)
+        self.state_trie.get(address, state_root)
     }
 
     /// Get an account or a default zero-balance account for the given address.
     pub fn get_account_or_default(&self, address: &StdByteArray, state_root: StdByteArray) -> Account {
-        let state_trie = self.state_trie.lock().expect("Failed to lock state trie");
-        state_trie.get(address, state_root).unwrap_or(Account::new(*address, 0))
+        self.state_trie.get(address, state_root).unwrap_or(Account::new(*address, 0))
     }
 
     /// Return all accounts reachable from `root`.
     pub fn get_all_accounts(&self, root: StdByteArray) -> Vec<Account>{
-        self.state_trie.lock().unwrap().get_all(root)
+        self.state_trie.get_all(root)
     }
 
     /// Remove a branched root and decrement reference counts, pruning unique nodes.
     pub fn remove_branch(&mut self, root: StdByteArray){
-        let mut state_trie = self.state_trie.lock().expect("Failed to lock state trie");
-        state_trie.trim_branch(root).expect("Failed to remove branch from state trie");
+        self.state_trie.trim_branch(root).expect("Failed to remove branch from state trie");
     }
 
     /// Apply a complete block to produce a new state root branch.
@@ -99,13 +96,12 @@ impl StateManager{
         // Update the accounts from the block
         let mut state_updates: HashMap<StdByteArray, Account> = HashMap::new();
         let state_root = prev_header.completion.as_ref().expect("Previous block should be complete").state_root;
-        let mut state_trie = self.state_trie.lock().expect("Failed to lock state trie");
         for transaction in &block.transactions {
             let mut sender = match state_updates.get(&transaction.header.sender){
                 Some(account) => account.clone(),
                 None => {
                     // if the sender does not exist, we create a new account with 0 balance
-                    let account = state_trie
+                    let account = self.state_trie
                         .get(&transaction.header.sender, state_root)
                         .unwrap_or(Account::new(transaction.header.sender, 0));
 
@@ -124,7 +120,7 @@ impl StateManager{
             let mut receiver = match state_updates.get(&transaction.header.receiver){
                 Some(account) => account.clone(),
                 None => {
-                    state_trie.get(&transaction.header.receiver, state_root).unwrap_or(Account::new(transaction.header.receiver, 0))
+                    self.state_trie.get(&transaction.header.receiver, state_root).unwrap_or(Account::new(transaction.header.receiver, 0))
                 },
             };
             // update balances
@@ -138,7 +134,7 @@ impl StateManager{
             Some(account) => account.clone(),
             None => {
                 // if the miner account does not exist, we create a new account with 0 balance
-                state_trie.get(miner_address, state_root).unwrap_or(Account::new(*miner_address, 0))
+                self.state_trie.get(miner_address, state_root).unwrap_or(Account::new(*miner_address, 0))
             }
         };
         miner_account.balance += if !por_enabled {reward} else {div_up(reward, POR_MINER_SHARE_DIVISOR)};
@@ -161,7 +157,7 @@ impl StateManager{
                 let mut stamper_account = match state_updates.get(stamper) {
                     Some(account) => account.clone(),
                     None => {
-                        state_trie.get(stamper, state_root).unwrap_or(Account::new(*stamper, 0))
+                        self.state_trie.get(stamper, state_root).unwrap_or(Account::new(*stamper, 0))
                     }
                 };
                 stamper_account.balance += stamper_reward;
@@ -183,7 +179,7 @@ impl StateManager{
             let mut stamper = match state_updates.get(stamper){
                 Some(account) => account.clone(),
                 None => {
-                    state_trie.get(stamper, state_root).unwrap_or(Account::new(*stamper, 0))
+                    self.state_trie.get(stamper, state_root).unwrap_or(Account::new(*stamper, 0))
                 }
             };
             if stamper.history.is_none(){
@@ -194,6 +190,6 @@ impl StateManager{
             state_updates.insert(stamper.address, stamper);
         }
         // branch the state trie with the updates
-        state_trie.branch(Some(state_root), state_updates).expect("Issue with branching state trie")
+        self.state_trie.branch(Some(state_root), state_updates).expect("Issue with branching state trie")
     }
 }

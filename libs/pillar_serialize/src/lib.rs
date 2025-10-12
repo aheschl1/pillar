@@ -89,7 +89,7 @@ impl PillarFixedSize for i8                          {}
 impl PillarFixedSize for i16                         {}
 impl PillarFixedSize for i32                         {}
 impl PillarFixedSize for i64                         {}
-impl PillarFixedSize for [u8; 32]                    {}
+impl<const C: usize> PillarFixedSize for [u8; C]                    {}
 
 impl PillarNativeEndian for StdByteArray {
     fn to_le(&mut self) {}
@@ -334,5 +334,34 @@ impl PillarSerialize for String {
         let string = String::from_utf8(data[4..4 + length].to_vec())
             .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid UTF-8"))?;
         Ok(string)
+    }
+}
+
+impl<T: PillarSerialize + Copy, const C: usize> PillarSerialize for [Option<T>; C]{
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mut buffer = Vec::new();
+        for item in self {
+            let internal = item.serialize_pillar()?;
+            buffer.extend((internal.len() as u32).to_le_bytes());
+            buffer.extend(internal);
+        }
+        Ok(buffer)
+    }
+
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        let mut offset = 0;
+        let mut array: [Option<T>; C] = [None; C];
+        for i in 0..C {
+            let length = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
+            offset += 4;
+            let item = if length > 0 {
+                Some(T::deserialize_pillar(&data[offset..offset + length])?)
+            } else {
+                None
+            };
+            array[i] = item;
+            offset += length;
+        }
+        Ok(array)
     }
 }

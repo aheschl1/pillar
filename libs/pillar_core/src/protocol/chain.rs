@@ -268,7 +268,7 @@ pub async fn service_sync(node: Node, leaves: &Vec<StdByteArray>) -> Result<Vec<
             }
             curr = chain.blocks.get(&current_block.header.previous_hash);
         }
-        Chain::new_from_blocks(blocks)
+        unsafe{Chain::new_from_blocks(blocks)}
     }).collect();
 
     Ok(chains)

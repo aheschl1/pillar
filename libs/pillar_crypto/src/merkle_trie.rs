@@ -7,10 +7,11 @@
 use std::{collections::{HashMap, HashSet, VecDeque}, fmt::Debug, marker::PhantomData};
 
 
-use pillar_serialize::PillarSerialize;
-use slotmap::{new_key_type, SlotMap};
+use pillar_serialize::{PillarFixedSize, PillarNativeEndian, PillarSerialize};
+use slotmap::{new_key_type, KeyData, SlotMap};
 
 use crate::{hashing::{DefaultHash, HashFunction, Hashable}, types::StdByteArray};
+
 new_key_type! { pub struct NodeKey; }
 
 /// In order to store account states, a Merkle Patricia Trie will be used
@@ -55,6 +56,7 @@ impl<T: PillarSerialize> TrieNode<T>{
 }
 
 
+#[derive(Clone)]
 pub struct MerkleTrie<K: Hashable, V: PillarSerialize> {
     _phantum: PhantomData<K>,
     pub(crate) nodes: SlotMap<NodeKey, TrieNode<V>>, // SlotMap to store Trie nodes
@@ -336,7 +338,74 @@ impl<K: Hashable, V: PillarSerialize> MerkleTrie<K, V> {
 
 }
 
+impl PillarSerialize for NodeKey {
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        Ok(self.0.as_ffi().serialize_pillar()?)
+    }
 
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        Ok(NodeKey(KeyData::from_ffi(
+            u64::from_le_bytes(data[0..8].try_into().unwrap())
+        )))
+    }
+}
+
+impl<K: PillarSerialize + Hashable, V: PillarSerialize> PillarSerialize for MerkleTrie<K, V> {
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mut buffer = Vec::new();
+        buffer.extend((self.nodes.len() as u32).to_le_bytes());
+        for (key, node) in &self.nodes {
+            let mut internal_buffer = vec![];
+            // key
+            internal_buffer.extend(key.serialize_pillar()?); // always 8
+            // references
+            internal_buffer.extend(node.references.to_le_bytes()); // always 2
+            // value
+            let vbuff = node.value.serialize_pillar()?;
+            internal_buffer.extend((vbuff.len() as u32).to_le_bytes());
+            internal_buffer.extend(vbuff);
+            // children
+            let d = node.children.serialize_pillar()?;
+            internal_buffer.extend((d.len() as u32).to_le_bytes());
+            internal_buffer.extend(d);
+
+            // give length and add
+            buffer.extend((internal_buffer.len() as u32).to_le_bytes());
+            buffer.extend(internal_buffer);
+        }
+        buffer.extend(self.roots.serialize_pillar()?);
+        Ok(buffer)
+    }
+
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        let n = u32::from_le_bytes(data[0..4].try_into().unwrap());
+        let mut offset = 4;
+        let nodes = SlotMap::new();
+        for _ in 0..n {
+            let key = NodeKey::deserialize_pillar(&data[offset..offset + 8])?;
+            offset += 8;
+            let references = u16::from_le_bytes(data[offset..offset + 2].try_into().unwrap());
+            offset += 2;
+            let value_size = u32::from_le_bytes(data[offset..offset+4].try_into().unwrap()) as usize;
+            offset += 4;
+            let values: Option<Vec<u8>> = Option::<Vec::<u8>>::deserialize_pillar(&data[offset.. offset + value_size])?;
+            offset += value_size;
+            let children_size = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
+            offset += 4;
+            let children: [Option<NodeKey>; 16] = <[Option<NodeKey>; 16]>::deserialize_pillar(&data[offset.. offset + children_size])?;
+            offset += children_size;
+            let node = TrieNode{
+                references: references,
+                children: children,
+                value: values,
+                _phantum: PhantomData
+            };
+            nodes.insert(value)
+        }
+
+        todo!();
+    }
+}
 
 #[cfg(test)]
 mod tests {

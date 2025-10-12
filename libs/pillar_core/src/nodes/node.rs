@@ -579,7 +579,7 @@ impl From<Node> for Peer {
     }
 }
 
-pub trait Broadcaster {
+pub(crate) trait Broadcaster {
     /// Broadcast a message to all peers.
     async fn broadcast(&self, message: &Message) -> Result<Vec<Message>, std::io::Error>;
 }

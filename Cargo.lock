@@ -1112,6 +1112,7 @@ dependencies = [
  "ctor",
  "flume",
  "futures-util",
+ "hex",
  "lfqueue",
  "lz4_flex",
  "pillar_crypto",
