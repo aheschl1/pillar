@@ -252,7 +252,7 @@ where
 
 impl<V> PillarSerialize for HashMap<StdByteArray, V>
 where 
-    V: PillarSerialize
+    V: PillarSerialize + PillarFixedSize
 {
     /// Specialized map encoding for 32-byte keys; value length is still prefixed.
     default fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
@@ -288,7 +288,7 @@ where
 /// a common hashmap implmentation for address/hash to fixed size value
 impl<V> PillarSerialize for HashMap<StdByteArray, V>
 where 
-    V: PillarSerialize + PillarNativeEndian + Zeroable + Pod
+    V: PillarSerialize + PillarNativeEndian + Zeroable + Pod + PillarFixedSize
 {
     /// Tight map encoding for 32-byte keys and fixed-size values (no per-entry length).
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {

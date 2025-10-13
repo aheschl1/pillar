@@ -168,10 +168,10 @@ impl PillarSerialize for crate::primitives::messages::Message {
 impl PillarSerialize for StateManager {
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
         let mut bytes = vec![];
-        let reputation_bytes = self.reputations.serialize_pillar()?;
-        bytes.extend((reputation_bytes.len() as u32).to_le_bytes());
-        bytes.extend(reputation_bytes);
-        
+        let trie_bytes = self.state_trie.serialize_pillar()?;
+        bytes.extend((trie_bytes.len() as u32).to_le_bytes());
+        bytes.extend(trie_bytes);
+        bytes.extend(self.reputations.serialize_pillar()?);
         Ok(bytes)
     }
 
