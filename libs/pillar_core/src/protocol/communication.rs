@@ -171,6 +171,7 @@ mod tests {
     use super::*;
     use pillar_serialize::PillarSerialize;
     use tokio::net::TcpStream;
+    use crate::nodes::node::StartupModes;
     use crate::nodes::peer::Peer;
     use crate::protocol::serialization::{package_standard_message};
     use crate::{
@@ -184,7 +185,7 @@ mod tests {
     async fn test_peer_declaration() {
         let ip_address = IpAddr::V4(Ipv4Addr::from_str("127.0.0.1").unwrap());
         let port = 8084;
-        let node = Node::new([1; 32], [2; 32], ip_address, port, vec![], None, None);
+        let node = Node::new([1; 32], [2; 32], ip_address, port, vec![], StartupModes::Empty, None);
 
         tokio::spawn(serve_peers(node.clone(), None));
 
@@ -214,7 +215,7 @@ mod tests {
     async fn test_message_broadcast() {
         let ip_address = IpAddr::V4(Ipv4Addr::from_str("127.0.0.1").unwrap());
         let port = 8080;
-        let node = Node::new([1; 32], [2; 32], ip_address, port, vec![], None, None);
+        let node = Node::new([1; 32], [2; 32], ip_address, port, vec![], StartupModes::Empty, None);
 
         tokio::spawn(serve_peers(node.clone(), None));
         tokio::spawn(broadcast_knowledge(node.clone(), None));
@@ -276,7 +277,7 @@ mod tests {
     async fn test_error_response() {
         let ip_address = IpAddr::V4(Ipv4Addr::from_str("127.0.0.1").unwrap());
         let port = 8090;
-        let node = Node::new([1; 32], [2; 32], ip_address, port, vec![], None, None);
+        let node = Node::new([1; 32], [2; 32], ip_address, port, vec![], StartupModes::Empty, None);
 
         tokio::spawn(serve_peers(node,None));
 
@@ -318,7 +319,7 @@ mod tests {
     async fn test_timeout_broadcast(){
         let ip_address = IpAddr::V4(Ipv4Addr::from_str("127.0.0.9").unwrap());
         let port = 8091;
-        let node = Node::new([1; 32], [2; 32], ip_address, port, vec![], None, None);
+        let node = Node::new([1; 32], [2; 32], ip_address, port, vec![], StartupModes::Empty, None);
 
         let (sender, stop_signal) = flume::bounded(1); // Create a stop signal receiver
         let handle = tokio::spawn(broadcast_knowledge(node.clone(), Some(stop_signal.clone())));
@@ -340,7 +341,7 @@ mod tests {
     async fn test_timeout_serve(){
         let ip_address = IpAddr::V4(Ipv4Addr::from_str("127.0.0.9").unwrap());
         let port = 8091;
-        let node = Node::new([1; 32], [2; 32], ip_address, port, vec![], None, None);
+        let node = Node::new([1; 32], [2; 32], ip_address, port, vec![], StartupModes::Empty, None);
 
         let (sender, stop_signal) = flume::bounded(1); // Create a stop signal receiver
         let handle = tokio::spawn(serve_peers(node.clone(), Some(stop_signal.clone())));

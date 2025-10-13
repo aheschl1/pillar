@@ -2,12 +2,11 @@ use super::peer::Peer;
 use flume::{Receiver, Sender};
 use pillar_crypto::{hashing::{DefaultHash, Hashable}, signing::{DefaultSigner, SigFunction, Signable}, types::StdByteArray};
 use tracing::instrument;
-use std::{collections::{HashMap, HashSet}, net::IpAddr, sync::Arc};
+use std::{collections::{HashMap, HashSet}, net::IpAddr, path::PathBuf, sync::Arc};
 use tokio::sync::{Mutex, RwLock};
 
 use crate::{
     blockchain::chain::Chain,
-    persistence::database::{Datastore, EmptyDatastore},
     primitives::{block::{Block, BlockHeader, Stamp}, messages::Message, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}},
     protocol::{chain::{block_settle_consumer, discover_chain, service_sync, sync_chain},
     communication::{broadcast_knowledge, serve_peers},
@@ -75,23 +74,18 @@ impl From<NodeState> for String {
     }
 }
 
-fn get_initial_state(datastore: &dyn Datastore) -> (NodeState, Option<Chain>) {
+fn get_initial_state(startup_mode: &StartupModes) -> (NodeState, Option<Chain>) {
     // check if the datastore has a chain
-    if datastore.latest_chain().is_some() {
-        // if it does, load the chain
-        match datastore.load_chain() {
-            Ok(chain) => {
-                // assign the chain to the node
-                (NodeState::ChainOutdated, Some(chain))
-            },
-            Err(_) => {
-                // if it fails, we are in discovery mode
-                (NodeState::ICD, None)
-            }
+    match startup_mode {
+        StartupModes::Empty => (NodeState::ICD, None),
+        StartupModes::Load(path) => {
+            // if it does, load the chain
+            todo!();
+        },
+        StartupModes::Genesis => {
+            // if it does not, we are in discovery mode
+            (NodeState::ChainOutdated, Some(Chain::new_with_genesis()))
         }
-    } else {
-        // if it does not, we are in discovery mode
-        (NodeState::ICD, None)
     }
 }
 
@@ -110,8 +104,6 @@ pub struct NodeInner {
     pub broadcasted_already: RwLock<HashSet<StdByteArray>>,
     // transaction filter queue
     pub transaction_filters: Mutex<Vec<(TransactionFilter, Peer)>>,
-    /// the datastore
-    pub datastore: Option<Arc<dyn Datastore>>,
     /// A queue of blocks which are to be settled to the chain
     pub late_settle_queue: lfqueue::UnboundedQueue<Block>,
     /// the state represents the nodes ability to communicate with other nodes
@@ -136,6 +128,12 @@ pub struct Node {
     kill_settle: Option<flume::Sender<()>>,
 }
 
+pub enum StartupModes {
+    Load(PathBuf),
+    Genesis,
+    Empty,
+}
+
 
 
 impl Node {
@@ -155,13 +153,9 @@ impl Node {
         ip_address: IpAddr,
         port: u16,
         peers: Vec<Peer>,
-        mut database: Option<Arc<dyn Datastore>>,
+        startup_mode: StartupModes,
         transaction_pool: Option<MinerPool>,
     ) -> Self {
-        if database.is_none() {
-            tracing::warn!("Node created without a database. This will not persist the chain or transactions.");
-            database = Some(Arc::new(EmptyDatastore::new()));
-        }
         let broadcast_queue = lfqueue::UnboundedQueue::new();
         let late_settle_queue = lfqueue::UnboundedQueue::new();
         let transaction_filters = Mutex::new(Vec::new());
@@ -171,7 +165,7 @@ impl Node {
             .map(|peer| (peer.public_key, *peer))
             .collect::<HashMap<_, _>>();
         tracing::info!("Node created with {} initial peers", peer_map.len());
-        let (state, maybe_chain) = get_initial_state(&**database.as_ref().unwrap());
+        let (state, maybe_chain) = get_initial_state(&startup_mode);
         tracing::debug!("Node initial state: {:?}", state);
         Node {
             inner: NodeInner {
@@ -185,7 +179,6 @@ impl Node {
             filter_callbacks: Mutex::new(HashMap::new()), // initially no callbacks
             state: RwLock::new(state), // initially in discovery mode
             late_settle_queue,
-            datastore: database,
             }.into(),
             ip_address,
             port,

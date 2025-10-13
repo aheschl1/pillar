@@ -13,8 +13,6 @@ use crate::{
     primitives::block::{Block, BlockHeader},
 };
 
-pub mod database;
-
 pub(crate) trait Persistable
 where
     Self: Sized + PillarSerialize,

@@ -61,6 +61,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::*;
+    use crate::nodes::node::StartupModes;
     use crate::nodes::{node::Node, peer::Peer};
     use crate::protocol::serialization::{package_standard_message, read_standard_message};
     use std::net::{IpAddr, Ipv4Addr};
@@ -84,7 +85,7 @@ mod tests {
             IpAddr::V4(Ipv4Addr::from_str("127.0.0.1").unwrap()),
             8080,
             vec![existing_peer],
-            None,
+            StartupModes::Empty,
             None,
         );
  

@@ -19,8 +19,8 @@ mod tests {
 
     use crate::{
         accounting::{account, wallet::Wallet}, nodes::{
-            miner::{Miner, MAX_TRANSACTION_WAIT_TIME}, node::{self, NodeState}, peer::Peer
-        }, persistence::database::GenesisDatastore, primitives::{messages::Message, pool::MinerPool, transaction::Transaction}, protocol::{difficulty::get_reward_from_depth_and_stampers, peers::{discover_peer, discover_peers}, transactions::{get_transaction_proof, submit_transaction}}
+            miner::{Miner, MAX_TRANSACTION_WAIT_TIME}, node::{self, NodeState, StartupModes}, peer::Peer
+        }, primitives::{messages::Message, pool::MinerPool, transaction::Transaction}, protocol::{difficulty::get_reward_from_depth_and_stampers, peers::{discover_peer, discover_peers}, transactions::{get_transaction_proof, submit_transaction}}
     };
 
     use super::node::Node;
@@ -100,7 +100,7 @@ mod tests {
             ip_address,
             port,
             peers.clone(),
-            if genesis_store {Some(Arc::new(GenesisDatastore::new()))} else {None},
+            if genesis_store {StartupModes::Genesis} else {StartupModes::Empty},
             miner_pool.clone(),
         );
 
@@ -129,7 +129,6 @@ mod tests {
         let ip_address = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
         let port = 8070;
         let peers = vec![];
-        let datastore = GenesisDatastore::new();
         let transaction_pool = None;
 
         let mut node = Node::new(
@@ -138,7 +137,7 @@ mod tests {
             ip_address,
             port,
             peers,
-            Some(Arc::new(datastore)),
+            StartupModes::Genesis,
             transaction_pool,
         );
 
