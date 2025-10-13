@@ -1,7 +1,7 @@
 
 use pillar_crypto::{hashing::{DefaultHash, HashFunction}, merkle::{generate_tree, MerkleTree}, proofs::{generate_proof_of_inclusion, verify_proof_of_inclusion, MerkleProof}, types::StdByteArray};
 
-use crate::{persistence::Persistable, primitives::{block::{Block, BlockHeader, BlockTail, Stamp}, transaction::Transaction}, protocol::reputation::N_TRANSMISSION_SIGNATURES};
+use crate::{primitives::{block::{Block, BlockHeader, BlockTail, Stamp}, transaction::Transaction}, protocol::reputation::N_TRANSMISSION_SIGNATURES};
 
 impl Block {
     /// Create a new block

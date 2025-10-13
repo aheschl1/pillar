@@ -39,6 +39,12 @@ pub struct GenesisDatastore{
     chain: Chain
 }
 
+impl Default for GenesisDatastore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GenesisDatastore {
     pub fn new() -> Self {
         GenesisDatastore {
@@ -77,6 +83,12 @@ impl Datastore for GenesisDatastore {
 /// This datastore never provides any chain, but it can store.
 pub struct EmptyDatastore{
     chain: Option<Chain>
+}
+
+impl Default for EmptyDatastore {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl EmptyDatastore {

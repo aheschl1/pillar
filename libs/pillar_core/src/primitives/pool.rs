@@ -21,6 +21,12 @@ pub struct MinerPool {
 /// Transaction pool for now is just a vector of transactions
 /// In the future, it will be a more complex structure - perhaps a max heap on the transaction fee
 /// Rn, FIFO
+impl Default for MinerPool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MinerPool{
     pub fn new() -> Self {
         let (mine_abort_sender, mine_abort_receiver) = flume::unbounded();

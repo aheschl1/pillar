@@ -61,9 +61,9 @@ impl NodeState {
     }
 }
 
-impl Into<String> for NodeState {
-    fn into(self) -> String {
-        match self {
+impl From<NodeState> for String {
+    fn from(val: NodeState) -> Self {
+        match val {
             NodeState::ChainLoading => "ChainLoading",
             NodeState::ChainOutdated => "ChainOutdated",
             NodeState::ChainSyncing => "ChainSyncing",
@@ -243,7 +243,7 @@ impl Node {
                 Some(handle)
             },
             _ => {
-                panic!("Unexpected node state for initialization: {:?}", state);
+                panic!("Unexpected node state for initialization: {state:?}");
             }
         };
         if let Some(handle) = handle {

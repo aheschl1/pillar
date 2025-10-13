@@ -5,7 +5,7 @@ use pillar_crypto::{hashing::DefaultHash, signing::{DefaultVerifier, SigVerFunct
 use tracing::instrument;
 
 use crate::{
-    accounting::{account::Account, state::StateManager}, persistence::{ Persistable}, primitives::{block::{Block, BlockHeader}, errors::BlockValidationError, transaction::Transaction}, protocol::{chain::get_genesis_block, pow::get_difficulty_for_block, reputation::{get_current_reputations_for_stampers, get_current_reputations_for_stampers_from_state}}
+    accounting::{account::Account, state::StateManager}, primitives::{block::{Block, BlockHeader}, errors::BlockValidationError, transaction::Transaction}, protocol::{chain::get_genesis_block, pow::get_difficulty_for_block, reputation::{get_current_reputations_for_stampers, get_current_reputations_for_stampers_from_state}}
 };
 
 use super::TrimmableChain;
@@ -305,13 +305,9 @@ impl Chain {
                 self.headers.get(&new_block.header.previous_hash).unwrap(),
                 &new_block.header
             ).values().sum();
-            if new_reputation > existing_reputation || (
+            new_reputation > existing_reputation || (
                 new_reputation == existing_reputation && new_block.header.tail.n_stamps() > current_deepest.header.tail.n_stamps()
-            ){
-                true
-            } else {
-                false
-            }
+            )
         } else { // self.depth < new_block.header.depth
             true
         }
@@ -381,7 +377,7 @@ impl Chain {
 
         let deepest = &self.deepest_hash;
         let mut stack: Vec<StdByteArray> = self.leaves.iter().filter(|x| {
-            let b = self.get_block(*x).unwrap();
+            let b = self.get_block(x).unwrap();
             x != &deepest && b.header.depth >= min_depth.unwrap_or(0)
         }).cloned().collect();
         stack.push(*deepest);
@@ -404,7 +400,7 @@ impl Chain {
             }
             stack.push(b.header.previous_hash);
             // this block depth is 1 greater than previous
-            if b.header.depth+1 <= max_depth.unwrap_or(u64::MAX) {
+            if b.header.depth < max_depth.unwrap_or(u64::MAX) {
                 result.push(block);
             }
 

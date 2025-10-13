@@ -4,7 +4,7 @@ use std::{
 };
 
 use bytemuck::{Pod, Zeroable};
-use pillar_crypto::{hashing::Hashable, types::StdByteArray};
+use pillar_crypto::types::StdByteArray;
 use pillar_serialize::{PillarFixedSize, PillarNativeEndian, PillarSerialize};
 
 use crate::{
@@ -60,7 +60,7 @@ fn get_headers_from_blocks(
 ) -> HashMap<StdByteArray, BlockHeader> {
     let mut headers = HashMap::new();
     for (hash, block) in blocks {
-        headers.insert(*hash, block.header.clone());
+        headers.insert(*hash, block.header);
     }
     headers
 }

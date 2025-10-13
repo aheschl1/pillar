@@ -423,21 +423,21 @@ impl PillarSerialize for Account {
 }
 
 mod tests {
-    use pillar_crypto::hashing::{DefaultHash, Hashable};
+    use pillar_crypto::hashing::DefaultHash;
     use pillar_serialize::PillarSerialize;
 
     use crate::{
         primitives::{
-            block::{Block, BlockHeader, Stamp},
+            block::{Block, Stamp},
             messages::Message,
             transaction::{Transaction, TransactionFilter},
         },
-        protocol::{reputation::N_TRANSMISSION_SIGNATURES, versions::Versions},
+        protocol::reputation::N_TRANSMISSION_SIGNATURES,
         blockchain::{chain::Chain, chain_shard::ChainShard},
         nodes::peer::Peer,
         accounting::account::TransactionStub,
     };
-    use pillar_crypto::{types::StdByteArray, proofs::{MerkleProof, HashDirection}};
+    use pillar_crypto::proofs::{MerkleProof, HashDirection};
     use std::net::{IpAddr, Ipv4Addr};
 
     #[test]
