@@ -31,7 +31,7 @@ impl Persistable for Chain {
         for (block_hash, block) in &self.blocks {
             let block_path = path.join(format!("{}.bin", hex::encode(block_hash)));
             block.save(&block_path).await?;
-        }        
+        }
         Ok(())
     }
 

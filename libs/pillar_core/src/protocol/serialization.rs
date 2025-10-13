@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use pillar_crypto::types::{StdByteArray, STANDARD_ARRAY_LENGTH};
+use pillar_crypto::{merkle_trie::MerkleTrie, types::{StdByteArray, STANDARD_ARRAY_LENGTH}};
 
 use pillar_serialize::{PillarFixedSize, PillarNativeEndian, PillarSerialize};
 use tokio::{io::AsyncReadExt, net::TcpStream};
@@ -176,7 +176,10 @@ impl PillarSerialize for StateManager {
     }
 
     fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
-        todo!()
+        let trielen = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+        let trie = MerkleTrie::<StdByteArray, Account>::deserialize_pillar(&data[4..trielen + 4])?;
+        let reputations = HashMap::<StdByteArray, NodeHistory>::deserialize_pillar(&data[trielen + 4..])?;
+        Ok(StateManager { state_trie: trie, reputations })
     }
 }
 

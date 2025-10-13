@@ -1,5 +1,5 @@
 //! State management built on a Merkle trie with optional reputation tracking.
-use std::{collections::HashMap, fmt::Debug, sync::{Arc, Mutex}};
+use std::{collections::HashMap, fmt::Debug};
 
 use pillar_crypto::{merkle_trie::MerkleTrie, types::StdByteArray};
 
