@@ -354,11 +354,7 @@ impl<T: PillarSerialize + Copy, const C: usize> PillarSerialize for [Option<T>; 
         for i in 0..C {
             let length = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
             offset += 4;
-            let item = if length > 0 {
-                Some(T::deserialize_pillar(&data[offset..offset + length])?)
-            } else {
-                None
-            };
+            let item = Option::<T>::deserialize_pillar(&data[offset..offset + length])?;
             array[i] = item;
             offset += length;
         }
