@@ -286,6 +286,37 @@ impl Chain {
         Ok(())
     }
 
+    /// retruns False if the existing deepest is better
+    /// returns true if it shold be replaced
+    #[inline]
+    pub(crate) fn block_greater(&self, new_block: &Block) -> bool {
+        if self.depth > new_block.header.depth {
+            false
+        } else if self.depth == new_block.header.depth {
+            // take the block which is stamped with the most reputation
+            let current_deepest = self.get_top_block().unwrap();
+            let existing_reputation: f64 = get_current_reputations_for_stampers_from_state(
+                &self.state_manager, 
+                self.headers.get(&current_deepest.header.previous_hash).unwrap(),
+                &current_deepest.header
+            ).values().sum();
+            let new_reputation: f64 = get_current_reputations_for_stampers_from_state(
+                &self.state_manager, 
+                self.headers.get(&new_block.header.previous_hash).unwrap(),
+                &new_block.header
+            ).values().sum();
+            if new_reputation > existing_reputation || (
+                new_reputation == existing_reputation && new_block.header.tail.n_stamps() > current_deepest.header.tail.n_stamps()
+            ){
+                true
+            } else {
+                false
+            }
+        } else { // self.depth < new_block.header.depth
+            true
+        }
+    }
+
     /// Call this only after a block has been verified
     #[instrument(skip_all, fields(block = ?block.header.completion))]
     fn settle_new_block(&mut self, block: Block) -> Result<(), BlockValidationError>{
@@ -309,29 +340,10 @@ impl Chain {
         tracing::debug!("Block settled in chain, but need to update depth.");
         // update the depth - the depth of this block is checked in the verification
         // perhaps this is a fork deeper in the chain, so we do not always update 
-        if block.header.depth > self.depth {
+        if self.block_greater(&block) {
             tracing::info!("Chain depth expanded to {}", block.header.depth);
             self.deepest_hash = block.header.completion.as_ref().unwrap().hash;
             self.depth = block.header.depth;
-        } else if block.header.depth == self.depth {
-            // take the block which is stamped with the most reputation
-            let current_deepest = self.get_top_block().unwrap();
-            let existing_reputation: f64 = get_current_reputations_for_stampers_from_state(
-                &self.state_manager, 
-                self.headers.get(&current_deepest.header.previous_hash).unwrap(),
-                &current_deepest.header
-            ).values().sum();
-            let new_reputation: f64 = get_current_reputations_for_stampers_from_state(
-                &self.state_manager, 
-                self.headers.get(&block.header.previous_hash).unwrap(),
-                &block.header
-            ).values().sum();
-            if new_reputation > existing_reputation || (
-                new_reputation == existing_reputation && block.header.tail.n_stamps() > current_deepest.header.tail.n_stamps()
-            ){
-                tracing::info!("Chain depth fork replaced deepest block with higher reputation fork");
-                self.deepest_hash = block.header.completion.as_ref().unwrap().hash;
-            }
         }
         Ok(())
     }
