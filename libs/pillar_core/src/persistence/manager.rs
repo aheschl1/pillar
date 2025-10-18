@@ -2,7 +2,7 @@ use std::{net::IpAddr, path::PathBuf};
 
 use pillar_crypto::types::StdByteArray;
 
-use crate::{accounting::wallet::Wallet, blockchain::chain::Chain, nodes::{node::{self, Node}, peer::{Peer, PillarIPAddr}}, persistence::Persistable, PROTOCOL_PORT};
+use crate::{accounting::wallet::Wallet, blockchain::chain::Chain, nodes::{node::Node, peer::{Peer, PillarIPAddr}}, persistence::Persistable};
 
 
 
