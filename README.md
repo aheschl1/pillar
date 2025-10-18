@@ -2,14 +2,6 @@
 
 Pillar is a zero-trust decentralized ledger that implements a Proof of Reputation (PoR) trust layer. It combines a conventional transaction layer with a reputation-driven incentive layer to reduce wasted computation and provide a trust metric for network participants.
 
-## High-Level Architecture
-
-The network data flow, chain structure, and block settlement process are illustrated in the following diagrams:
-
-- [Network Flow](figures/net_flow.png)
-- [Chain Structure](figures/structure.png)
-- [Settle Chart](figures/settle_chart.png)
-
 ## Repository Layout
 
 - [`pillar/`](pillar/) – Entrypoint for managing a Pillar node.
@@ -18,6 +10,14 @@ The network data flow, chain structure, and block settlement process are illustr
 - [`libs/pillar_serialize/`](libs/pillar_serialize/) – Lightweight serialization utilities.
 - [`pillar_monitor/`](pillar_monitor/) – A web-based frontend for monitoring a node.
 - [`vm_mesh/`](vm_mesh/) – A framework for distributed testing and simulation using QEMU.
+
+## High-Level Architecture
+
+The network data flow, chain structure, and block settlement process are illustrated in the following diagrams:
+
+- [Network Flow](figures/net_flow.png)
+- [Chain Structure](figures/structure.png)
+- [Settle Chart](figures/settle_chart.png)
 
 ## Getting Started
 
