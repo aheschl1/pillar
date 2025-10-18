@@ -19,7 +19,7 @@ mod tests {
 
     use crate::{
         accounting::{account, wallet::Wallet}, nodes::{
-            miner::{Miner, MAX_TRANSACTION_WAIT_TIME}, node::{self, NodeState, StartupModes}, peer::Peer
+            miner::{Miner, MAX_TRANSACTION_WAIT_TIME}, node::{self, NodeState}, peer::Peer
         }, primitives::{messages::Message, pool::MinerPool, transaction::Transaction}, protocol::{difficulty::get_reward_from_depth_and_stampers, peers::{discover_peer, discover_peers}, transactions::{get_transaction_proof, submit_transaction}}
     };
 
@@ -88,8 +88,7 @@ mod tests {
         ip_address: IpAddr, 
         port: u16, 
         peers: Vec<Peer>,
-        genesis_store: bool,
-        miner_pool: Option<MinerPool>,
+        genesis: bool
     ) -> (Node, Wallet){
         let wallet = Wallet::generate_random();
 
@@ -100,8 +99,7 @@ mod tests {
             ip_address,
             port,
             peers.clone(),
-            if genesis_store {StartupModes::Genesis} else {StartupModes::Empty},
-            miner_pool.clone(),
+            genesis,
         );
 
         assert_eq!(node.inner.public_key, wallet.address);
@@ -109,11 +107,10 @@ mod tests {
         assert_eq!(node.ip_address, ip_address);
         assert_eq!(node.port, port);
         assert_eq!(node.inner.peers.read().await.len(), peers.len());
-        assert_eq!(node.inner.chain.lock().await.is_some(), genesis_store);
-        assert_eq!(node.miner_pool.is_some(), miner_pool.is_some());
+        assert_eq!(node.inner.chain.lock().await.is_some(), genesis);
         assert!(node.inner.transaction_filters.lock().await.is_empty());
         assert!(node.inner.filter_callbacks.lock().await.is_empty());
-        if genesis_store{
+        if genesis{
             assert_eq!(node.inner.state.read().await.clone(), NodeState::ChainOutdated);
         }else{
             assert_eq!(node.inner.state.read().await.clone(), NodeState::ICD);
@@ -129,7 +126,6 @@ mod tests {
         let ip_address = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
         let port = 8070;
         let peers = vec![];
-        let transaction_pool = None;
 
         let mut node = Node::new(
             public_key,
@@ -137,8 +133,7 @@ mod tests {
             ip_address,
             port,
             peers,
-            StartupModes::Genesis,
-            transaction_pool,
+            true
         );
 
         node.serve().await;
@@ -169,7 +164,6 @@ mod tests {
             port,
             peers,
             true,
-            None,
         )
         .await;
 
@@ -187,7 +181,6 @@ mod tests {
             8070,
             vec![node1.clone().into()],
             true,
-            None,
         )
         .await;
 
@@ -242,7 +235,6 @@ mod tests {
             port_a,
             vec![],
             true,
-            None,
         )
         .await;
 
@@ -251,7 +243,6 @@ mod tests {
             port_d,
             vec![Peer::new(wallet_a.address, ip_address_a, port_a)],
             true,
-            None,
         )
         .await;
 
@@ -260,7 +251,6 @@ mod tests {
             port_c,
             vec![Peer::new(wallet_d.address, ip_address_d, port_d)],
             true,
-            None,
         )
         .await;
 
@@ -270,7 +260,6 @@ mod tests {
             port_b,
             vec![Peer::new(wallet_c.address, ip_address_c, port_c)],
             true,
-            None,
         )
         .await;
 
@@ -363,7 +352,6 @@ mod tests {
             port_b,
             vec![],
             true,
-            None,
         )
         .await;
 
@@ -372,7 +360,6 @@ mod tests {
             port_a,
             vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
             true,
-            None,
         )
         .await;
 
@@ -704,7 +691,6 @@ mod tests {
             port_b,
             vec![],
             true,
-            Some(MinerPool::new()),
         )
         .await;
 
@@ -713,7 +699,6 @@ mod tests {
             port_a,
             vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
             true,
-            None,
         )
         .await;
 
@@ -740,7 +725,6 @@ mod tests {
             port_b,
             vec![],
             true,
-            Some(MinerPool::new()), // we will mine from this node
         ).await;
 
         let (mut node_a, mut wallet_a) = create_empty_node_genisis(
@@ -748,7 +732,6 @@ mod tests {
             port_a,
             vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
             true,
-            None,
         ).await;
 
         inner_test_transaction_and_block_proposal(
@@ -927,7 +910,6 @@ mod tests {
             port_b,
             vec![],
             true,
-            Some(MinerPool::new()),
         )
         .await;
 
@@ -936,7 +918,6 @@ mod tests {
             port_a,
             vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
             true,
-            None,
         )
         .await;
 
@@ -945,7 +926,6 @@ mod tests {
             port_c,
             vec![Peer::new(wallet_a.address, ip_address_a, port_a)],
             false,
-            None,
         )
         .await;
 
@@ -977,7 +957,6 @@ mod tests {
             port_b,
             vec![],
             true,
-            Some(MinerPool::new()),
         )
         .await;
 
@@ -986,7 +965,6 @@ mod tests {
             port_a,
             vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
             true,
-            None,
         )
         .await;
 
@@ -995,7 +973,6 @@ mod tests {
             port_c,
             vec![Peer::new(wallet_a.address, ip_address_a, port_a)],
             false,
-            None,
         )
         .await;
 
@@ -1072,7 +1049,6 @@ mod tests {
             port_b,
             vec![],
             true,
-            Some(MinerPool::new()),
         )
         .await;
 
@@ -1081,7 +1057,6 @@ mod tests {
             port_a,
             vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
             true,
-            None,
         )
         .await;
 
@@ -1090,7 +1065,6 @@ mod tests {
             port_c,
             vec![Peer::new(wallet_a.address, ip_address_a, port_a)],
             false,
-            None,
         )
         .await;
 
@@ -1186,7 +1160,6 @@ mod tests {
             port_b,
             vec![],
             true,
-            Some(MinerPool::new()),
         )
         .await;
 
@@ -1195,7 +1168,6 @@ mod tests {
             port_a,
             vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
             true,
-            None,
         )
         .await;
 
@@ -1279,7 +1251,6 @@ mod tests {
             port_a, 
             vec![],
             true,
-            Some(MinerPool::new()),
         ).await;
 
         let (mut node_b, _ ) = create_empty_node_genisis(
@@ -1287,7 +1258,6 @@ mod tests {
             port_b, 
             vec![node_a.clone().into()],
             true,
-            Some(MinerPool::new()),
         ).await;
 
         let mut miner_a = Miner::new(node_a.clone()).unwrap();
@@ -1345,7 +1315,6 @@ mod tests {
             port_b,
             vec![],
             true,
-            Some(MinerPool::new()),
         )
         .await;
 
@@ -1354,7 +1323,6 @@ mod tests {
             port_a,
             vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
             true,
-            None,
         )
         .await;
 
@@ -1619,7 +1587,6 @@ mod tests {
             port_b,
             vec![],
             true,
-            Some(MinerPool::new()),
         )
         .await;
         let (mut node_a, mut wallet_a) = create_empty_node_genisis(
@@ -1627,7 +1594,6 @@ mod tests {
             port_a,
             vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
             true,
-            None,
         )
         .await;
 
@@ -1664,7 +1630,6 @@ mod tests {
             port_b,
             vec![],
             true,
-            Some(MinerPool::new()),
         )
         .await;
         let (mut node_a, mut wallet_a) = create_empty_node_genisis(
@@ -1672,7 +1637,6 @@ mod tests {
             port_a,
             vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
             true,
-            None,
         )
         .await;
 
@@ -1730,7 +1694,6 @@ mod tests {
             port_c,
             vec![],
             true,
-            None,
         ).await;
         // create node b with miner pool
         let (mut node_b, wallet_b) = create_empty_node_genisis(
@@ -1738,7 +1701,6 @@ mod tests {
             port_b,
             vec![Peer::new(wallet_c.address, ip_address_c, port_c)],
             true,
-            None,
         )
         .await;
         let (mut node_a, mut wallet_a) = create_empty_node_genisis(
@@ -1746,7 +1708,6 @@ mod tests {
             port_a,
             vec![Peer::new(wallet_c.address, ip_address_c, port_c), Peer::new(wallet_b.address, ip_address_b, port_b)],
             true,
-            Some(MinerPool::new()),
         )
         .await;
 
@@ -1822,7 +1783,6 @@ mod tests {
             port_c,
             vec![],
             true,
-            None,
         ).await;
         // create node b with miner pool
         let (node_b, mut wallet_b) = create_empty_node_genisis(
@@ -1830,7 +1790,6 @@ mod tests {
             port_b,
             vec![Peer::new(wallet_c.address, ip_address_c, port_c)],
             true,
-            Some(MinerPool::new()),
         )
         .await;
         let (mut node_a, wallet_a) = create_empty_node_genisis(
@@ -1838,7 +1797,6 @@ mod tests {
             port_a,
             vec![],
             true,
-            None,
         )
         .await;
         
@@ -1941,7 +1899,6 @@ mod tests {
             port_b,
             vec![],
             true,
-            Some(MinerPool::new()),
         )
         .await;
         let (mut node_a, wallet_a) = create_empty_node_genisis(
@@ -1949,7 +1906,6 @@ mod tests {
             port_a,
             vec![],
             true,
-            None,
         )
         .await;
 
@@ -1982,7 +1938,6 @@ mod tests {
             port_c,
             vec![],
             false,
-            None,
         )
         .await;
 
@@ -1991,7 +1946,6 @@ mod tests {
             port_b,
             vec![],
             true,
-            None,
         )
         .await;
         let (mut node_a, wallet_a) = create_empty_node_genisis(
@@ -1999,7 +1953,6 @@ mod tests {
             port_a,
             vec![],
             false,
-            None,
         )
         .await;
 

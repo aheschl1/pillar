@@ -1,7 +1,7 @@
 use std::sync::{Arc};
 
 use axum::{extract::{Path, Query, State}, http::HeaderMap, response::IntoResponse, routing::{get, post}, Json, Router};
-use pillar_core::{accounting::{account, wallet::{self, Wallet}}, nodes::{miner::Miner, node::{Node, StartupModes}, peer::Peer}, primitives::pool::MinerPool, protocol::peers::discover_peer, reputation::history::NodeHistory};
+use pillar_core::{accounting::{account, wallet::{self, Wallet}}, nodes::{miner::Miner, node::Node, peer::Peer}, primitives::pool::MinerPool, protocol::peers::discover_peer, reputation::history::NodeHistory};
 use pillar_crypto::types::StdByteArray;
 use serde::{Deserialize, Serialize};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -508,8 +508,7 @@ pub async fn launch_node(config: Config, genesis: bool, miner: bool) {
         config.ip_address,
         pillar_core::PROTOCOL_PORT,
         vec![],
-        if genesis { StartupModes::Genesis } else { StartupModes::Empty },
-        if miner { Some(MinerPool::new()) } else { None }
+        genesis
     );
     
     for peer in &config.wkps {

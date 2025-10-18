@@ -5,13 +5,14 @@ use pillar_crypto::{merkle_trie::MerkleTrie, types::{StdByteArray, STANDARD_ARRA
 use pillar_serialize::{PillarFixedSize, PillarNativeEndian, PillarSerialize};
 use tokio::{io::AsyncReadExt, net::TcpStream};
 
-use crate::{accounting::{account::{Account, TransactionStub}, state::StateManager}, blockchain::{chain::Chain, chain_shard::ChainShard}, nodes::peer::Peer, primitives::{block::{Block, BlockHeader}, messages::Message, transaction::{Transaction, TransactionFilter}}, reputation::history::{HeaderShard, NodeHistory}};
+use crate::{accounting::{account::{Account, TransactionStub}, state::StateManager}, blockchain::{chain::Chain, chain_shard::ChainShard}, nodes::peer::{Peer, PillarIPAddr}, primitives::{block::{Block, BlockHeader}, messages::Message, transaction::{Transaction, TransactionFilter}}, reputation::history::{HeaderShard, NodeHistory}};
 
 impl PillarFixedSize for BlockHeader                 {}
 impl PillarFixedSize for Transaction                 {}
 impl PillarFixedSize for Peer                        {}
 impl PillarFixedSize for TransactionStub             {}
 impl PillarFixedSize for HeaderShard                 {}
+impl PillarFixedSize for PillarIPAddr                {}
 
 /// Pack a serialized `Message` with a 4-byte little-endian length prefix.
 ///
@@ -371,6 +372,10 @@ impl PillarNativeEndian for HeaderShard {
         self.timestamp = self.timestamp.to_le();
         self.n_stamps = self.n_stamps.to_le();
     }
+}
+
+impl PillarNativeEndian for PillarIPAddr {
+    fn to_le(&mut self) {}
 }
 
 impl PillarSerialize for NodeHistory {

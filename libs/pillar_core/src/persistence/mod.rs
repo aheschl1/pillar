@@ -8,14 +8,13 @@ use pillar_crypto::types::StdByteArray;
 use pillar_serialize::{PillarFixedSize, PillarNativeEndian, PillarSerialize};
 
 use crate::{
-    accounting::state::StateManager,
-    blockchain::chain::Chain,
-    primitives::block::{Block, BlockHeader},
+    accounting::state::StateManager, blockchain::chain::Chain, nodes::{node::Node, peer::PillarIPAddr}, primitives::block::{Block, BlockHeader}
 };
+pub mod manager;
 
 pub(crate) trait Persistable
 where
-    Self: Sized + PillarSerialize,
+    Self: PillarSerialize,
 {
     async fn save(&self, path: &PathBuf) -> Result<(), std::io::Error> {
         let bytes = self.serialize_pillar()?;
@@ -28,6 +27,13 @@ where
 }
 
 impl<V> Persistable for Vec<V> where V: PillarSerialize {}
+impl<K, V> Persistable for HashMap<K, V>
+where
+    K: PillarSerialize + std::hash::Hash + Eq,
+    V: PillarSerialize,
+{}
+
+impl Persistable for String {}
 
 impl Persistable for Block {} // we are using the default implementations, which is just serialize and save to a path
 impl Persistable for StateManager {}
@@ -78,6 +84,9 @@ impl PillarNativeEndian for ChainMeta {
 }
 impl PillarFixedSize for ChainMeta {}
 impl Persistable for ChainMeta {}
+impl Persistable for StdByteArray {}
+impl Persistable for PillarIPAddr {}
+impl Persistable for u16 {}
 
 // chains serialization is to save one block per file
 impl Persistable for Chain {
