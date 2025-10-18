@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import { useServer } from '../contexts/serverContext';
 import BlockComponent from '../components/BlockComponent';
 import { toHex } from '../api/utils';
 import TransactionView from '../components/TransactionView';
 import StateView from '../components/StateView';
-import { useLocation, useNavigate } from 'react-router-dom';
 import './Block.css';
 
 const hexClean = (s) => s.replace(/^0x/, '').trim();
@@ -23,26 +22,21 @@ const hexToBytes = (hex) => {
 
 const Block = () => {
     const { ipAddress, httpPort, isConnected } = useServer();
-    const location = useLocation();
-    const navigate = useNavigate();
-    const params = new URLSearchParams(location.search);
-    const initialHash = params.get('hash') || '';
-
-    const [hashInput, setHashInput] = useState(initialHash);
+    const [hashInput, setHashInput] = useState('');
     const [block, setBlock] = useState(null);
     const [txs, setTxs] = useState([]);
     const [accountStates, setAccountStates] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
 
-    const fetchBlock = useCallback(async (hash) => {
-        if (!hash) return;
+    const handleSearch = async (e) => {
+        e.preventDefault();
         setError(null);
         setBlock(null);
         setTxs([]);
         setAccountStates([]);
 
-        const bytes = hexToBytes(hash);
+        const bytes = hexToBytes(hashInput);
         if (!bytes) {
             setError('Block hash must be 32-byte hex (64 hex chars)');
             return;
@@ -63,6 +57,7 @@ const Block = () => {
             const b = body.body;
             setBlock(b);
 
+            // fetch transactions
             const txPromises = (b.transaction_hashs || []).map(async (txHashBytes) => {
                 const txHashHex = toHex(txHashBytes);
                 try {
@@ -80,6 +75,7 @@ const Block = () => {
             const fetchedTxs = await Promise.all(txPromises);
             setTxs(fetchedTxs);
 
+            // fetch account states
             try {
                 const sres = await fetch(`http://${ipAddress}:${httpPort}/state/${hexHash}`);
                 if (!sres.ok) throw new Error(`HTTP status ${sres.status}`);
@@ -88,61 +84,36 @@ const Block = () => {
                 setAccountStates(sbody.body.accounts || []);
             } catch (e) {
                 console.error('Failed to fetch state', e);
+                // Not a fatal error, so we just log it
             }
+
         } catch (e) {
             setError(e.message || String(e));
         } finally {
             setLoading(false);
         }
-    }, [ipAddress, httpPort, isConnected]);
-
-    // Automatically load when ?hash= is present
-    useEffect(() => {
-        if (initialHash) {
-            fetchBlock(initialHash);
-        }
-    }, [initialHash, fetchBlock]);
-
-    const handleSearch = async (e) => {
-        e.preventDefault();
-        // Update the URL without refreshing
-        navigate(`/block?hash=${hashInput}`);
-        await fetchBlock(hashInput);
     };
 
     return (
         <div className="block-page">
-            <div className="header">
-                <h2>Block Explorer</h2>
-            </div>
-
+            <h2>Block</h2>
             <form className="block-search" onSubmit={handleSearch}>
-                <input
-                    value={hashInput}
-                    onChange={(e) => setHashInput(e.target.value)}
-                    placeholder="Enter block hash (64 hex chars)"
-                    className="hash-input"
-                />
-                <button type="submit" className="search-btn" disabled={loading}>
-                    {loading ? 'Searching...' : 'Search'}
-                </button>
+                <input value={hashInput} onChange={(e) => setHashInput(e.target.value)} placeholder="Block hash (64 hex chars)" />
+                <button type="submit">Search</button>
             </form>
-
-            {error && <div className="error-box">{error}</div>}
+            {error && <div className="error">{error}</div>}
+            {loading && <div className="small">Loading...</div>}
 
             {block && (
                 <div className="block-grid">
-                    <div className="card">
-                        <h3>Block Details</h3>
+                    <div className="block-left">
+                        {/* show expanded BlockComponent - pass block as-is, it's compatible */}
                         <BlockComponent block={block} forceExpanded={true} />
+                        <StateView accounts={accountStates} />
                     </div>
-                    <div className="card">
+                    <div className="block-right">
                         <h3>Transactions ({txs.length})</h3>
                         <TransactionView txs={txs} />
-                    </div>
-                    <div className="card">
-                        <h3>Account States</h3>
-                        <StateView accounts={accountStates} />
                     </div>
                 </div>
             )}
