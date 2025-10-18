@@ -8,7 +8,7 @@ use pillar_crypto::types::StdByteArray;
 use pillar_serialize::{PillarFixedSize, PillarNativeEndian, PillarSerialize};
 
 use crate::{
-    accounting::state::StateManager, blockchain::chain::Chain, nodes::{node::Node, peer::PillarIPAddr}, primitives::block::{Block, BlockHeader}
+    accounting::{state::StateManager, wallet::Wallet}, blockchain::chain::Chain, nodes::{node::Node, peer::PillarIPAddr}, primitives::block::{Block, BlockHeader}
 };
 pub mod manager;
 
@@ -87,6 +87,7 @@ impl Persistable for ChainMeta {}
 impl Persistable for StdByteArray {}
 impl Persistable for PillarIPAddr {}
 impl Persistable for u16 {}
+impl Persistable for Wallet {}
 
 // chains serialization is to save one block per file
 impl Persistable for Chain {

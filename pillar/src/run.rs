@@ -1,19 +1,19 @@
 use std::sync::{Arc};
 
 use axum::{extract::{Path, Query, State}, http::HeaderMap, response::IntoResponse, routing::{get, post}, Json, Router};
-use pillar_core::{accounting::{account, wallet::{self, Wallet}}, nodes::{miner::Miner, node::Node, peer::Peer}, primitives::pool::MinerPool, protocol::peers::discover_peer, reputation::history::NodeHistory};
-use pillar_crypto::types::StdByteArray;
+use pillar_core::{accounting::wallet::Wallet, nodes::{miner::Miner, node::Node, peer::Peer}, persistence::manager::PersistenceManager, protocol::peers::discover_peer};
+use pillar_crypto::{signing::SigFunction, types::StdByteArray};
 use serde::{Deserialize, Serialize};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use tokio::sync::RwLock;
-use crate::{log_stream::ws_logs, ws_handles::{handle_transaction_post, TransactionPost}, Config};
+use crate::{log_stream::ws_logs, ws_handles::{handle_transaction_post, TransactionPost}};
 use tower_http::cors::{CorsLayer, Any};
 
 
 #[derive(Clone)]
 struct AppState {
     node: Node,
-    config: Arc<RwLock<Config>>
+    wallet: Arc<RwLock<Wallet>>
 }
 
 #[derive(Serialize, Deserialize)]
@@ -68,7 +68,7 @@ async fn handle_ws_connection(mut socket: WebSocket, headers: HeaderMap, mut sta
             tracing::debug!("Received WebSocket message: {:?}", msg);
             match serde_json::from_str::<ClientMessage>(msg.to_text().unwrap_or("")) {
                 Ok(ClientMessage::TransactionPost(tx)) => {
-                    let wallet = &mut state.config.write().await.wallet;
+                    let wallet = &mut state.wallet.write().await;
                     handle_transaction_post(
                         &mut socket, 
                         tx,
@@ -296,7 +296,7 @@ async fn handle_node_get(
     let peer_count = state.node.inner.peers.read().await.len();
     let node_state = state.node.inner.state.read().await.clone();
     let response = NodeInfo {
-        public_key: state.config.read().await.wallet.address,
+        public_key: state.wallet.read().await.address,
         ip_address: state.node.ip_address.to_string(),
         port: state.node.port,
         peer_count,
@@ -316,7 +316,7 @@ struct WalletInfo {
 async fn handle_wallet_get(
     State(state): State<AppState>,
 ) -> Json<StatusResponse<WalletInfo>> {
-    let wallet = &state.config.read().await.wallet;
+    let wallet = &state.wallet.read().await;
 
     let chain = state.node
         .lock_chain()
@@ -501,17 +501,46 @@ async fn handle_init_download(
     Json(StatusResponse { success: true, error: None, body: None })
 }
 
-pub async fn launch_node(config: Config, genesis: bool, miner: bool) {
-    let mut node = Node::new(
-        config.wallet.address,
-        config.wallet.get_private_key(),
-        config.ip_address,
-        pillar_core::PROTOCOL_PORT,
-        vec![],
-        genesis
-    );
+pub async fn launch_node(
+    genesis: bool,
+    miner: bool,
+    wkps: Vec<Peer>,
+    ip_address: std::net::IpAddr,
+    root: std::path::PathBuf,
+) {
+
+    let persistence_manager = PersistenceManager::new(Some(root));
+    let wallet = match persistence_manager.load_wallet().await.expect("Failed to access wallet on disk") {
+        Some(wallet) => {
+            tracing::info!("Loaded existing wallet from disk with address: {}", hex::encode(wallet.address));
+            wallet
+        },
+        None => {
+            tracing::info!("No existing wallet found on disk, generating new wallet.");
+            let wallet = Wallet::generate_random();
+            persistence_manager.save_wallet(&wallet).await.expect("Failed to save new wallet to disk");
+            tracing::info!("Generated new wallet with address: {}", hex::encode(wallet.address));
+            wallet
+        }
+    };
+
+    let mut node = if persistence_manager.has_node() {
+        tracing::info!("Loading existing node configuration from disk.");
+        Node::new_load(&persistence_manager).await.expect("Failed to load existing node")
+    } else {
+        tracing::info!("Creating new node configuration.");
+        Node::new(
+            wallet.address,
+            wallet.get_private_key(),
+            ip_address,
+            pillar_core::PROTOCOL_PORT,
+            vec![],
+            genesis
+        )
+    };
+
     
-    for peer in &config.wkps {
+    for peer in &wkps {
         tracing::info!("Configuring well-known peer: {}:{}", peer.ip_address, peer.port);
         // we need to actually discover the peer to get its public key
         let discovered = discover_peer(&mut node, peer.ip_address.into(), peer.port).await;
@@ -534,29 +563,31 @@ pub async fn launch_node(config: Config, genesis: bool, miner: bool) {
     }
 
 
-    let api_address = format!("{}:3000", config.ip_address);
-    let logs_address = format!("{}:3001", config.ip_address);
+    let api_address = format!("{}:3000", ip_address);
+    let logs_address = format!("{}:3001", ip_address);
     let state = AppState {
         node,
-        config: Arc::new(RwLock::new(config))
+        wallet: Arc::new(RwLock::new(wallet))
     };
     let cors = CorsLayer::new()
         .allow_origin(Any)      // allow all origins
         .allow_methods(Any)     // allow all HTTP methods
-        .allow_headers(Any);    // allow all headers
+        .allow_headers(Any);              // allow all headers
     let app_api = Router::new()
+        // get
         .route("/ws", get(ws_route))
-        .route("/peer/{public_key}", post(handle_peer_post)) // allow with public key
-        .route("/peer", post(handle_peer_post)) // allow without public key
         .route("/peers", get(handle_peer_get))
-        .route("/block/{hash}", get(handle_block_get))
         .route("/transaction/{block_hash}/{hash}", get(handle_transaction_get))
+        .route("/block/{hash}", get(handle_block_get))
         .route("/state/{block_hash}", get(handle_state_get))
         .route("/blocks", get(handle_block_list))
         .route("/node", get(handle_node_get))
         .route("/wallet", get(handle_wallet_get))
+        // post
+        .route("/peer/{public_key}", post(handle_peer_post)) // allow with public key
+        .route("/peer", post(handle_peer_post)) // allow without public key
         .route("/init", post(handle_init_download))
-        .with_state(state)
+        .with_state(state.clone())
         .layer(cors);
     
     let app_logs = Router::new().route("/logs", get(ws_logs));
@@ -567,8 +598,17 @@ pub async fn launch_node(config: Config, genesis: bool, miner: bool) {
     tracing::info!("Listening on {}", api_address);
     tracing::info!("Listening for log requests on {}", logs_address);
 
+    tokio::spawn(async move {
+        loop {
+            tracing::debug!("Saving...");
+            persistence_manager.save_node(&state.node).await.expect("Failed to save node state to disk");
+            persistence_manager.save_wallet(&state.wallet.read().await.clone()).await.expect("Failed to save wallet to disk");
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        }
+    });
+
     let _ = tokio::join!(
         axum::serve(api_listener, app_api),
-        axum::serve(logs_listener, app_logs)
+        axum::serve(logs_listener, app_logs),
     );
 }

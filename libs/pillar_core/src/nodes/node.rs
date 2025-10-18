@@ -1,12 +1,12 @@
 use super::peer::Peer;
 use flume::{Receiver, Sender};
-use pillar_crypto::{hashing::{DefaultHash, Hashable}, signing::{DefaultSigner, SigFunction, Signable}, types::StdByteArray};
+use pillar_crypto::{hashing::{DefaultHash, Hashable}, signing::{DefaultSigner, DefaultVerifier, SigFunction, Signable}, types::StdByteArray};
 use tracing::instrument;
 use std::{collections::{HashMap, HashSet}, net::IpAddr, path::PathBuf, sync::Arc};
 use tokio::sync::{Mutex, RwLock};
 
 use crate::{
-    accounting::state::StateManager, blockchain::chain::Chain, persistence::{self, manager::PersistenceManager}, primitives::{block::{Block, BlockHeader, Stamp}, messages::Message, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::{block_settle_consumer, discover_chain, service_sync, sync_chain},
+    accounting::{state::StateManager, wallet::Wallet}, blockchain::chain::Chain, persistence::{self, manager::PersistenceManager}, primitives::{block::{Block, BlockHeader, Stamp}, messages::Message, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::{block_settle_consumer, discover_chain, service_sync, sync_chain},
     communication::{broadcast_knowledge, serve_peers},
     reputation::{nth_percentile_peer, N_TRANSMISSION_SIGNATURES}}
 };

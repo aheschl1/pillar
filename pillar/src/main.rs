@@ -3,75 +3,12 @@ mod run;
 mod ws_handles;
 mod log_stream;
 
-use pillar_core::{accounting::wallet::Wallet, nodes::peer::Peer};
-use pillar_crypto::signing::SigFunction;
-use pillar_serialize::PillarSerialize;
+use pillar_core::{nodes::peer::Peer};
 use clap::Parser;
 use tracing_subscriber::{filter::LevelFilter, fmt::{self, writer::BoxMakeWriter}, layer::SubscriberExt, util::SubscriberInitExt, Layer, Registry};
 use std::{fs::File, path::PathBuf};
 
 use crate::{log_stream::BroadcastWriter, run::launch_node};
-
-
-#[derive(Clone)]
-struct Config {
-    /// Well-known peers to connect to on startup
-    wkps: Vec<Peer>,
-    ip_address: std::net::IpAddr,
-    wallet: Wallet
-}
-
-impl Config {
-    fn new(wkps: Vec<Peer>, ip_address: std::net::IpAddr, wallet: Option<Wallet>) -> Self {
-        let wallet = if let Some(w) = wallet {
-            w
-        } else {
-            Wallet::generate_random()
-        };
-        Config { wkps, ip_address, wallet }
-    }
-
-    fn from_root(root: &PathBuf) -> Self {
-        let path = root.join("config.bin");
-        Self::from_file(&path)
-    }
-
-    fn from_file(path: &PathBuf) -> Self {
-        let data = std::fs::read(path).expect("failed to read config file");
-        Self::deserialize_pillar(&data).expect("failed to deserialize config file")
-    }
-
-    fn save(&self, root: &PathBuf) {
-        let path = root.join("config.bin");
-        let data = self.serialize_pillar().expect("failed to serialize config");
-        std::fs::write(path, data).expect("failed to write config file");
-    }
-}
-
-impl PillarSerialize for Config {
-    // TODO optimize this serialization. Wallet is a fixed size, so we don't need to store its length
-    // Same for IP address, we can store it as 4 or 16 bytes depending on if it's IPv4 or IPv6
-    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
-        let mut data = Vec::new();
-        let wkps_ser = self.wkps.serialize_pillar()?;
-        data.extend((wkps_ser.len() as u32).to_le_bytes());
-        data.extend(wkps_ser);
-        let wallet_ser = self.wallet.serialize_pillar()?;
-        data.extend((wallet_ser.len() as u32).to_le_bytes());
-        data.extend(wallet_ser);
-        data.extend(self.ip_address.to_string().serialize_pillar()?);
-        Ok(data)
-    }
-
-    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
-        let wkps_len = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
-        let wkps = Vec::<Peer>::deserialize_pillar(&data[4..4+wkps_len])?;
-        let wallet_len = u32::from_le_bytes(data[4+wkps_len..8+wkps_len].try_into().unwrap()) as usize;
-        let wallet = Wallet::deserialize_pillar(&data[8+wkps_len..8+wkps_len+wallet_len])?;
-        let ip_address = String::deserialize_pillar(&data[8+wkps_len+wallet_len..])?;
-        Ok(Config { wkps, ip_address: ip_address.parse().unwrap(), wallet })
-    }
-}
 
 fn setup_tracing(log_dir: &PathBuf) {
     let log_dir = log_dir.to_str().unwrap();
@@ -121,7 +58,7 @@ struct Args {
     #[arg(long, help = "Start with genesis block (only for testing, do not use in production)")]
     genesis: bool,
     #[arg(long, help = "Start node as a miner")]
-    miner: bool, 
+    miner: bool,
 }
 
 
@@ -155,13 +92,12 @@ async fn main() -> Result<(), ()> {
             }
         }
     }).collect();
-    let config = if let Some(config_path) = args.config {
-        Config::from_file(&config_path)
-    }else{
-        let config = Config::new(wkps, ip_address, None);
-        config.save(&log_dir);
-        config
-    };
-    launch_node(config, args.genesis, args.miner).await;
+    launch_node(
+        args.genesis,
+        args.miner,
+        wkps,
+        ip_address,
+        log_dir
+    ).await;
     Ok(())
 }

@@ -2,7 +2,7 @@ use std::{net::IpAddr, path::PathBuf};
 
 use pillar_crypto::types::StdByteArray;
 
-use crate::{blockchain::chain::Chain, nodes::{node::{self, Node}, peer::{Peer, PillarIPAddr}}, persistence::Persistable, PROTOCOL_PORT};
+use crate::{accounting::wallet::Wallet, blockchain::chain::Chain, nodes::{node::{self, Node}, peer::{Peer, PillarIPAddr}}, persistence::Persistable, PROTOCOL_PORT};
 
 
 
@@ -52,7 +52,7 @@ impl PersistenceManager {
         }
     }
 
-    pub(crate) async fn save_node(&self, node: &Node) -> Result<(), std::io::Error>{
+    pub async fn save_node(&self, node: &Node) -> Result<(), std::io::Error>{
         if let Some(chain) = node.inner.chain.lock().await.as_ref() {
             chain.save(&self.chain_root).await?;
         }
@@ -95,6 +95,21 @@ impl PersistenceManager {
         } else {
             Ok(None)
         }
+    }
+
+    pub fn has_node(&self) -> bool {
+        std::fs::metadata(self.node_root.join("private_key.bin")).is_ok()
+    }
+
+    pub async fn save_wallet(&self, wallet: &Wallet) -> Result<(), std::io::Error> {
+        wallet.save(&self.root.join("wallet.bin")).await
+    }
+
+    pub async fn load_wallet(&self) -> Result<Option<Wallet>, std::io::Error> {
+        if !std::fs::metadata(self.root.join("wallet.bin")).is_ok() {
+            return Ok(None);
+        }
+        Ok(Some(Wallet::load(&self.root.join("wallet.bin")).await?))
     }
 
 }
