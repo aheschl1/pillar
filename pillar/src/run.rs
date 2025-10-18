@@ -538,6 +538,7 @@ pub async fn launch_node(
             genesis
         )
     };
+    node.ip_address = ip_address; // override ip address to bind to, as it may have changed
 
     
     for peer in &wkps {
