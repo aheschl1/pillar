@@ -141,6 +141,11 @@ impl Node {
     ) -> Result<Node, std::io::Error>{
         let chain = persistence_manager.load_chain().await?;
         let node_state = persistence_manager.load_node().await?;
+        let state = if chain.is_some() {
+            NodeState::ChainOutdated
+        } else {
+            NodeState::ICD
+        };
 
         let node = Node::new_inner(
             node_state.public_key,
@@ -149,7 +154,7 @@ impl Node {
             node_state.port,
             node_state.peers,
             chain,
-            NodeState::ChainOutdated
+            state
         );
 
         Ok(node)

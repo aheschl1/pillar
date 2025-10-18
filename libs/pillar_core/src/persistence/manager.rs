@@ -12,7 +12,7 @@ pub struct PersistenceManager {
     node_root: PathBuf,
 }
 
-pub(crate) struct NodeState {
+pub(crate) struct NodeShard {
     pub ip_address: IpAddr,
     pub port: u16,
     pub peers: Vec<Peer>,
@@ -59,23 +59,27 @@ impl PersistenceManager {
 
         let address: PillarIPAddr = node.ip_address.into();
 
-        node.inner.public_key.save(&self.root.join("public_key.bin")).await?;
-        node.inner.private_key.save(&self.root.join("private_key.bin")).await?;
-        node.inner.peers.read().await.save(&self.node_root.join("peers.bin")).await?;
+        node.inner.public_key.save(&self.node_root.join("public_key.bin")).await?;
+        node.inner.private_key.save(&self.node_root.join("private_key.bin")).await?;
+        node.inner.peers.read()
+            .await.values()
+            .cloned()
+            .collect::<Vec<Peer>>()
+            .save(&self.node_root.join("peers.bin")).await?;
         address.save(&self.node_root.join("ip_address.bin")).await?;
         node.port.save(&self.node_root.join("port.bin")).await?;
 
         Ok(())
     }
 
-    pub(crate) async fn load_node(&self) -> Result<NodeState, std::io::Error> {
-        let public_key = StdByteArray::load(&self.root.join("public_key.bin")).await?;
-        let private_key = StdByteArray::load(&self.root.join("private_key.bin")).await?;
+    pub(crate) async fn load_node(&self) -> Result<NodeShard, std::io::Error> {
+        let public_key = StdByteArray::load(&self.node_root.join("public_key.bin")).await?;
+        let private_key = StdByteArray::load(&self.node_root.join("private_key.bin")).await?;
         let peers = Vec::<Peer>::load(&self.node_root.join("peers.bin")).await?;
         let ip_address: PillarIPAddr = PillarIPAddr::load(&self.node_root.join("ip_address.bin")).await?;
         let port = u16::load(&self.node_root.join("port.bin")).await?;
 
-        Ok(NodeState {
+        Ok(NodeShard {
             ip_address: ip_address.into(),
             port,
             peers,
@@ -86,7 +90,7 @@ impl PersistenceManager {
     }
 
     pub async fn load_chain(&self) -> Result<Option<Chain>, std::io::Error> {
-        if std::fs::metadata(self.chain_root.join("chain.bin")).is_ok() {
+        if std::fs::metadata(self.chain_root.join("meta.bin")).is_ok() {
             Ok(Some(Chain::load(&self.chain_root).await?))
         } else {
             Ok(None)

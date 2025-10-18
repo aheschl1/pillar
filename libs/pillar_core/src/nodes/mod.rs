@@ -9,6 +9,7 @@ mod tests {
     use chrono::Local;
     use pillar_crypto::{hashing::{DefaultHash, Hashable}, signing::{SigFunction, Signable}, types::StdByteArray};
     
+    use tempfile::TempDir;
     use tracing::level_filters::LevelFilter;
     use tracing_subscriber::{
         Layer, Registry,
@@ -20,15 +21,13 @@ mod tests {
     use crate::{
         accounting::{account, wallet::Wallet}, nodes::{
             miner::{Miner, MAX_TRANSACTION_WAIT_TIME}, node::{self, NodeState}, peer::Peer
-        }, primitives::{messages::Message, pool::MinerPool, transaction::Transaction}, protocol::{difficulty::get_reward_from_depth_and_stampers, peers::{discover_peer, discover_peers}, transactions::{get_transaction_proof, submit_transaction}}
+        }, persistence::manager::PersistenceManager, primitives::{messages::Message, pool::MinerPool, transaction::Transaction}, protocol::{difficulty::get_reward_from_depth_and_stampers, peers::{discover_peer, discover_peers}, transactions::{get_transaction_proof, submit_transaction}}
     };
 
     use super::node::Node;
 
     use std::{
-        fs::File,
-        net::{IpAddr, Ipv4Addr},
-        sync::Arc, time::Duration,
+        fs::File, net::{IpAddr, Ipv4Addr}, path::PathBuf, sync::Arc, time::Duration
     };
 
     // always setup tracing first
@@ -1992,6 +1991,130 @@ mod tests {
         // node a is in serving state
         assert_eq!(*node_a.inner.state.read().await, NodeState::Serving);
 
+    }
+
+    async fn save_node(node: Node) -> TempDir{
+        let path = tempfile::tempdir().unwrap();
+        let persistence_manager = PersistenceManager::new(Some(path.path().to_path_buf()));
+        persistence_manager.save_node(&node).await.unwrap();
+        path
+    }
+
+    #[tokio::test]
+    async fn test_sync_two_blocks_persistence() {
+        let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 8));
+        let port_a = 6999;
+
+        let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 9));
+        let port_b = 6998;
+
+        let ip_address_c = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 5));
+        let port_c = 6997;
+
+
+        let (mut node_b, wallet_b) = create_empty_node_genisis(
+            ip_address_b,
+            port_b,
+            vec![],
+            true,
+        )
+        .await;
+
+        let (mut node_a, mut wallet_a) = create_empty_node_genisis(
+            ip_address_a,
+            port_a,
+            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
+            true,
+        )
+        .await;
+
+        let (mut node_c, mut wallet_c) = create_empty_node_genisis(
+            ip_address_c,
+            port_c,
+            vec![Peer::new(wallet_a.address, ip_address_a, port_a)],
+            false,
+        )
+        .await;
+
+        inner_test_new_node_online(
+            &mut node_a,
+            &mut node_b,
+            &mut node_c,
+            &mut wallet_a,
+            &wallet_b,
+            &wallet_c,
+        )
+        .await;
+        // now, let A go offline. C will submit a transaction.
+        println!("Stopping node A - expect ConnetionRefused errors");
+        node_a.stop().await;
+        let path_a = save_node(node_a).await;
+        println!("{path_a:?}");
+        // pause a sec - TODO remove this after fixing the join on stoping
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        // now, C will submit a transaction to B
+        let _ = submit_transaction(
+            &mut node_c,
+            &mut wallet_c,
+            wallet_b.address,
+            0,
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+        // pause a sec
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await; // time to settle, and give up waiting for full block
+        // now both shold have 3 blocks
+        let chain_b = node_b.inner.chain.lock().await;
+        assert!(chain_b.as_ref().unwrap().depth == 2); // 3 blocks
+        assert!(chain_b.as_ref().unwrap().blocks.len() == 3); // 3 blocks
+        drop(chain_b);
+        // now c
+        let chain_c = node_c.inner.chain.lock().await;
+        assert!(chain_c.as_ref().unwrap().depth == 2); // 3 blocks
+        assert!(chain_c.as_ref().unwrap().blocks.len() == 3); // 3 blocks
+        drop(chain_c);
+        // DO A SECOND TRANSACTION TO GET 2 BLOCKS OUTDATED
+        let _ = submit_transaction(
+            &mut node_c,
+            &mut wallet_c,
+            wallet_b.address,
+            0,
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+        // pause a sec
+        tokio::time::sleep(std::time::Duration::from_secs(15)).await; // time to settle, and give up waiting for full block
+        // now both shold have 4 blocks
+        let chain_b = node_b.inner.chain.lock().await;
+        assert!(chain_b.as_ref().unwrap().depth == 3); // 4 blocks
+        assert!(chain_b.as_ref().unwrap().blocks.len() == 4); // 4 blocks
+        drop(chain_b);
+        // now c
+        let chain_c = node_c.inner.chain.lock().await;
+        assert!(chain_c.as_ref().unwrap().depth == 3); // 4 blocks
+        assert!(chain_c.as_ref().unwrap().blocks.len() == 4); // 4 blocks
+        drop(chain_c);
+        // put A back online
+        let mut node_a = Node::new_load(&PersistenceManager::new(Some(path_a.path().to_path_buf()))).await.expect("Failed to load node A");
+        node_a.serve().await;
+        assert!(node_a.inner.state.read().await.clone() == NodeState::ChainSyncing);
+        // wait for a bit
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        // check if node a knows about node b and c
+        let peers_a = node_a.inner.peers.read().await;
+        assert!(peers_a.contains_key(&wallet_b.address));
+        assert!(peers_a.contains_key(&wallet_c.address));
+        drop(peers_a);
+        // now check that it collected the block
+        let chain_a = node_a.inner.chain.lock().await;
+        assert_eq!(chain_a.as_ref().unwrap().depth, 3); // 3 blocks
+        assert_eq!(chain_a.as_ref().unwrap().blocks.len(), 4); // 3 blocks
+        // now, node A should be in serving state
+        assert!(node_a.inner.state.read().await.clone() == NodeState::Serving);
     }
 
 }
