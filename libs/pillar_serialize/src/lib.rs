@@ -24,6 +24,7 @@
 //! - `HashMap<K,V>`: When key/value sizes are not fixed, we prefix with counts and per-entry sizes.
 //!   Specializations for `StdByteArray` keys and/or fixed-size values remove some length prefixes.
 //!
+#![allow(incomplete_features)]
 #![feature(specialization)]
 use std::collections::HashMap;
 
