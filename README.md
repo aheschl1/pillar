@@ -1,128 +1,74 @@
 # <img src="./figures/logo.svg" alt="Pillar Logo" width="50" style="vertical-align: middle; margin-right: 8px;" /> Pillar <!-- markdownlint-disable-line MD033 -->
 
-Zero-trust decentralized ledger with a Proof of Reputation (PoR) trust layer. It combines a conventional transaction layer with a reputation-driven incentive layer to reduce wasted computation, and provide a trust metric.
+Pillar is a zero-trust decentralized ledger that implements a Proof of Reputation (PoR) trust layer. It combines a conventional transaction layer with a reputation-driven incentive layer to reduce wasted computation and provide a trust metric for network participants.
 
-## Core cryptographic and data structures
+## High-Level Architecture
 
-- Hashing (`pillar_crypto::hashing`)
-  - Default: SHA3-256 via `DefaultHash`.
-  - `Hashable` trait defines how a type contributes bytes to the hasher.
-  - Provided impls for `&str`, `String`, `StdByteArray` (`[u8; 32]`), `Vec<u8>`.
-  - Error: calling `digest()` with no prior `update()` yields `std::io::ErrorKind::InvalidInput`.
+The network data flow, chain structure, and block settlement process are illustrated in the following diagrams:
 
-- Signing (`pillar_crypto::signing`)
-  - ed25519 (ed25519-dalek): `DefaultSigner`/`DefaultVerifier`.
-  - Traits `SigFunction<K,P,S>` / `SigVerFunction<K,S>` use fixed sizes; defaults are K=32, P=32, S=64.
-  - `verify_strict` is used; randomness only in key generation.
-  - Messages implement `Signable<S>` and expose canonical bytes via `get_signing_bytes()`.
+- [Network Flow](figures/net_flow.png)
+- [Chain Structure](figures/structure.png)
+- [Settle Chart](figures/settle_chart.png)
 
-- Binary Merkle tree (`pillar_crypto::merkle`)
-  - Leaf: `leaf = H(H(item_bytes))` (item hashed via `Hashable`, then hashed again as leaf).
-  - Internal: `node = H(left || right)` (32-byte concatenations, order preserved).
-  - Odd levels duplicate the last leaf to pair.
-  - Tree equality is by root hash equality.
+## Repository Layout
 
-- Merkle proof (`pillar_crypto::proofs::MerkleProof`)
-  - Contains sibling hashes and `Left`/`Right` directions.
-  - Verifier recomputes from `H(prehash)` upward. Input is the pre-hash of the item.
-  - Serialized with `u32` lengths (LE) followed by raw bytes.
+- [`pillar/`](pillar/) – Entrypoint for managing a Pillar node.
+- [`libs/pillar_core/`](libs/pillar_core/) – Core protocol logic and data structures.
+- [`libs/pillar_crypto/`](libs/pillar_crypto/) – Cryptographic primitives, including hashing, signing, and Merkle structures.
+- [`libs/pillar_serialize/`](libs/pillar_serialize/) – Lightweight serialization utilities.
+- [`pillar_monitor/`](pillar_monitor/) – A web-based frontend for monitoring a node.
+- [`vm_mesh/`](vm_mesh/) – A framework for distributed testing and simulation using QEMU.
 
-- Merkle trie (`pillar_crypto::merkle_trie`)
-  - Keys: `H(key)` split into nibbles (hi 4 bits, lo 4 bits) to traverse a 16-ary trie.
-  - Node hash: append `[i] || hash(child_i)` for present children in ascending `i`; if value present, append `[16] || value_bytes`; hash the concatenation.
-  - Values serialized with `PillarSerialize` and stored as raw bytes.
-  - Branching (`branch`): clones only necessary path nodes; reference counts track sharing.
-  - Trimming (`trim_branch`): decrements references, removes unique nodes.
+## Getting Started
 
-## High-level architecture
+### Prerequisites
 
-The network and data flow are illustrated below, alongside how blocks are settled and how components interact.
+- Docker
+- Rust toolchain
+- Node.js and npm
 
-- [Network flow](figures/net_flow.png)
-- [Chain structure](figures/structure.png)
-- [Settle chart](figures/settle_chart.png)
+### Running a Node
 
-## Repository layout
+The recommended method for running a Pillar node is via Docker.
 
-- [`pillar/`](pillar/) – Entrpoint for managing a Pillar node
-- [`libs/pillar_core/`](libs/pillar_core/) – Core protocol and logic
-- [`libs/pillar_crypto/`](libs/pillar_crypto/) – Cryptographic primitives
-- [`libs/pillar_serialize/`](libs/pillar_serialize/) – Lightweight serialization utilities used across crates.
-- [`vm_mesh/`](vm_mesh/) – VM Mesh framework for distributed testing and simulation
+1. **Build the Docker image:**
 
-## Testing
+    ```bash
+    ./build.sh
+    ```
+
+2. **Run the node:**
+
+    ```bash
+    # All arguments are optional. A new wallet and random name will be generated if not provided.
+    # The node will listen on the next available ip on the docker subnet by default.
+    ./run.sh --work-dir=<WORK_DIR> --ip-address=<IP_ADDRESS> --wkps=<WKP_SERVERS> --name=<NODE_NAME> --config=<CONFIG_FILE>
+    ```
+
+A convenience script, `./kill_all.sh`, is provided to stop all running Pillar containers.
+
+### Testing
+
+To run the test suite for all crates, execute:
 
 ```bash
 cargo test
 ```
 
-Note: Tests log to `./test_output/{timestamp}/output.log`. Some log errors can occur; they don’t indicate failing tests.
+Test logs are written to `./test_output/{timestamp}/output.log`.
 
-## Serialization and platform notes
+### Frontend Dashboard
 
-Serialization works only for 64-bit targets but is endian-agnostic. Big-endian machines may serialize less efficiently due to byte swaps for some fixed-size primitives.
+A web-based dashboard is available for monitoring a running node.
 
-## VM Mesh: Distributed Testing and Simulation
+1. **Launch a Pillar node** using the instructions above.
 
-The VM Mesh framework enables distributed testing and simulation of the Pillar protocol across multiple virtual machines, supporting both x86_64 and aarch64 architectures. It automates the provisioning, networking, and orchestration of VMs using QEMU, with unified repository injection and cloud-init configuration. This is used for testing across different architectures, in order to assert serialization compatibility.
+2. **Start the frontend application:**
 
-### Features
+    ```bash
+    cd pillar_monitor
+    npm install
+    npm run dev
+    ```
 
-- **Automated VM Provisioning:** Launch any number of VMs with isolated overlays and custom network bridges.
-- **Unified Codebase Injection:** Clones the repository and injects it into all VMs via a shared ISO, ensuring consistent test environments.
-- **Cloud-Init Integration:** Uses cloud-init to configure SSH keys, networking, and repository setup for each VM.
-- **Network Simulation:** Creates a virtual bridge and tap devices, allowing VMs to communicate as if on a real network.
-- **Lifecycle Management:** Start, monitor, and terminate all VMs from a single interface. Supports context-managed operation for clean setup and teardown.
-- **Architecture Flexibility:** Supports both x86_64 and aarch64 VMs for cross-platform protocol validation.
-
-### Usage
-
-To launch a mesh of VMs for distributed testing:
-
-```bash
-python vm_mesh/runner.py --n-x86 2 --n-aarch 1 --name test-mesh
-```
-
-This will:
-
-- Create a dedicated directory for the mesh and overlays
-- Provision 2 x86_64 and 1 aarch64 VM, each with the Pillar repository injected
-- Set up a virtual network bridge for inter-VM communication
-- Wait for all VMs to become responsive, then terminate them after tests
-
-You can also launch a single VM interactively for debugging:
-
-```bash
-python vm_mesh/runner.py --n-x86 1 --name debug-vm
-```
-
-### Integration
-
-The VM Mesh is ideal for:
-
-- End-to-end protocol validation across multiple nodes
-- Simulating network conditions and consensus scenarios
-- Automated CI/CD pipelines for distributed ledger testing
-- Cross-architecture compatibility checks
-
-## Running a Pillar Node
-
-To run, using the Docker image is recommended:
-
-```bash
-./build.sh # builds the docker image
-# Runs the node container. All arguments can be left blank, in which case a new wallet and random name will be generated. Node will listen on 0.0.0.0
-./run.sh --work-dir=<WORK_DIR> --ip-address=<IP_ADDRESS> --wkps=<WKP_SERVERS> --name=<NODE_NAME> --config=<CONFIG_FILE>  
-```
-
-For convenience, `./kill_all.sh` stops all running containers.
-
-### Frontend
-
-To access a dashboard, first launch a node and then:
-
-```bash
-cd pillar_monitor
-npm i
-npm run dev
-```
+The dashboard will be accessible in a web browser at the address provided by the development server.
