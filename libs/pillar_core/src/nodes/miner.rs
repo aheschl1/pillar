@@ -156,7 +156,7 @@ mod test{
 
     use pillar_crypto::hashing::DefaultHash;
 
-    use crate::{persistence::database::GenesisDatastore, primitives::{block::{Block, BlockTail}, pool::MinerPool, transaction::Transaction}, protocol::{difficulty::MIN_DIFFICULTY, pow::mine}};
+    use crate::{primitives::{block::{Block, BlockTail}, pool::MinerPool, transaction::Transaction}, protocol::{difficulty::MIN_DIFFICULTY, pow::mine}};
     use crate::nodes::miner::Miner;
     use super::Node;
 
@@ -166,7 +166,7 @@ mod test{
         let private_key = [2u8; 32];
         let ip_address = IpAddr::V4(Ipv4Addr::from_str("127.0.0.1").unwrap());
         let port = 8080;
-        let node = Node::new(public_key, private_key, ip_address, port, vec![], Some(Arc::new(GenesisDatastore::new())), Some(MinerPool::new()));
+        let node = Node::new(public_key, private_key, ip_address, port, vec![], true);
         let miner = Miner::new(node).unwrap();
         let mut hasher = DefaultHash::new();
 

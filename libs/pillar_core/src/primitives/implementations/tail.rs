@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 
 use pillar_crypto::{hashing::Hashable, signing::{DefaultVerifier, SigVerFunction, Signable}, types::StdByteArray};
 

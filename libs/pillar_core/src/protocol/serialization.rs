@@ -1,17 +1,18 @@
 use std::collections::HashMap;
 
-use pillar_crypto::types::{StdByteArray, STANDARD_ARRAY_LENGTH};
+use pillar_crypto::{merkle_trie::MerkleTrie, types::{StdByteArray, STANDARD_ARRAY_LENGTH}};
 
 use pillar_serialize::{PillarFixedSize, PillarNativeEndian, PillarSerialize};
 use tokio::{io::AsyncReadExt, net::TcpStream};
 
-use crate::{accounting::{account::{Account, TransactionStub}, state::StateManager}, blockchain::{chain::Chain, chain_shard::ChainShard}, nodes::peer::Peer, primitives::{block::{Block, BlockHeader}, messages::Message, transaction::{Transaction, TransactionFilter}}, reputation::history::{HeaderShard, NodeHistory}};
+use crate::{accounting::{account::{Account, TransactionStub}, state::StateManager}, blockchain::{chain::Chain, chain_shard::ChainShard}, nodes::peer::{Peer, PillarIPAddr}, primitives::{block::{Block, BlockHeader}, messages::Message, transaction::{Transaction, TransactionFilter}}, reputation::history::{HeaderShard, NodeHistory}};
 
 impl PillarFixedSize for BlockHeader                 {}
 impl PillarFixedSize for Transaction                 {}
 impl PillarFixedSize for Peer                        {}
 impl PillarFixedSize for TransactionStub             {}
 impl PillarFixedSize for HeaderShard                 {}
+impl PillarFixedSize for PillarIPAddr                {}
 
 /// Pack a serialized `Message` with a 4-byte little-endian length prefix.
 ///
@@ -165,6 +166,24 @@ impl PillarSerialize for crate::primitives::messages::Message {
 
 }
 
+impl PillarSerialize for StateManager {
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mut bytes = vec![];
+        let trie_bytes = self.state_trie.serialize_pillar()?;
+        bytes.extend((trie_bytes.len() as u32).to_le_bytes());
+        bytes.extend(trie_bytes);
+        bytes.extend(self.reputations.serialize_pillar()?);
+        Ok(bytes)
+    }
+
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        let trielen = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+        let trie = MerkleTrie::<StdByteArray, Account>::deserialize_pillar(&data[4..trielen + 4])?;
+        let reputations = HashMap::<StdByteArray, NodeHistory>::deserialize_pillar(&data[trielen + 4..])?;
+        Ok(StateManager { state_trie: trie, reputations })
+    }
+}
+
 impl PillarSerialize for Block{
     /// Serialize a `Block` as `[header][transactions...]`.
     ///
@@ -214,6 +233,7 @@ impl PillarSerialize for Chain {
         buffer.extend(self.deepest_hash.serialize_pillar()?);
         // TODO maybe big clone
         buffer.extend(self.leaves.iter().cloned().collect::<Vec<_>>().serialize_pillar()?);
+        // 
         Ok(buffer)
     }
 
@@ -245,8 +265,8 @@ impl PillarSerialize for Chain {
         let leaves = Vec::<StdByteArray>::deserialize_pillar(&data[offset..])?;
 
         Ok(Chain {
-        blocks,
-        headers,
+            blocks,
+            headers,
             depth,
             deepest_hash,
             leaves: leaves.into_iter().collect(),
@@ -354,6 +374,10 @@ impl PillarNativeEndian for HeaderShard {
     }
 }
 
+impl PillarNativeEndian for PillarIPAddr {
+    fn to_le(&mut self) {}
+}
+
 impl PillarSerialize for NodeHistory {
     /// Serialize a node's history as `[public_key:32][blocks_mined_len:u32][blocks_mined_bytes][blocks_stamped...]`.
     ///
@@ -408,17 +432,13 @@ mod tests {
     use pillar_serialize::PillarSerialize;
 
     use crate::{
-        primitives::{
+        accounting::account::TransactionStub, blockchain::{chain::Chain, chain_shard::ChainShard}, nodes::peer::Peer, primitives::{
             block::{Block, BlockHeader, Stamp},
             messages::Message,
             transaction::{Transaction, TransactionFilter},
-        },
-        protocol::{reputation::N_TRANSMISSION_SIGNATURES, versions::Versions},
-        blockchain::{chain::Chain, chain_shard::ChainShard},
-        nodes::peer::Peer,
-        accounting::account::TransactionStub,
+        }, protocol::{reputation::N_TRANSMISSION_SIGNATURES, versions::Versions}
     };
-    use pillar_crypto::{types::StdByteArray, proofs::{MerkleProof, HashDirection}};
+    use pillar_crypto::proofs::{MerkleProof, HashDirection};
     use std::net::{IpAddr, Ipv4Addr};
 
     #[test]

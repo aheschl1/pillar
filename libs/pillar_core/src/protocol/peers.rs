@@ -52,7 +52,7 @@ pub async fn discover_peer(node: &mut Node, ip_address: std::net::IpAddr, port: 
         Message::DiscoveryResponse(peer) => {
             Ok(peer)
         }
-        _ => Err(std::io::Error::other(format!("Invalid message received: {:?}", response))),
+        _ => Err(std::io::Error::other(format!("Invalid message received: {response:?}"))),
     }
 }
 
@@ -84,8 +84,7 @@ mod tests {
             IpAddr::V4(Ipv4Addr::from_str("127.0.0.1").unwrap()),
             8080,
             vec![existing_peer],
-            None,
-            None,
+            false
         );
  
         // Mock new peer to be discovered

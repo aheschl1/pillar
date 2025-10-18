@@ -4,13 +4,14 @@
 //! into nibbles (0-15). Values are serialized using `PillarSerialize`. The
 //! structure supports multiple roots for branching state (e.g., competing
 //! chain tips) while sharing unchanged subtrees.
-use std::{collections::{HashMap, HashSet, VecDeque}, fmt::Debug, marker::PhantomData};
+use std::{collections::{HashMap, HashSet, VecDeque}, fmt::Debug, hash::Hash, marker::PhantomData};
 
 
-use pillar_serialize::PillarSerialize;
-use slotmap::{new_key_type, SlotMap};
+use pillar_serialize::{PillarFixedSize, PillarNativeEndian, PillarSerialize};
+use slotmap::{new_key_type, KeyData, SlotMap};
 
 use crate::{hashing::{DefaultHash, HashFunction, Hashable}, types::StdByteArray};
+
 new_key_type! { pub struct NodeKey; }
 
 /// In order to store account states, a Merkle Patricia Trie will be used
@@ -55,6 +56,7 @@ impl<T: PillarSerialize> TrieNode<T>{
 }
 
 
+#[derive(Clone)]
 pub struct MerkleTrie<K: Hashable, V: PillarSerialize> {
     _phantum: PhantomData<K>,
     pub(crate) nodes: SlotMap<NodeKey, TrieNode<V>>, // SlotMap to store Trie nodes
@@ -336,7 +338,89 @@ impl<K: Hashable, V: PillarSerialize> MerkleTrie<K, V> {
 
 }
 
+impl PillarSerialize for NodeKey {
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        Ok(self.0.as_ffi().serialize_pillar()?)
+    }
 
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        Ok(NodeKey(KeyData::from_ffi(
+            u64::from_le_bytes(data[0..8].try_into().unwrap())
+        )))
+    }
+}
+
+impl<K: PillarSerialize + Hashable, V: PillarSerialize> PillarSerialize for MerkleTrie<K, V> {
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mut buffer = Vec::new();
+        buffer.extend((self.nodes.len() as u32).to_le_bytes());
+        for (key, node) in &self.nodes {
+           buffer.extend(key.serialize_pillar()?); // 8 bytes
+           buffer.extend(node.references.serialize_pillar()?); // 2 bytes
+           let vbuff = node.value.serialize_pillar()?;
+           buffer.extend((vbuff.len() as u32).to_le_bytes());
+           buffer.extend(vbuff);
+        }
+        for (_, node) in &self.nodes {
+            // do children now
+            let cbuff = node.children.serialize_pillar()?;
+            buffer.extend((cbuff.len() as u32).to_le_bytes());
+            buffer.extend(cbuff);
+        }
+        buffer.extend(self.roots.serialize_pillar()?);
+        Ok(buffer)
+    }
+
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        let mut key_map: HashMap<NodeKey, NodeKey> = HashMap::new();
+        let n = u32::from_le_bytes(data[0..4].try_into().unwrap());
+        let mut offset = 4;
+        let mut nodes = SlotMap::with_key();
+        let mut order = vec![];
+        for _ in 0..n {
+            let key = NodeKey::deserialize_pillar(&data[offset..offset + 8])?;
+            offset+=8;
+            let references = u16::from_le_bytes(data[offset..offset+2].try_into().unwrap());
+            offset += 2;
+            let vlength = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
+            offset += 4;
+            let value = Option::<Vec::<u8>>::deserialize_pillar(&data[offset..offset + vlength])?;
+            offset += vlength;
+            let mut node: TrieNode<V> = TrieNode::new();
+            node.value = value;
+            node.references = references;
+            let new_key = nodes.insert(node);
+            key_map.insert(key, new_key);
+            order.push(new_key);
+        }
+        
+        for i in 0..n {
+            let length = u32::from_le_bytes(data[offset..offset+4].try_into().unwrap()) as usize;
+            offset += 4;
+            let children: [Option<NodeKey>; 16] = <[Option<NodeKey>; 16]>::deserialize_pillar(&data[offset..offset + length])?
+                .map(|old_key: Option<NodeKey>|{
+                    match old_key {
+                        None => None,
+                        Some(key) => key_map.get(&key).cloned()
+                    }
+                });
+            offset += length;
+            let node = nodes.get_mut(*order.get(i as usize).unwrap()).unwrap();
+            node.children = children;
+        }
+
+        let mut roots: HashMap<StdByteArray, NodeKey> = HashMap::<StdByteArray, NodeKey>::deserialize_pillar(&data[offset..])?;
+        for (k, v) in roots.clone() {
+            roots.insert(k.clone(), key_map.get(&v).cloned().unwrap());
+        }
+
+        Ok(MerkleTrie {
+            roots: roots,
+            _phantum: PhantomData,
+            nodes: nodes
+        })
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -536,18 +620,18 @@ mod tests {
     fn test_proof_for_branch() {
         let initial_account_info = AccountState { balance: 100, nonce: 1 };
         // let (mut trie, initial_root) = MerkleTrie::<&str, AccountState>::new("account0", initial_account_info.clone());
-        let mut trie = MerkleTrie::<&str, AccountState>::new();
-        let initial_root = trie.create_genesis("account0", initial_account_info.clone()).expect("Failed to create genesis");
+        let mut trie = MerkleTrie::<String, AccountState>::new();
+        let initial_root = trie.create_genesis("account0".into(), initial_account_info.clone()).expect("Failed to create genesis");
 
         let account1 = AccountState { balance: 200, nonce: 2 };
-        trie.insert("account1", account1.clone(), initial_root).unwrap();
+        trie.insert("account1".into(), account1.clone(), initial_root).unwrap();
 
         // let branch_keys = vec![("account1", AccountState { balance: 300, nonce: 3 })];
         let mut branch_keys = HashMap::new();
-        branch_keys.insert("account1", AccountState { balance: 300, nonce: 3 });
+        branch_keys.insert("account1".into(), AccountState { balance: 300, nonce: 3 });
         let new_root = trie.branch(Some(initial_root), branch_keys).unwrap();
 
-        let (proof, _) = generate_proof_of_state(&trie, "account1", Some(new_root), &mut DefaultHash::new()).expect("Proof generation failed for branch");
+        let (proof, _) = generate_proof_of_state(&trie, "account1".into(), Some(new_root), &mut DefaultHash::new()).expect("Proof generation failed for branch");
 
         let root_key = trie.roots.get(&new_root).expect("Root not found");
 
@@ -564,6 +648,29 @@ mod tests {
             &mut DefaultHash::new(),
         );
         assert!(valid, "Proof verification failed for branch");
+
+        // test serialize
+        let bytes = trie.serialize_pillar().unwrap();
+        let trie2 = MerkleTrie::<String, AccountState>::deserialize_pillar(&bytes).unwrap();
+
+        let (proof, _) = generate_proof_of_state(&trie2, "account1".into(), Some(new_root), &mut DefaultHash::new()).expect("Proof generation failed for branch");
+
+        let root_key = trie2.roots.get(&new_root).expect("Root not found");
+
+        let valid = proof.verify(
+            AccountState { balance: 300, nonce: 3 }.serialize_pillar().unwrap(),
+            trie2.get_hash_for(*root_key, &mut DefaultHash::new()).unwrap(),
+            &mut DefaultHash::new(),
+        );
+        assert!(valid, "Proof verification failed for branch");
+
+        let valid = proof.verify(
+            AccountState { balance: 300, nonce: 3 }.serialize_pillar().unwrap(),
+            trie2.get_hash_for(*root_key, &mut DefaultHash::new()).unwrap(),
+            &mut DefaultHash::new(),
+        );
+        assert!(valid, "Proof verification failed for branch");
+
     }
 
     #[test]
@@ -661,23 +768,23 @@ mod tests {
     #[test]
     fn test_get_all() {
         let initial_account_info = AccountState { balance: 100, nonce: 1 };
-        let mut trie = MerkleTrie::<&str, AccountState>::new();
-        let initial_root = trie.create_genesis("account0", initial_account_info.clone()).expect("Failed to create genesis");
+        let mut trie = MerkleTrie::<String, AccountState>::new();
+        let initial_root = trie.create_genesis("account0".into(), initial_account_info.clone()).expect("Failed to create genesis");
 
         let account1 = AccountState { balance: 200, nonce: 2 };
-        trie.insert("account1", account1.clone(), initial_root).unwrap();
+        trie.insert("account1".into(), account1.clone(), initial_root).unwrap();
 
         let account2 = AccountState { balance: 300, nonce: 3 };
-        trie.insert("account2", account2.clone(), initial_root).unwrap();
+        trie.insert("account2".into(), account2.clone(), initial_root).unwrap();
 
         let account3 = AccountState { balance: 400, nonce: 4 };
-        trie.insert("account3", account3.clone(), initial_root).unwrap();
+        trie.insert("account3".into(), account3.clone(), initial_root).unwrap();
 
         // branch 
 
         let account4 = AccountState { balance: 4000, nonce: 0};
         let mut updates = HashMap::new();
-        updates.insert("account4", account4.clone());
+        updates.insert("account4".into(), account4.clone());
         let _ = trie.branch(Some(initial_root), updates).unwrap();
 
         let all_values = trie.get_all(initial_root);
@@ -688,6 +795,20 @@ mod tests {
         assert!(all_values.contains(&account2));
         assert!(all_values.contains(&account3));
         assert!(!all_values.contains(&account4));
+
+        // quick serialize
+        let bytes = trie.serialize_pillar().unwrap();
+        let trie2 = MerkleTrie::<String, AccountState>::deserialize_pillar(&bytes).unwrap();
+
+        let all_values = trie2.get_all(initial_root);
+
+        assert_eq!(all_values.len(), 4); // account0, account1, account2, account3
+        assert!(all_values.contains(&initial_account_info));
+        assert!(all_values.contains(&account1));
+        assert!(all_values.contains(&account2));
+        assert!(all_values.contains(&account3));
+        assert!(!all_values.contains(&account4));
+
     }
 
     #[test]
@@ -789,6 +910,70 @@ mod tests {
         assert_eq!(trie.get(&"account2", initial_root), Some(account2));
         assert_eq!(trie.get(&"account0", initial_root), Some(initial_account_info));
 
+
+    }
+
+    #[test]
+    fn test_serialize_trie() {
+        let initial_account_info = AccountState { balance: 100, nonce: 1 };
+        let mut trie = MerkleTrie::<String, AccountState>::new();
+        let initial_root = trie.create_genesis("account0".into(), initial_account_info.clone()).expect("Failed to create genesis");
+
+        let account1 = AccountState { balance: 200, nonce: 2 };
+        trie.insert("account1".into(), account1.clone(), initial_root).unwrap();
+
+        let account2 = AccountState { balance: 300, nonce: 3 };
+        trie.insert("account2".into(), account2.clone(), initial_root).unwrap();
+
+        // branch 
+        let mut updates = HashMap::new();
+        updates.insert("account3".into(), AccountState { balance: 2000, nonce: 44 });
+        let new_root = trie.branch(Some(initial_root), updates).unwrap();
+
+        // branch again
+        let mut updates2 = HashMap::new();
+        updates2.insert("account4".into(), AccountState { balance: 0, nonce: 1 });
+        let new_root2 = trie.branch(Some(new_root), updates2).unwrap();
+
+        // check that the new root is still there
+        assert!(trie.get(&"account3".into(), new_root).is_some());
+        assert!(trie.get(&"account4".into(), new_root2).is_some());
+
+        // check that the old root is still there
+        assert_eq!(trie.get(&"account1".into(), initial_root), Some(account1.clone()));
+        assert_eq!(trie.get(&"account2".into(), initial_root), Some(account2.clone()));
+        assert_eq!(trie.get(&"account0".into(), initial_root), Some(initial_account_info.clone()));
+
+        // getall, make sure account 3 does not exist
+        let all_values = trie.get_all(initial_root);
+        assert_eq!(all_values.len(), 3); // account0, account1, account2
+
+        // trim the branch
+        trie.trim_branch(new_root).expect("Failed to trim branch");
+
+        // check that the new root is still there
+        assert!(trie.get(&"account3".into(), new_root).is_none());
+        assert!(trie.get(&"account3".into(), new_root2).is_some());
+
+        // check that the old root is still there
+        assert_eq!(trie.get(&"account1".into(), initial_root), Some(account1.clone()));
+        assert_eq!(trie.get(&"account2".into(), initial_root), Some(account2.clone()));
+        assert_eq!(trie.get(&"account0".into(), initial_root), Some(initial_account_info.clone()));
+
+        // ========================= test serialize =========================
+        let bytes = trie.serialize_pillar().unwrap();
+        let trie2 = MerkleTrie::<String, AccountState>::deserialize_pillar(&bytes).unwrap();
+
+        // same assettions
+
+        // check that the new root is still there
+        assert!(trie2.get(&"account3".into(), new_root).is_none());
+        assert!(trie2.get(&"account3".into(), new_root2).is_some());
+
+        // check that the old root is still there
+        assert_eq!(trie2.get(&"account1".into(), initial_root), Some(account1));
+        assert_eq!(trie2.get(&"account2".into(), initial_root), Some(account2));
+        assert_eq!(trie2.get(&"account0".into(), initial_root), Some(initial_account_info));
 
     }
 }

@@ -2,16 +2,13 @@ use super::peer::Peer;
 use flume::{Receiver, Sender};
 use pillar_crypto::{hashing::{DefaultHash, Hashable}, signing::{DefaultSigner, SigFunction, Signable}, types::StdByteArray};
 use tracing::instrument;
-use std::{collections::{HashMap, HashSet}, net::IpAddr, sync::Arc};
+use std::{collections::{HashMap, HashSet}, net::IpAddr, path::PathBuf, sync::Arc};
 use tokio::sync::{Mutex, RwLock};
 
 use crate::{
-    blockchain::chain::Chain,
-    persistence::database::{Datastore, EmptyDatastore},
-    primitives::{block::{Block, BlockHeader, Stamp}, messages::Message, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}},
-    protocol::{chain::{block_settle_consumer, discover_chain, service_sync, sync_chain},
+    accounting::state::StateManager, blockchain::chain::Chain, persistence::{self, manager::PersistenceManager}, primitives::{block::{Block, BlockHeader, Stamp}, messages::Message, pool::MinerPool, transaction::{FilterMatch, TransactionFilter}}, protocol::{chain::{block_settle_consumer, discover_chain, service_sync, sync_chain},
     communication::{broadcast_knowledge, serve_peers},
-    reputation::{nth_percentile_peer, N_TRANSMISSION_SIGNATURES}},
+    reputation::{nth_percentile_peer, N_TRANSMISSION_SIGNATURES}}
 };
  
 /// Operational state of a node, which controls how it treats incoming data.
@@ -61,9 +58,9 @@ impl NodeState {
     }
 }
 
-impl Into<String> for NodeState {
-    fn into(self) -> String {
-        match self {
+impl From<NodeState> for String {
+    fn from(val: NodeState) -> Self {
+        match val {
             NodeState::ChainLoading => "ChainLoading",
             NodeState::ChainOutdated => "ChainOutdated",
             NodeState::ChainSyncing => "ChainSyncing",
@@ -72,26 +69,6 @@ impl Into<String> for NodeState {
             NodeState::Serving => "Serving",
             NodeState::ICD => "ICD"
         }.into()
-    }
-}
-
-fn get_initial_state(datastore: &dyn Datastore) -> (NodeState, Option<Chain>) {
-    // check if the datastore has a chain
-    if datastore.latest_chain().is_some() {
-        // if it does, load the chain
-        match datastore.load_chain() {
-            Ok(chain) => {
-                // assign the chain to the node
-                (NodeState::ChainOutdated, Some(chain))
-            },
-            Err(_) => {
-                // if it fails, we are in discovery mode
-                (NodeState::ICD, None)
-            }
-        }
-    } else {
-        // if it does not, we are in discovery mode
-        (NodeState::ICD, None)
     }
 }
 
@@ -110,8 +87,6 @@ pub struct NodeInner {
     pub broadcasted_already: RwLock<HashSet<StdByteArray>>,
     // transaction filter queue
     pub transaction_filters: Mutex<Vec<(TransactionFilter, Peer)>>,
-    /// the datastore
-    pub datastore: Option<Arc<dyn Datastore>>,
     /// A queue of blocks which are to be settled to the chain
     pub late_settle_queue: lfqueue::UnboundedQueue<Block>,
     /// the state represents the nodes ability to communicate with other nodes
@@ -136,8 +111,6 @@ pub struct Node {
     kill_settle: Option<flume::Sender<()>>,
 }
 
-
-
 impl Node {
     /// Create a new node
     #[instrument(
@@ -149,19 +122,53 @@ impl Node {
             port = port
         )
     )]
-    pub fn new(
+    pub fn new<'a>(
         public_key: StdByteArray,
         private_key: StdByteArray,
         ip_address: IpAddr,
         port: u16,
         peers: Vec<Peer>,
-        mut database: Option<Arc<dyn Datastore>>,
-        transaction_pool: Option<MinerPool>,
+        genesis: bool
     ) -> Self {
-        if database.is_none() {
-            tracing::warn!("Node created without a database. This will not persist the chain or transactions.");
-            database = Some(Arc::new(EmptyDatastore::new()));
-        }
+        let state = if genesis { NodeState::ChainOutdated } else { NodeState::ICD };
+        let chain = if genesis { Some(Chain::new_with_genesis()) } else { None };
+        tracing::debug!("Node initial state: {:?}", state);
+        Node::new_inner(public_key, private_key, ip_address, port, peers, chain, state)
+    }
+
+    pub async fn new_load(
+        persistence_manager: &PersistenceManager,
+    ) -> Result<Node, std::io::Error>{
+        let chain = persistence_manager.load_chain().await?;
+        let node_state = persistence_manager.load_node().await?;
+        let state = if chain.is_some() {
+            NodeState::ChainOutdated
+        } else {
+            NodeState::ICD
+        };
+
+        let node = Node::new_inner(
+            node_state.public_key,
+            node_state.private_key,
+            node_state.ip_address,
+            node_state.port,
+            node_state.peers,
+            chain,
+            state
+        );
+
+        Ok(node)
+    }
+
+    fn new_inner(
+        public_key: StdByteArray,
+        private_key: StdByteArray,
+        ip_address: IpAddr,
+        port: u16,
+        peers: Vec<Peer>,
+        chain: Option<Chain>,
+        state: NodeState,
+    ) -> Self {
         let broadcast_queue = lfqueue::UnboundedQueue::new();
         let late_settle_queue = lfqueue::UnboundedQueue::new();
         let transaction_filters = Mutex::new(Vec::new());
@@ -170,26 +177,23 @@ impl Node {
             .iter()
             .map(|peer| (peer.public_key, *peer))
             .collect::<HashMap<_, _>>();
-        tracing::info!("Node created with {} initial peers", peer_map.len());
-        let (state, maybe_chain) = get_initial_state(&**database.as_ref().unwrap());
-        tracing::debug!("Node initial state: {:?}", state);
+
         Node {
             inner: NodeInner {
             public_key,
             private_key,
             peers: RwLock::new(peer_map),
-            chain: Mutex::new(maybe_chain),
+            chain: Mutex::new(chain),
             broadcasted_already,
             transaction_filters,
             broadcast_queue,
             filter_callbacks: Mutex::new(HashMap::new()), // initially no callbacks
             state: RwLock::new(state), // initially in discovery mode
             late_settle_queue,
-            datastore: database,
             }.into(),
             ip_address,
             port,
-            miner_pool: transaction_pool,
+            miner_pool: Some(MinerPool::new()),
             kill_broadcast: None,
             kill_serve: None,
             kill_settle: None,
@@ -243,7 +247,7 @@ impl Node {
                 Some(handle)
             },
             _ => {
-                panic!("Unexpected node state for initialization: {:?}", state);
+                panic!("Unexpected node state for initialization: {state:?}");
             }
         };
         if let Some(handle) = handle {
@@ -579,7 +583,7 @@ impl From<Node> for Peer {
     }
 }
 
-pub trait Broadcaster {
+pub(crate) trait Broadcaster {
     /// Broadcast a message to all peers.
     async fn broadcast(&self, message: &Message) -> Result<Vec<Message>, std::io::Error>;
 }

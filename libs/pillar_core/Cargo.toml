@@ -23,3 +23,6 @@ lz4_flex = "0.11.5"
 bytemuck = {version="1.23.2", features=["derive"]}
 bytes = "1.10.1"
 byteorder = "1.5.0"
+hex = "0.4.3"
+tempfile = "3.23.0"
+dirs = "6.0.0"

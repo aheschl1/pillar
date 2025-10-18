@@ -1,7 +1,5 @@
-use core::hash;
-use std::{collections::{HashMap, HashSet}, result};
+use std::{collections::{HashMap, HashSet}};
 
-use lz4_flex::block;
 use pillar_crypto::{hashing::DefaultHash, signing::{DefaultVerifier, SigVerFunction}, types::StdByteArray};
 
 use tracing::instrument;
@@ -33,12 +31,9 @@ pub struct Chain {
 impl Chain {
     /// Creates a new blockchain with a genesis block.
     pub fn new_with_genesis() -> Self {
-        let state_manager = StateManager::new();
+        let mut state_manager = StateManager::new();
         let state_root = state_manager
             .state_trie
-            .lock()
-            .as_mut()
-            .unwrap()
             .create_genesis([0; 32], Account::default())
             .expect("Failed to create genesis state root");
 
@@ -66,11 +61,12 @@ impl Chain {
     }
 
     /// Create a chain without a genesis block.
+    /// Does NOT set state manager
     #[instrument(
         skip_all,
         name = "Chain::new_from_blocks",
     )]
-    pub fn new_from_blocks(blocks: HashMap<StdByteArray, Block>) -> Self{
+    pub(crate) unsafe fn new_from_blocks(blocks: HashMap<StdByteArray, Block>) -> Self{
         let mut headers = HashMap::new();
         let mut deepest_hash = [0; 32];
         let mut depth = 0;
@@ -116,7 +112,7 @@ impl Chain {
         // get all reputations according to previous block
         let reputations = get_current_reputations_for_stampers(self, &block.header).values().cloned().collect::<Vec<f64>>();
 
-        let (expected_target, is_por) = get_difficulty_for_block(&block.header, &reputations);
+        let (expected_target, _is_por) = get_difficulty_for_block(&block.header, &reputations);
 
         if block.header.completion.is_none() || expected_target != block.header.completion.as_ref().unwrap().difficulty_target {
             tracing::info!("Block difficulty target is invalid - Failing");
@@ -290,6 +286,33 @@ impl Chain {
         Ok(())
     }
 
+    /// retruns False if the existing deepest is better
+    /// returns true if it shold be replaced
+    #[inline]
+    pub(crate) fn block_greater(&self, new_block: &Block) -> bool {
+        if self.depth > new_block.header.depth {
+            false
+        } else if self.depth == new_block.header.depth {
+            // take the block which is stamped with the most reputation
+            let current_deepest = self.get_top_block().unwrap();
+            let existing_reputation: f64 = get_current_reputations_for_stampers_from_state(
+                &self.state_manager, 
+                self.headers.get(&current_deepest.header.previous_hash).unwrap(),
+                &current_deepest.header
+            ).values().sum();
+            let new_reputation: f64 = get_current_reputations_for_stampers_from_state(
+                &self.state_manager, 
+                self.headers.get(&new_block.header.previous_hash).unwrap(),
+                &new_block.header
+            ).values().sum();
+            new_reputation > existing_reputation || (
+                new_reputation == existing_reputation && new_block.header.tail.n_stamps() > current_deepest.header.tail.n_stamps()
+            )
+        } else { // self.depth < new_block.header.depth
+            true
+        }
+    }
+
     /// Call this only after a block has been verified
     #[instrument(skip_all, fields(block = ?block.header.completion))]
     fn settle_new_block(&mut self, block: Block) -> Result<(), BlockValidationError>{
@@ -313,29 +336,10 @@ impl Chain {
         tracing::debug!("Block settled in chain, but need to update depth.");
         // update the depth - the depth of this block is checked in the verification
         // perhaps this is a fork deeper in the chain, so we do not always update 
-        if block.header.depth > self.depth {
+        if self.block_greater(&block) {
             tracing::info!("Chain depth expanded to {}", block.header.depth);
             self.deepest_hash = block.header.completion.as_ref().unwrap().hash;
             self.depth = block.header.depth;
-        } else if block.header.depth == self.depth {
-            // take the block which is stamped with the most reputation
-            let current_deepest = self.get_top_block().unwrap();
-            let existing_reputation: f64 = get_current_reputations_for_stampers_from_state(
-                &self.state_manager, 
-                self.headers.get(&current_deepest.header.previous_hash).unwrap(),
-                &current_deepest.header
-            ).values().sum();
-            let new_reputation: f64 = get_current_reputations_for_stampers_from_state(
-                &self.state_manager, 
-                self.headers.get(&block.header.previous_hash).unwrap(),
-                &block.header
-            ).values().sum();
-            if new_reputation > existing_reputation || (
-                new_reputation == existing_reputation && block.header.tail.n_stamps() > current_deepest.header.tail.n_stamps()
-            ){
-                tracing::info!("Chain depth fork replaced deepest block with higher reputation fork");
-                self.deepest_hash = block.header.completion.as_ref().unwrap().hash;
-            }
         }
         Ok(())
     }
@@ -373,7 +377,7 @@ impl Chain {
 
         let deepest = &self.deepest_hash;
         let mut stack: Vec<StdByteArray> = self.leaves.iter().filter(|x| {
-            let b = self.get_block(*x).unwrap();
+            let b = self.get_block(x).unwrap();
             x != &deepest && b.header.depth >= min_depth.unwrap_or(0)
         }).cloned().collect();
         stack.push(*deepest);
@@ -396,7 +400,7 @@ impl Chain {
             }
             stack.push(b.header.previous_hash);
             // this block depth is 1 greater than previous
-            if b.header.depth+1 <= max_depth.unwrap_or(u64::MAX) {
+            if b.header.depth < max_depth.unwrap_or(u64::MAX) {
                 result.push(block);
             }
 
@@ -935,5 +939,50 @@ mod tests {
         // Verify the main chain remains intact
         assert!(chain.blocks.contains_key(&main_hash));
         assert_eq!(chain.leaves.len(), 1); // Only the main chain remains
+    }
+
+    #[tokio::test]
+    async fn test_new_from_blocks(){
+        let mut chain = Chain::new_with_genesis();
+        let mut signing_key = DefaultSigner::generate_random();
+        // public
+        let sender = signing_key.get_verifying_function().to_bytes();
+
+        let mut parent_hash = chain.deepest_hash;
+        let genesis_hash = parent_hash;
+
+        // Build a main chain of depth 5
+        for depth in 1..=5 {
+            let time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth;
+            let mut transaction = Transaction::new(sender, [2; 32], 0, time, depth-1, &mut DefaultHash::new());
+            transaction.sign(&mut signing_key);
+            let mut block = Block::new(
+                parent_hash,
+                0,
+                time,
+                vec![transaction],
+                None,
+                BlockTail::default().stamps,
+                depth,
+                None,
+                None,
+                &mut DefaultHash::new(),
+            );
+            let prev_header = chain.headers.get(&block.header.previous_hash)
+                .expect("Previous block header not found");
+            let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
+            mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
+            parent_hash = block.header.completion.as_ref().unwrap().hash;
+            chain.add_new_block(block).unwrap();
+        }
+
+        let blocks: HashMap<StdByteArray, Block> = chain.blocks.clone();
+        let new_chain = unsafe { Chain::new_from_blocks(blocks) };
+        assert_eq!(new_chain.depth, chain.depth);
+        assert_eq!(new_chain.leaves, chain.leaves);
+        assert_eq!(new_chain.blocks, chain.blocks);
+        assert_eq!(new_chain.headers, chain.headers);
+        assert_eq!(new_chain.deepest_hash, chain.deepest_hash);
+
     }
 }

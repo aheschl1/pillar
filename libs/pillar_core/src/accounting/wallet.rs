@@ -1,5 +1,4 @@
 //! Wallet wrapper around an ed25519 keypair with convenience methods.
-use bytemuck::{Pod, Zeroable};
 use pillar_crypto::{signing::{DefaultSigner, DefaultVerifier, SigFunction, SigVerFunction, Signable}, types::{StdByteArray, STANDARD_ARRAY_LENGTH}};
 use pillar_serialize::PillarSerialize;
 

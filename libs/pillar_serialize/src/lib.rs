@@ -89,7 +89,7 @@ impl PillarFixedSize for i8                          {}
 impl PillarFixedSize for i16                         {}
 impl PillarFixedSize for i32                         {}
 impl PillarFixedSize for i64                         {}
-impl PillarFixedSize for [u8; 32]                    {}
+impl<const C: usize> PillarFixedSize for [u8; C]                    {}
 
 impl PillarNativeEndian for StdByteArray {
     fn to_le(&mut self) {}
@@ -252,7 +252,7 @@ where
 
 impl<V> PillarSerialize for HashMap<StdByteArray, V>
 where 
-    V: PillarSerialize
+    V: PillarSerialize + PillarFixedSize
 {
     /// Specialized map encoding for 32-byte keys; value length is still prefixed.
     default fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
@@ -288,7 +288,7 @@ where
 /// a common hashmap implmentation for address/hash to fixed size value
 impl<V> PillarSerialize for HashMap<StdByteArray, V>
 where 
-    V: PillarSerialize + PillarNativeEndian + Zeroable + Pod
+    V: PillarSerialize + PillarNativeEndian + Zeroable + Pod + PillarFixedSize
 {
     /// Tight map encoding for 32-byte keys and fixed-size values (no per-entry length).
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
@@ -334,5 +334,30 @@ impl PillarSerialize for String {
         let string = String::from_utf8(data[4..4 + length].to_vec())
             .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid UTF-8"))?;
         Ok(string)
+    }
+}
+
+impl<T: PillarSerialize + Copy, const C: usize> PillarSerialize for [Option<T>; C]{
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mut buffer = Vec::new();
+        for item in self {
+            let internal = item.serialize_pillar()?;
+            buffer.extend((internal.len() as u32).to_le_bytes());
+            buffer.extend(internal);
+        }
+        Ok(buffer)
+    }
+
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        let mut offset = 0;
+        let mut array: [Option<T>; C] = [None; C];
+        for i in 0..C {
+            let length = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
+            offset += 4;
+            let item = Option::<T>::deserialize_pillar(&data[offset..offset + length])?;
+            array[i] = item;
+            offset += length;
+        }
+        Ok(array)
     }
 }
