@@ -340,7 +340,7 @@ impl<K: Hashable, V: PillarSerialize> MerkleTrie<K, V> {
 
 impl PillarSerialize for NodeKey {
     fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
-        Ok(self.0.as_ffi().serialize_pillar()?)
+        self.0.as_ffi().serialize_pillar()
     }
 
     fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
@@ -411,13 +411,13 @@ impl<K: PillarSerialize + Hashable, V: PillarSerialize> PillarSerialize for Merk
 
         let mut roots: HashMap<StdByteArray, NodeKey> = HashMap::<StdByteArray, NodeKey>::deserialize_pillar(&data[offset..])?;
         for (k, v) in roots.clone() {
-            roots.insert(k.clone(), key_map.get(&v).cloned().unwrap());
+            roots.insert(k, key_map.get(&v).cloned().unwrap());
         }
 
         Ok(MerkleTrie {
-            roots: roots,
+            roots,
             _phantum: PhantomData,
-            nodes: nodes
+            nodes
         })
     }
 }

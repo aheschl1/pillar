@@ -150,7 +150,7 @@ async fn handle_peer_post(
 
     let result = state.node.maybe_update_peer(Peer::new(public_key, ipaddr, request.port)).await;
     let response = if let Err(e) = result {
-        StatusResponse::error(format!("Failed to add peer: {:?}", e))
+        StatusResponse::error(format!("Failed to add peer: {e:?}"))
     }else{
         tracing::info!("Successfully added peer {} at {}:{}", hex::encode(public_key), request.ip_address, request.port);
         StatusResponse::success("success".to_string())
@@ -169,7 +169,7 @@ async fn handle_peer_get(
     State(state): State<AppState>,
 ) -> Json<StatusResponse<Vec<PeerResponse>>> {
     let peers = state.node.inner.peers.read().await.clone();
-    let peer_responses: Vec<PeerResponse> = peers.into_iter().map(|(_, peer)| PeerResponse {
+    let peer_responses: Vec<PeerResponse> = peers.into_values().map(|peer| PeerResponse {
         public_key: peer.public_key,
         ip_address: peer.ip_address.to_string(),
         port: peer.port,
@@ -222,7 +222,7 @@ async fn handle_block_get(
     };
     match block {
         None => {
-            return Json(StatusResponse::error("Block not found".to_string()));
+            Json(StatusResponse::error("Block not found".to_string()))
         }
         Some(block) => {
             let header_response = HeaderResponse{
@@ -328,7 +328,7 @@ async fn handle_wallet_get(
     let chain = chain.as_ref().unwrap();
 
     let state_root = chain.get_state_root();
-    if let None = state_root {
+    if state_root.is_none() {
         return Json(StatusResponse::error("Node has no state root".to_string()));
     }
     let state_root = state_root.unwrap();
@@ -337,7 +337,7 @@ async fn handle_wallet_get(
         .state_manager
         .get_account(&wallet.address, state_root);
 
-    if let None = account {
+    if account.is_none() {
         return Json(StatusResponse::error("Failed to get account data from the chain (have you used it yet?)".to_string()));
     }
     let account = account.unwrap();
@@ -397,13 +397,13 @@ async fn handle_transaction_get(
     };
     match block {
         None => {
-            return Json(StatusResponse::error("Block not found".to_string()));
+            Json(StatusResponse::error("Block not found".to_string()))
         }
         Some(block) => {
             let transaction = block.transactions.iter().find(|tx| tx.hash == hash_array);
             match transaction {
                 None => {
-                    return Json(StatusResponse::error("Transaction not found in block".to_string()));
+                    Json(StatusResponse::error("Transaction not found in block".to_string()))
                 }
                 Some(tx) => {
                     let response = TransactionResponse {
@@ -415,7 +415,7 @@ async fn handle_transaction_get(
                         nonce: tx.header.nonce,
                         hash: tx.hash
                     };
-                    return Json(StatusResponse::success(response));
+                    Json(StatusResponse::success(response))
                 }
             }
         },
@@ -460,7 +460,7 @@ async fn handle_state_get(
     };
     match block {
         None => {
-            return Json(StatusResponse::error("Block not found".to_string()));
+            Json(StatusResponse::error("Block not found".to_string()))
         }
         Some(block) => {
             let state_root = match &block.header.completion.as_ref() {
@@ -488,7 +488,7 @@ async fn handle_state_get(
                 root: state_root,
                 accounts,
             };
-            return Json(StatusResponse::success(response));
+            Json(StatusResponse::success(response))
         }
     }
 }
@@ -564,8 +564,8 @@ pub async fn launch_node(
     }
 
 
-    let api_address = format!("{}:3000", ip_address);
-    let logs_address = format!("{}:3001", ip_address);
+    let api_address = format!("{ip_address}:3000");
+    let logs_address = format!("{ip_address}:3001");
     let state = AppState {
         node,
         wallet: Arc::new(RwLock::new(wallet))

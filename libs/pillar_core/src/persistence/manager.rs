@@ -106,7 +106,7 @@ impl PersistenceManager {
     }
 
     pub async fn load_wallet(&self) -> Result<Option<Wallet>, std::io::Error> {
-        if !std::fs::metadata(self.root.join("wallet.bin")).is_ok() {
+        if std::fs::metadata(self.root.join("wallet.bin")).is_err() {
             return Ok(None);
         }
         Ok(Some(Wallet::load(&self.root.join("wallet.bin")).await?))

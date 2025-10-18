@@ -67,7 +67,7 @@ pub(crate) async fn handle_transaction_post(
         Err(e) => {
             let response = TransactionResponse {
                 success: false,
-                message: format!("Failed to submit transaction: {:?}", e),
+                message: format!("Failed to submit transaction: {e:?}"),
                 transaction_hash: None,
                 keep_alive: false
             };
