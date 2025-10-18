@@ -109,9 +109,9 @@ mod tests{
     use core::panic;
     use std::net::{IpAddr, Ipv4Addr};
 
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::AsyncWriteExt;
 
-    use crate::{nodes::peer::Peer, primitives::messages::Message, protocol::{serialization::{package_standard_message, read_standard_message}, PROTOCOL_VERSION}};
+    use crate::{nodes::peer::Peer, primitives::messages::Message, protocol::serialization::{package_standard_message, read_standard_message}};
 
     #[test]
     fn test_peer_new(){

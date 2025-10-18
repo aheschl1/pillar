@@ -1,5 +1,5 @@
 use flume::Receiver;
-use pillar_crypto::{hashing::{DefaultHash, Hashable}, proofs::verify_proof_of_inclusion, signing::{SigFunction, Signable}, types::StdByteArray};
+use pillar_crypto::{hashing::{DefaultHash, Hashable}, proofs::verify_proof_of_inclusion, signing::Signable, types::StdByteArray};
 use tracing::instrument;
 
 use crate::{accounting::{account::TransactionStub, wallet::Wallet}, nodes::node::{Broadcaster, Node}, primitives::{block::BlockHeader, errors::QueryError, messages::Message, transaction::Transaction}};

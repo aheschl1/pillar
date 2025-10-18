@@ -7,7 +7,7 @@
 use std::{collections::{HashMap, HashSet, VecDeque}, fmt::Debug, hash::Hash, marker::PhantomData};
 
 
-use pillar_serialize::{PillarFixedSize, PillarNativeEndian, PillarSerialize};
+use pillar_serialize::PillarSerialize;
 use slotmap::{new_key_type, KeyData, SlotMap};
 
 use crate::{hashing::{DefaultHash, HashFunction, Hashable}, types::StdByteArray};

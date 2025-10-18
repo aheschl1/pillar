@@ -330,20 +330,13 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
 }
 
 
-// tests
+
+#[cfg(test)]
 mod tests {
     use pillar_crypto::hashing::{DefaultHash, Hashable};
 
     use crate::{blockchain::chain::Chain, protocol::{difficulty::MIN_DIFFICULTY, pow::{get_difficulty_for_block, is_valid_hash}}};
-
     
-
-    
-
-    
-
-    
-
     #[test]
     fn test_genesis_block(){
         let chain = Chain::new_with_genesis();

@@ -949,7 +949,6 @@ mod tests {
         let sender = signing_key.get_verifying_function().to_bytes();
 
         let mut parent_hash = chain.deepest_hash;
-        let genesis_hash = parent_hash;
 
         // Build a main chain of depth 5
         for depth in 1..=5 {

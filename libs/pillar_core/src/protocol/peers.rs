@@ -58,7 +58,7 @@ pub async fn discover_peer(node: &mut Node, ip_address: std::net::IpAddr, port: 
 
 #[cfg(test)]
 mod tests {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::AsyncWriteExt;
 
     use super::*;
     use crate::nodes::{node::Node, peer::Peer};

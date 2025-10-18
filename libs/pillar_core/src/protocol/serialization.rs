@@ -304,7 +304,6 @@ impl PillarSerialize for ChainShard {
         offset += 4;
         let leaves = Vec::<StdByteArray>::deserialize_pillar(&data[offset..offset + leaves_len])
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Failed to deserialize leaves: {e}")))?;
-        offset += leaves_len;
 
         Ok(ChainShard { headers: header, leaves: leaves.iter().copied().collect() })
     }
@@ -427,6 +426,7 @@ impl PillarSerialize for Account {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use pillar_crypto::hashing::{DefaultHash, Hashable};
     use pillar_serialize::PillarSerialize;

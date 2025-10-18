@@ -7,7 +7,6 @@ pub mod implementations;
 
 #[cfg(test)]
 mod tests{
-    use std::num::NonZeroU64;
 
     use pillar_crypto::{hashing::{DefaultHash, Hashable}, signing::{DefaultSigner, SigFunction, SigVerFunction, Signable}};
     

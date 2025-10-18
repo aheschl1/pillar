@@ -152,11 +152,11 @@ async fn monitor_block_pool(miner: Miner) {
 
 #[cfg(test)]
 mod test{
-    use std::{net::{IpAddr, Ipv4Addr}, num::NonZeroU64, str::FromStr, sync::Arc};
+    use std::{net::{IpAddr, Ipv4Addr}, str::FromStr};
 
     use pillar_crypto::hashing::DefaultHash;
 
-    use crate::{primitives::{block::{Block, BlockTail}, pool::MinerPool, transaction::Transaction}, protocol::{difficulty::MIN_DIFFICULTY, pow::mine}};
+    use crate::{primitives::{block::{Block, BlockTail}, transaction::Transaction}, protocol::{difficulty::MIN_DIFFICULTY, pow::mine}};
     use crate::nodes::miner::Miner;
     use super::Node;
 

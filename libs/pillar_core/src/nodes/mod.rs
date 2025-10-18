@@ -19,15 +19,15 @@ mod tests {
     };
 
     use crate::{
-        accounting::{account, wallet::Wallet}, nodes::{
-            miner::{Miner, MAX_TRANSACTION_WAIT_TIME}, node::{self, NodeState}, peer::Peer
-        }, persistence::manager::PersistenceManager, primitives::{messages::Message, pool::MinerPool, transaction::Transaction}, protocol::{difficulty::get_reward_from_depth_and_stampers, peers::{discover_peer, discover_peers}, transactions::{get_transaction_proof, submit_transaction}}
+        accounting::wallet::Wallet, nodes::{
+            miner::{Miner, MAX_TRANSACTION_WAIT_TIME}, node::NodeState, peer::Peer
+        }, persistence::manager::PersistenceManager, primitives::{messages::Message, transaction::Transaction}, protocol::{difficulty::get_reward_from_depth_and_stampers, peers::{discover_peer, discover_peers}, transactions::{get_transaction_proof, submit_transaction}}
     };
 
     use super::node::Node;
 
     use std::{
-        fs::File, net::{IpAddr, Ipv4Addr}, path::PathBuf, sync::Arc, time::Duration
+        fs::File, net::{IpAddr, Ipv4Addr}, time::Duration
     };
 
     // always setup tracing first
@@ -1179,15 +1179,6 @@ mod tests {
         // check states
         assert!(node_a.inner.state.read().await.clone() == NodeState::Serving);
         assert!(node_b.inner.state.read().await.clone() == NodeState::Serving);
-        let state_manager = node_a
-            .inner
-            .chain
-            .lock()
-            .await
-            .as_mut()
-            .unwrap()
-            .state_manager
-            .clone();
         println!("Submitting multiple transactions from A to B");
         submit_transaction(
             &mut node_a,
@@ -1702,7 +1693,7 @@ mod tests {
             true,
         )
         .await;
-        let (mut node_a, mut wallet_a) = create_empty_node_genisis(
+        let (node_a, mut wallet_a) = create_empty_node_genisis(
             ip_address_a,
             port_a,
             vec![Peer::new(wallet_c.address, ip_address_c, port_c), Peer::new(wallet_b.address, ip_address_b, port_b)],

@@ -8,7 +8,7 @@ use pillar_crypto::types::StdByteArray;
 use pillar_serialize::{PillarFixedSize, PillarNativeEndian, PillarSerialize};
 
 use crate::{
-    accounting::{state::StateManager, wallet::Wallet}, blockchain::chain::Chain, nodes::{node::Node, peer::PillarIPAddr}, primitives::block::{Block, BlockHeader}
+    accounting::{state::StateManager, wallet::Wallet}, blockchain::chain::Chain, nodes::peer::PillarIPAddr, primitives::block::{Block, BlockHeader}
 };
 pub mod manager;
 
@@ -154,7 +154,6 @@ impl Persistable for Chain {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
     use std::path::PathBuf;
 
     use pillar_crypto::hashing::DefaultHash;
