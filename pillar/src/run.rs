@@ -1,7 +1,7 @@
 use std::sync::{Arc};
 
 use axum::{extract::{Path, Query, State}, http::HeaderMap, response::IntoResponse, routing::{get, post}, Json, Router};
-use pillar_core::{accounting::wallet::Wallet, nodes::{miner::Miner, node::Node, peer::Peer}, persistence::manager::PersistenceManager, protocol::peers::discover_peer};
+use pillar_core::{accounting::wallet::Wallet, nodes::{miner::Miner, node::Node, peer::Peer}, persistence::manager::PersistenceManager, protocol::peers::{discover_peer, discover_peers}};
 use pillar_crypto::{signing::SigFunction, types::StdByteArray};
 use serde::{Deserialize, Serialize};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -158,6 +158,19 @@ async fn handle_peer_post(
     Json(response)
 }
 
+async fn handle_peer_discover(
+    State(state): State<AppState>,
+) -> Json<StatusResponse<()>> { 
+    let result = discover_peers(&state.node).await;
+    match result {
+        Ok(_) => {
+            Json(StatusResponse::success(()))
+        },
+        Err(e) => {
+            Json(StatusResponse::error(format!("Failed to discover peers: {:?}", e)))
+        }
+    }
+}
 #[derive(Serialize, Deserialize)]
 struct PeerResponse {
     public_key: StdByteArray,
@@ -587,6 +600,7 @@ pub async fn launch_node(
         // post
         .route("/peer/{public_key}", post(handle_peer_post)) // allow with public key
         .route("/peer", post(handle_peer_post)) // allow without public key
+        .route("/peer/discover", post(handle_peer_discover)) // do peer discovery
         .route("/init", post(handle_init_download))
         .with_state(state.clone())
         .layer(cors);

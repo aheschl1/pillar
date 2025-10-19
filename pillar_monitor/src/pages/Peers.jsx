@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { usePeers } from '../hooks/usePeers';
 import { useAddPeer } from '../hooks/useAddPeer';
+import { useDiscoverPeers } from '../hooks/useDiscoverPeers';
 import './Peers.css';
 
 const AddPeerForm = ({ onPeerAdded }) => {
@@ -72,8 +73,25 @@ const AddPeerForm = ({ onPeerAdded }) => {
 
 const Peers = () => {
     const { peers, loading, error, refetch } = usePeers();
+    const { discoverPeers, loading: discovering, success: discoverSuccess, error: discoverError } = useDiscoverPeers();
     const [showAddPanel, setShowAddPanel] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
+    const [showDiscoverSuccess, setShowDiscoverSuccess] = useState(false);
+
+    useEffect(() => {
+        if (discoverSuccess) {
+            setShowDiscoverSuccess(true);
+            refetch();
+            const timer = setTimeout(() => {
+                setShowDiscoverSuccess(false);
+            }, 3000);
+            return () => clearTimeout(timer);
+        }
+    }, [discoverSuccess, refetch]);
+
+    const handleDiscover = async () => {
+        await discoverPeers();
+    };
 
     const peersArr = Array.isArray(peers) ? peers : [];
     const filteredPeers = peersArr.filter(peer =>
@@ -88,11 +106,14 @@ const Peers = () => {
                 <div className="header-actions">
                     <input
                         type="text"
-                        placeholder="🔍 Search by public key or IP"
+                        placeholder="Search by public key or IP"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                         className="search-bar"
                     />
+                    <button onClick={handleDiscover} disabled={discovering} className="discover-button">
+                        {discovering ? 'Discovering...' : 'Discover'}
+                    </button>
                     <button
                         className={`add-peer-toggle ${showAddPanel ? 'open' : ''}`}
                         onClick={() => setShowAddPanel(s => !s)}
@@ -108,6 +129,8 @@ const Peers = () => {
 
             {loading && <p className="status-message">Loading peers...</p>}
             {error && <p className="error-message">{error}</p>}
+            {showDiscoverSuccess && <p className="success-message">✅ Peer discovery initiated.</p>}
+            {discoverError && <p className="error-message">{discoverError}</p>}
 
             <div className="peers-grid">
                 {filteredPeers.map(peer => (

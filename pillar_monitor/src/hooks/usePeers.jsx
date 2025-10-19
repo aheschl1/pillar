@@ -3,7 +3,7 @@ import { toHex } from '../api/utils';
 import { useMemo } from 'react';
 
 export const usePeers = () => {
-    const { data, loading, error } = useHttp('/peers');
+    const { data, loading, error, refetch } = useHttp('/peers');
 
     const peers = useMemo(() => {
         if (!data) return [];
@@ -13,5 +13,5 @@ export const usePeers = () => {
         }));
     }, [data]);
 
-    return { peers, loading, error };
+    return { peers, loading, error, refetch };
 };
