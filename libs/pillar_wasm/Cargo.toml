@@ -1,0 +1,8 @@
+[package]
+name = "pillar_wasm"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+pillar_crypto = { path = "../pillar_crypto" }
+wasmtime = "38.0.3"
