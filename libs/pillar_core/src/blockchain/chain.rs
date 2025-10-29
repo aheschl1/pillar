@@ -5,7 +5,7 @@ use pillar_crypto::{hashing::DefaultHash, signing::{DefaultVerifier, SigVerFunct
 use tracing::instrument;
 
 use crate::{
-    accounting::{account::Account, state::StateManager}, primitives::{block::{Block, BlockHeader}, errors::BlockValidationError, transaction::Transaction}, protocol::{chain::get_genesis_block, pow::get_difficulty_for_block, reputation::{get_current_reputations_for_stampers, get_current_reputations_for_stampers_from_state}}
+    MAX_BLOCK_DATA_SIZE, accounting::{account::Account, state::StateManager}, primitives::{block::{Block, BlockHeader}, errors::BlockValidationError, transaction::Transaction}, protocol::{chain::get_genesis_block, pow::get_difficulty_for_block, reputation::{get_current_reputations_for_stampers, get_current_reputations_for_stampers_from_state}}
 };
 
 use super::TrimmableChain;
@@ -250,6 +250,11 @@ impl Chain {
     /// 3. Sufficient balance for the transaction amount.
     #[instrument(skip_all, fields(transaction = ?transaction.hash))]
     pub(crate) fn validate_transaction(&self, transaction: &Transaction, state_root: StdByteArray) -> Result<(), BlockValidationError> {
+        // check payload size
+        if transaction.header.data.len() > MAX_BLOCK_DATA_SIZE {
+            tracing::info!("Transaction data size exceeds maximum - Failing");
+            return Err(BlockValidationError::MalformedBlock("Transaction data size exceeds maximum".into()));
+        }
         let sender = transaction.header.sender();
         let signature = transaction.signature;
         // check for signature
