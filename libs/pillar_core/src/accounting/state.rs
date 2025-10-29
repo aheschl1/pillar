@@ -97,15 +97,15 @@ impl StateManager{
         let mut state_updates: HashMap<StdByteArray, Account> = HashMap::new();
         let state_root = prev_header.completion.as_ref().expect("Previous block should be complete").state_root;
         for transaction in &block.transactions {
-            let mut sender = match state_updates.get(&transaction.header.sender){
+            let mut sender = match state_updates.get(&transaction.header.sender()){
                 Some(account) => account.clone(),
                 None => {
                     // if the sender does not exist, we create a new account with 0 balance
                     let account = self.state_trie
-                        .get(&transaction.header.sender, state_root)
-                        .unwrap_or(Account::new(transaction.header.sender, 0));
+                        .get(&transaction.header.sender(), state_root)
+                        .unwrap_or(Account::new(transaction.header.sender(), 0));
 
-                    if account.balance < transaction.header.amount {
+                    if account.balance < transaction.header.ammount() {
                         panic!("Insufficient balance for transaction");
                     }
 
@@ -113,18 +113,18 @@ impl StateManager{
                     
                 }
             };
-            sender.balance -= transaction.header.amount;
+            sender.balance -= transaction.header.ammount();
             sender.nonce += 1;
             state_updates.insert(sender.address, sender);
             // may need to make a new public account for the receiver under the established public key
-            let mut receiver = match state_updates.get(&transaction.header.receiver){
+            let mut receiver = match state_updates.get(&transaction.header.receiver()){
                 Some(account) => account.clone(),
                 None => {
-                    self.state_trie.get(&transaction.header.receiver, state_root).unwrap_or(Account::new(transaction.header.receiver, 0))
+                    self.state_trie.get(&transaction.header.receiver(), state_root).unwrap_or(Account::new(transaction.header.receiver(), 0))
                 },
             };
             // update balances
-            receiver.balance += transaction.header.amount;
+            receiver.balance += transaction.header.ammount();
             state_updates.insert(receiver.address, receiver);
         }
         // add the miner reward. this reward will be based upon the blocks difficulty, and the number of stamps.

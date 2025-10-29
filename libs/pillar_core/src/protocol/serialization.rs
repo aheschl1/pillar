@@ -5,10 +5,10 @@ use pillar_crypto::{merkle_trie::MerkleTrie, types::{StdByteArray, STANDARD_ARRA
 use pillar_serialize::{PillarFixedSize, PillarNativeEndian, PillarSerialize};
 use tokio::{io::AsyncReadExt, net::TcpStream};
 
-use crate::{accounting::{account::{Account, TransactionStub}, state::StateManager}, blockchain::{chain::Chain, chain_shard::ChainShard}, nodes::peer::{Peer, PillarIPAddr}, primitives::{block::{Block, BlockHeader}, messages::Message, transaction::{Transaction, TransactionFilter}}, reputation::history::{HeaderShard, NodeHistory}};
+use crate::{accounting::{account::{Account, TransactionStub}, state::StateManager}, blockchain::{chain::Chain, chain_shard::ChainShard}, nodes::peer::{Peer, PillarIPAddr}, primitives::{block::{Block, BlockHeader}, messages::Message, transaction::{Transaction, TransactionFilter, TransactionHeader, TransactionMeta}}, reputation::history::{HeaderShard, NodeHistory}};
 
 impl PillarFixedSize for BlockHeader                 {}
-impl PillarFixedSize for Transaction                 {}
+impl PillarFixedSize for TransactionMeta             {}
 impl PillarFixedSize for Peer                        {}
 impl PillarFixedSize for TransactionStub             {}
 impl PillarFixedSize for HeaderShard                 {}
@@ -332,6 +332,61 @@ impl PillarSerialize for TransactionFilter {
     }
 }
 
+impl PillarSerialize for TransactionHeader {
+    /// Serialize a `TransactionHeader` as `[meta][data]`.
+    ///
+    /// - `meta` is a fixed-size `TransactionMeta` (Pod) serialized as raw bytes after `to_le()`.
+    /// - `data` is a length-prefixed vector of bytes.
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mut bytes = self.meta.serialize_pillar()?;
+        assert!(bytes.len().is_multiple_of(8)); // ensure alignment
+        let data_bytes = self.data.serialize_pillar()?;
+        bytes.extend(data_bytes);
+        Ok(bytes)
+    }
+
+    /// Deserialize a `TransactionHeader` from `[meta][data]`.
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        let nmeta_bytes = size_of::<TransactionMeta>();
+        let meta = TransactionMeta::deserialize_pillar(&data[..nmeta_bytes])?;
+        let data_vec = Vec::<u8>::deserialize_pillar(&data[nmeta_bytes..])?;
+        Ok(TransactionHeader {
+            meta,
+            data: data_vec,
+        })
+    }
+}
+
+impl PillarSerialize for Transaction {
+    /// Serialize a `Transaction` as `[header][signature]`.
+    ///
+    /// - `header` is a fixed-size `TransactionHeader` (Pod) serialized as raw bytes after `to_le()`.
+    /// - `signature` is a fixed-size `[u8; 64]` serialized as raw bytes.
+    fn serialize_pillar(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mut buffer = vec![];
+        let bytes = self.header.serialize_pillar()?;
+        buffer.extend((bytes.len() as u32).to_le_bytes());
+        buffer.extend(bytes);
+        buffer.extend(self.hash.serialize_pillar()?);
+        buffer.extend(self.signature.serialize_pillar()?);
+        Ok(buffer)
+    }
+
+    /// Deserialize a `Transaction` from `[header][signature]`.
+    fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
+        let nheader_bytes = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+        let header = TransactionHeader::deserialize_pillar(&data[4..4 + nheader_bytes])?;
+        let offset = 4 + nheader_bytes;
+        let hash = StdByteArray::deserialize_pillar(&data[offset..offset + STANDARD_ARRAY_LENGTH])?;
+        let signature = <[u8; 64]>::deserialize_pillar(&data[offset + STANDARD_ARRAY_LENGTH..])?;
+        Ok(Transaction {
+            header,
+            hash,
+            signature,
+        })
+    }
+}
+
 impl PillarNativeEndian for BlockHeader {
     /// Convert native-endian fields to little-endian in-place for `BlockHeader`.
     fn to_le(&mut self) {
@@ -344,12 +399,12 @@ impl PillarNativeEndian for BlockHeader {
     }
 }
 
-impl PillarNativeEndian for Transaction {
-    /// Convert native-endian fields to little-endian in-place for `Transaction` header.
+impl PillarNativeEndian for TransactionMeta {
+    /// Convert native-endian fields to little-endian in-place for `TransactionMeta`.
     fn to_le(&mut self) {
-        self.header.amount = self.header.amount.to_le();
-        self.header.timestamp = self.header.timestamp.to_le();
-        self.header.nonce = self.header.nonce.to_le();
+        self.amount = self.amount.to_le();
+        self.timestamp = self.timestamp.to_le();
+        self.nonce = self.nonce.to_le();
     }
 }
 
@@ -664,7 +719,7 @@ mod tests {
             previous_hash,
             0,
             timestamp,
-            vec![transaction],
+            vec![transaction.clone()],
             Some(miner_address),
             [Stamp::default(); N_TRANSMISSION_SIGNATURES],
             depth,
@@ -698,7 +753,7 @@ mod tests {
             previous_hash,
             0,
             timestamp,
-            vec![transaction, tx2, tx3],
+            vec![transaction.clone(), tx2.clone(), tx3.clone()],
             Some(miner_address),
             [Stamp::default(); N_TRANSMISSION_SIGNATURES],
             depth,

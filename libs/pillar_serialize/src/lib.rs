@@ -92,10 +92,6 @@ impl PillarFixedSize for i32                         {}
 impl PillarFixedSize for i64                         {}
 impl<const C: usize> PillarFixedSize for [u8; C]                    {}
 
-impl PillarNativeEndian for StdByteArray {
-    fn to_le(&mut self) {}
-}
-
 impl PillarNativeEndian for u8 {
     fn to_le(&mut self) {}
 }
@@ -116,6 +112,10 @@ impl PillarNativeEndian for u64 {
     fn to_le(&mut self) {
         *self = u64::to_le(*self);
     }
+}
+
+impl<const N: usize> PillarNativeEndian for [u8; N]{
+    fn to_le(&mut self) {}
 }
 
 

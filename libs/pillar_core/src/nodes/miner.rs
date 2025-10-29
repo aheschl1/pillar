@@ -90,7 +90,7 @@ async fn monitor_transaction_pool(miner: Miner) {
                 chain.get_top_block().unwrap().header.completion.as_ref().expect("Expected complete block").hash,
                 0, // undefined nonce
                 now,
-                transactions.iter().copied().collect(),
+                transactions.iter().cloned().collect(),
                 None, // because this is a proposition on an unmined node
                 BlockTail::default().stamps,
                 chain.depth + 1,
