@@ -20,3 +20,5 @@ Contracts are created by sending a transaction to a special address with the con
 Contract state is managed through a Merkle tree structure, where each contract has its own subtree. The root of this subtree is included in the global state root, ensuring that any changes to the contract state are reflected in the overall blockchain state.
 
 When a contract is executed, it can read from and write to its own state subtree. Any changes made during execution are recorded and the new state root is computed and updated in the global state root.
+
+The contract should be able to interact over a key value interface, in which each key maps to a value. The contract can read, write, and create new key-value pairs in its state. It cannot delete keys, but it can overwrite existing values. Values are stored as arbitrary byte arrays.

@@ -4,8 +4,7 @@ use pillar_crypto::{hashing::{HashFunction, Hashable}, signing::{SigFunction, Si
 use super::block::Block;
 
 
-#[derive(Pod, Zeroable, Debug,  Clone, Copy, Hash, PartialEq, Eq)]
-#[repr(C, align(8))]
+#[derive(Debug,  Clone, Hash, PartialEq, Eq)]
 pub struct Transaction{
     // header is the header of the transaction
     pub header: TransactionHeader,
@@ -17,7 +16,7 @@ pub struct Transaction{
 
 #[derive(Pod, Zeroable, Debug,  Clone, Copy, Hash, PartialEq, Eq)]
 #[repr(C, align(8))]
-pub struct TransactionHeader{
+pub(crate) struct TransactionMeta{
     // sender is the ed25519 public key of the sender
     pub sender: StdByteArray,
     // receiver is the ed25519 public key of the receiver
@@ -28,6 +27,13 @@ pub struct TransactionHeader{
     pub timestamp: u64,
     // the nonce is a random number used to prevent replay attacks
     pub nonce: u64,
+}
+
+#[derive(Debug,  Clone, Hash, PartialEq, Eq)]
+pub struct TransactionHeader{
+    pub(crate) meta: TransactionMeta,
+    // data field
+    pub data: Vec<u8>,
 }
 
 #[derive(Debug,  Clone, PartialEq, Eq, Hash)]
@@ -68,15 +74,15 @@ pub trait FilterMatch<T>{
 impl FilterMatch<Transaction> for TransactionFilter {
     fn matches(&self, other: &Transaction) -> bool {
         if let Some(sender) = self.sender
-            && sender != other.header.sender {
+            && sender != other.header.meta.sender {
                 return false;
             }
         if let Some(receiver) = self.receiver
-            && receiver != other.header.receiver {
+            && receiver != other.header.meta.receiver {
                 return false;
             }
         if let Some(amount) = self.amount
-            && amount != other.header.amount {
+            && amount != other.header.meta.amount {
                 return false;
             }
         true
@@ -98,9 +104,9 @@ impl FilterMatch<Block> for TransactionFilter {
 impl From<Transaction> for TransactionFilter{
     fn from(transaction: Transaction) -> Self {
         TransactionFilter {
-            sender: Some(transaction.header.sender),
-            receiver: Some(transaction.header.receiver),
-            amount: Some(transaction.header.amount),
+            sender: Some(transaction.header.meta.sender),
+            receiver: Some(transaction.header.meta.receiver),
+            amount: Some(transaction.header.meta.amount),
         }
     }
 }
@@ -114,11 +120,14 @@ impl TransactionHeader {
         nonce: u64
     ) -> Self {
         TransactionHeader {
-            sender,
-            receiver,
-            amount,
-            timestamp,
-            nonce
+            meta: TransactionMeta {
+                sender,
+                receiver,
+                amount,
+                timestamp,
+                nonce
+            },
+            data: Vec::with_capacity(0)
         }
     }
 
@@ -132,13 +141,36 @@ impl TransactionHeader {
     ///
     /// * The hash of the transaction header as a StdByteArray array
     pub fn hash(&self, hasher: &mut impl HashFunction) -> StdByteArray {
-        hasher.update(self.sender);
-        hasher.update(self.receiver);
-        hasher.update(self.amount.to_le_bytes());
-        hasher.update(self.timestamp.to_le_bytes());
-        hasher.update(self.nonce.to_le_bytes());
+        hasher.update(self.meta.sender);
+        hasher.update(self.meta.receiver);
+        hasher.update(self.meta.amount.to_le_bytes());
+        hasher.update(self.meta.timestamp.to_le_bytes());
+        hasher.update(self.meta.nonce.to_le_bytes());
+        hasher.update(&self.data);
         hasher.digest().expect("Hashing failed")
     }
+
+
+    pub fn ammount(&self) -> u64 {
+        self.meta.amount
+    }
+
+    pub fn sender(&self) -> StdByteArray {
+        self.meta.sender
+    }
+
+    pub fn receiver(&self) -> StdByteArray {
+        self.meta.receiver
+    }
+
+    pub fn timestamp(&self) -> u64 {
+        self.meta.timestamp
+    }
+
+    pub fn nonce(&self) -> u64 {
+        self.meta.nonce
+    }
+
 }
 
 impl Transaction {

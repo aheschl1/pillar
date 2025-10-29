@@ -51,7 +51,7 @@ pub async fn submit_transaction(
     transaction.sign(wallet);
 
     // broadcast and wait for peer responses
-    let message = Message::TransactionBroadcast(transaction);
+    let message = Message::TransactionBroadcast(transaction.clone());
     // we do not want this to wait in broadcast queue, so we will lock it out immediately
     node.inner.broadcasted_already.write().await.insert(message.hash(&mut DefaultHash::new()).unwrap());
     let results = node.broadcast(&message).await.map_err(|e| {
@@ -65,7 +65,7 @@ pub async fn submit_transaction(
     match ok{
         true => {
             if register_completion_callback {
-                let receiver = node.register_transaction_callback(transaction.into()).await;
+                let receiver = node.register_transaction_callback(transaction.clone().into()).await;
                 Ok((Some(receiver), transaction))
             }else{
                 Ok((None, transaction))
@@ -87,7 +87,7 @@ pub async fn get_transaction_proof(node: &mut Node, transaction: &Transaction, h
     for (i, result) in results.iter().enumerate() {
         if let Message::TransactionProofResponse(proof) = result
             && verify_proof_of_inclusion(
-                *transaction,
+                transaction.clone(),
                 proof,
                 header.merkle_root,
                 &mut DefaultHash::new()

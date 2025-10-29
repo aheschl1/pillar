@@ -169,7 +169,7 @@ impl Chain {
             transactions
                 .iter()
                 .fold(HashMap::new(), |mut acc, tx| {
-                    acc.entry(tx.header.sender) // assuming this gives you the StdByteArray key
+                    acc.entry(tx.header.sender()) // assuming this gives you the StdByteArray key
                         .or_default()
                         .push(tx);
                     acc
@@ -179,7 +179,7 @@ impl Chain {
         for (user, transactions) in per_user.iter() {
             let account = self.state_manager.get_account(user, state_root).unwrap_or(Account::new(*user, 0));
             // return true;
-            let total_sum: u64 = transactions.iter().map(|t| t.header.amount).sum();
+            let total_sum: u64 = transactions.iter().map(|t| t.header.ammount()).sum();
             if account.balance < total_sum {
                 tracing::info!("Account balance is insufficient for user {:?} - Failing", user);
                 return Err(BlockValidationError::TransactionInsufficientBalance(account.balance));
@@ -187,7 +187,7 @@ impl Chain {
             let mut nonces = vec![];
             // now validate each individual transaction
             for transaction in transactions {
-                nonces.push(transaction.header.nonce);
+                nonces.push(transaction.header.nonce());
                 let result = self.validate_transaction(transaction, state_root);
                 if let Err(err) = result {
                     tracing::info!("Invalid transaction - Failing");
@@ -250,7 +250,7 @@ impl Chain {
     /// 3. Sufficient balance for the transaction amount.
     #[instrument(skip_all, fields(transaction = ?transaction.hash))]
     pub(crate) fn validate_transaction(&self, transaction: &Transaction, state_root: StdByteArray) -> Result<(), BlockValidationError> {
-        let sender = transaction.header.sender;
+        let sender = transaction.header.sender();
         let signature = transaction.signature;
         // check for signature
         let validating_key: DefaultVerifier = DefaultVerifier::from_bytes(&sender);
@@ -269,7 +269,7 @@ impl Chain {
         }
         // verify balance
         let account = self.state_manager.get_account(&sender, state_root).unwrap_or(Account::new(sender, 0));
-        if account.balance < transaction.header.amount {
+        if account.balance < transaction.header.ammount() {
             tracing::info!("Account balance is insufficient - Failing");
             return Err(BlockValidationError::TransactionInsufficientBalance(account.balance));
         } 
