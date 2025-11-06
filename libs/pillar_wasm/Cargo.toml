@@ -5,4 +5,5 @@ edition = "2024"
 
 [dependencies]
 pillar_crypto = { path = "../pillar_crypto" }
+pillar_serialize = { path = "../pillar_serialize" }
 wasmtime = "38.0.3"

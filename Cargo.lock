@@ -1639,6 +1639,7 @@ name = "pillar_wasm"
 version = "0.1.0"
 dependencies = [
  "pillar_crypto",
+ "pillar_serialize",
  "wasmtime",
 ]
 

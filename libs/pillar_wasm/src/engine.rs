@@ -1,29 +1,45 @@
 use std::{collections::HashMap, path::PathBuf};
+use pillar_crypto::{merkle_trie::MerkleTrie, types::StdByteArray};
+use pillar_serialize::PillarSerialize;
 use wasmtime::{Caller, Config, Engine, Linker, Store};
 
-
-pub(crate) trait WasmEngineHost {
-    fn get_block_height(&self) -> u64;
-    fn set_block_height(&mut self, height: u64);
-}
-
-pub struct Host {
-    block_height: u64,
+struct Host {
+    // block metadata
+    block_height: u64,  
+    // storage
+    account_trie: MerkleTrie<StdByteArray, Vec<u8>>,
+    account_key: StdByteArray,
+    // local cache
+    local_cache: HashMap<StdByteArray, Vec<u8>>,
 }
 
 impl Host {
-    pub fn new(block_height: u64) -> Self {
-        Self { block_height }
+    fn new() -> Self {
+        Self {
+            block_height: 0,
+            account_trie: MerkleTrie::new(),
+            account_key: StdByteArray::default(),
+            local_cache: HashMap::new(),
+        }
     }
-}
-
-impl WasmEngineHost for Host {
-    fn get_block_height(&self) -> u64 {
-        self.block_height
+    fn get_key<V: PillarSerialize>(&self, key: &StdByteArray) -> Option<V> {
+        if let Some(cached) = self.local_cache.get(key) {
+            return Some(V::deserialize_pillar(cached).unwrap());
+        }
+        let bytes = self.account_trie.get(key, self.account_key);
+        match bytes {
+            None => None,
+            Some(b) => Some(V::deserialize_pillar(&b).unwrap()),
+        }
     }
-
-    fn set_block_height(&mut self, height: u64) {
-        self.block_height = height;
+    fn set_key<V: PillarSerialize>(&mut self, key: &StdByteArray, value: V) {
+        let bytes = value.serialize_pillar().unwrap();
+        self.local_cache.insert(key.clone(), bytes);
+    }
+    fn settle(&mut self) -> Result<(), std::io::Error> {
+        let new_root = self.account_trie.branch(Some(self.account_key), self.local_cache.clone());
+        self.account_key = new_root?;
+        Ok(())
     }
 }
 
@@ -35,37 +51,26 @@ pub(crate) fn create_engine() -> Engine {
     Engine::new(&config).unwrap()
 }
 
-pub(crate) fn build_store(engine: &Engine, host: Host, gas: u64) -> Store<Host> {
-    let mut store = Store::new(engine, host);
+pub(crate) fn build_store(engine: &Engine, gas: u64) -> Store<Host> {
+    let mut store = Store::new(engine, Host::new());
     store.set_fuel(gas).unwrap();
     store
 }
 
-pub(crate) fn build_linker<T: WasmEngineHost + 'static>(engine: &Engine) -> Result<Linker<T>, wasmtime::Error> {
+pub(crate) fn build_linker(engine: &Engine) -> Result<Linker<Host>, wasmtime::Error> {
     let mut linker = Linker::new(engine);
 
     // Read a key from storage
-    linker.func_wrap("env", "height_set",
-        |mut caller: Caller<'_, T>, height: u32| -> i32 {
-            caller.data_mut().set_block_height(height as u64);
+    linker.func_wrap("env", "set",
+        |mut caller: Caller<'_, Host>, key: StdByteArray, value: Vec<u8>| -> i32 {
+            caller.data_mut().set_key(key, value);
             0
         })?;
-
-    // Write a key to storage
-    linker.func_wrap("env", "height_get", 
-        |caller: Caller<'_, T>| -> i32 {
-            caller.data().get_block_height() as i32
-        })?;
-
-    // Block height query
-    linker.func_wrap("env", "block_height", |caller: Caller<'_, T>| -> u64 {
-        caller.data().get_block_height()
-    })?;
 
     Ok(linker)
 }
 
-pub(crate) fn run_from_file<T: WasmEngineHost + 'static>(engine: &Engine, store: &mut Store<T>, file_path: PathBuf) {
+pub(crate) fn run_from_file(engine: &Engine, store: &mut Store<Host>, file_path: PathBuf) {
     let module = wasmtime::Module::from_file(engine, file_path).unwrap();
     let linker = build_linker(engine).unwrap();
 

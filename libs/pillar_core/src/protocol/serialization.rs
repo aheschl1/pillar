@@ -172,15 +172,20 @@ impl PillarSerialize for StateManager {
         let trie_bytes = self.state_trie.serialize_pillar()?;
         bytes.extend((trie_bytes.len() as u32).to_le_bytes());
         bytes.extend(trie_bytes);
-        bytes.extend(self.reputations.serialize_pillar()?);
+        let rep_bytes = self.reputations.serialize_pillar()?;
+        bytes.extend((rep_bytes.len() as u32).to_le_bytes());
+        bytes.extend(rep_bytes);
+        bytes.extend(self.contract_tries.serialize_pillar()?);
         Ok(bytes)
     }
 
     fn deserialize_pillar(data: &[u8]) -> Result<Self, std::io::Error> {
         let trielen = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
         let trie = MerkleTrie::<StdByteArray, Account>::deserialize_pillar(&data[4..trielen + 4])?;
-        let reputations = HashMap::<StdByteArray, NodeHistory>::deserialize_pillar(&data[trielen + 4..])?;
-        Ok(StateManager { state_trie: trie, reputations })
+        let replen = u32::from_le_bytes(data[trielen + 4..trielen + 8].try_into().unwrap()) as usize;
+        let reputations = HashMap::<StdByteArray, NodeHistory>::deserialize_pillar(&data[trielen + 8..trielen + 8 + replen])?;
+        let contract_tries = HashMap::<StdByteArray, MerkleTrie<StdByteArray, Vec<u8>>>::deserialize_pillar(&data[trielen + 8 + replen..])?;
+        Ok(StateManager { state_trie: trie, reputations, contract_tries })
     }
 }
 

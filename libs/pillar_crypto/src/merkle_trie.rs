@@ -102,7 +102,8 @@ impl<K: Hashable, V: PillarSerialize> MerkleTrie<K, V> {
         Ok(inital_hash)
     }
 
-
+    /// Internal insert function that inserts a key-value pair into the trie starting from the given root node.
+    /// If the key already exists, an error is returned.
     fn _insert(&mut self, key: K, value: V, root: NodeKey) -> Result<(), std::io::Error>{
         let nibbles = to_nibbles(&key);
         let value = value.serialize_pillar().map_err(std::io::Error::other)?;
@@ -975,5 +976,19 @@ mod tests {
         assert_eq!(trie2.get(&"account2".into(), initial_root), Some(account2));
         assert_eq!(trie2.get(&"account0".into(), initial_root), Some(initial_account_info));
 
+    }
+
+    #[test]
+    fn test_update_existing_key_error() {
+        let initial_account_info = AccountState { balance: 100, nonce: 1 };
+        let mut trie = MerkleTrie::<&str, AccountState>::new();
+        let initial_root = trie.create_genesis("account0", initial_account_info.clone()).expect("Failed to create genesis");
+
+        let account1 = AccountState { balance: 200, nonce: 2 };
+        trie.insert("account1", account1.clone(), initial_root).unwrap();
+
+        // Attempt to insert the same key again
+        let result = trie.insert("account1", AccountState { balance: 300, nonce: 3 }, initial_root);
+        assert!(result.is_err(), "Inserting an existing key should return an error");
     }
 }

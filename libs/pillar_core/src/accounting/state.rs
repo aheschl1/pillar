@@ -2,6 +2,7 @@
 use std::{collections::HashMap, fmt::Debug};
 
 use pillar_crypto::{merkle_trie::MerkleTrie, types::StdByteArray};
+use pillar_serialize::PillarSerialize;
 
 use crate::{accounting::account::Account, primitives::block::{Block, BlockHeader}, protocol::{difficulty::get_reward_from_depth_and_stampers, pow::{get_difficulty_for_block, POR_INCLUSION_MINIMUM, POR_MINER_SHARE_DIVISOR}, reputation::get_current_reputations_for_stampers_from_state}, reputation::history::NodeHistory};
 
@@ -15,6 +16,8 @@ pub struct StateManager{
     pub state_trie: MerkleTrie<StdByteArray, Account>,
     /// mapping of reputations for peers
     pub reputations: ReputationMap,
+    /// State tries for contracts
+    pub contract_tries: HashMap<StdByteArray, MerkleTrie<StdByteArray, Vec<u8>>>,
 }
 
 impl Debug for StateManager {
@@ -38,6 +41,7 @@ impl StateManager{
         StateManager {
             state_trie: MerkleTrie::new(),
             reputations: HashMap::new(),
+            contract_tries: HashMap::new(),
         }
     }
 
