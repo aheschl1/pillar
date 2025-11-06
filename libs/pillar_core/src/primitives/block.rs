@@ -1,10 +1,17 @@
 
 use bytemuck::{Pod, Zeroable};
-use pillar_crypto::types::StdByteArray;
+use pillar_crypto::{merkle_trie::MerkleTrie, types::StdByteArray};
 
 
-use crate::protocol::reputation::N_TRANSMISSION_SIGNATURES;
+use crate::{accounting::account::Account, protocol::reputation::N_TRANSMISSION_SIGNATURES};
 use super::transaction::Transaction;
+
+
+pub struct BlockMetaData {
+    pub height: u64,
+    pub global_state: MerkleTrie<StdByteArray, Account>
+}
+
 
 #[derive(Debug,  Clone, PartialEq, Eq)]
 #[repr(C, align(8))]

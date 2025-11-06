@@ -2,6 +2,7 @@
 use std::{collections::HashMap, fmt::Debug};
 
 use pillar_crypto::{merkle_trie::MerkleTrie, types::StdByteArray};
+use pillar_serialize::PillarSerialize;
 
 use crate::{accounting::account::Account, primitives::block::{Block, BlockHeader}, protocol::{difficulty::get_reward_from_depth_and_stampers, pow::{get_difficulty_for_block, POR_INCLUSION_MINIMUM, POR_MINER_SHARE_DIVISOR}, reputation::get_current_reputations_for_stampers_from_state}, reputation::history::NodeHistory};
 
@@ -15,6 +16,8 @@ pub struct StateManager{
     pub state_trie: MerkleTrie<StdByteArray, Account>,
     /// mapping of reputations for peers
     pub reputations: ReputationMap,
+    /// State tries for contracts
+    pub contract_tries: HashMap<StdByteArray, MerkleTrie<StdByteArray, Vec<u8>>>,
 }
 
 impl Debug for StateManager {
@@ -38,6 +41,7 @@ impl StateManager{
         StateManager {
             state_trie: MerkleTrie::new(),
             reputations: HashMap::new(),
+            contract_tries: HashMap::new(),
         }
     }
 
@@ -97,15 +101,15 @@ impl StateManager{
         let mut state_updates: HashMap<StdByteArray, Account> = HashMap::new();
         let state_root = prev_header.completion.as_ref().expect("Previous block should be complete").state_root;
         for transaction in &block.transactions {
-            let mut sender = match state_updates.get(&transaction.header.sender){
+            let mut sender = match state_updates.get(&transaction.header.sender()){
                 Some(account) => account.clone(),
                 None => {
                     // if the sender does not exist, we create a new account with 0 balance
                     let account = self.state_trie
-                        .get(&transaction.header.sender, state_root)
-                        .unwrap_or(Account::new(transaction.header.sender, 0));
+                        .get(&transaction.header.sender(), state_root)
+                        .unwrap_or(Account::new(transaction.header.sender(), 0));
 
-                    if account.balance < transaction.header.amount {
+                    if account.balance < transaction.header.ammount() {
                         panic!("Insufficient balance for transaction");
                     }
 
@@ -113,18 +117,18 @@ impl StateManager{
                     
                 }
             };
-            sender.balance -= transaction.header.amount;
+            sender.balance -= transaction.header.ammount();
             sender.nonce += 1;
             state_updates.insert(sender.address, sender);
             // may need to make a new public account for the receiver under the established public key
-            let mut receiver = match state_updates.get(&transaction.header.receiver){
+            let mut receiver = match state_updates.get(&transaction.header.receiver()){
                 Some(account) => account.clone(),
                 None => {
-                    self.state_trie.get(&transaction.header.receiver, state_root).unwrap_or(Account::new(transaction.header.receiver, 0))
+                    self.state_trie.get(&transaction.header.receiver(), state_root).unwrap_or(Account::new(transaction.header.receiver(), 0))
                 },
             };
             // update balances
-            receiver.balance += transaction.header.amount;
+            receiver.balance += transaction.header.ammount();
             state_updates.insert(receiver.address, receiver);
         }
         // add the miner reward. this reward will be based upon the blocks difficulty, and the number of stamps.

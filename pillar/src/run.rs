@@ -421,11 +421,11 @@ async fn handle_transaction_get(
                 Some(tx) => {
                     let response = TransactionResponse {
                         signature: hex::encode(tx.signature),
-                        sender: tx.header.sender,
-                        receiver: tx.header.receiver,
-                        amount: tx.header.amount,
-                        timestamp: tx.header.timestamp,
-                        nonce: tx.header.nonce,
+                        sender: tx.header.sender(),
+                        receiver: tx.header.receiver(),
+                        amount: tx.header.ammount(),
+                        timestamp: tx.header.timestamp(),
+                        nonce: tx.header.nonce(),
                         hash: tx.hash
                     };
                     Json(StatusResponse::success(response))
