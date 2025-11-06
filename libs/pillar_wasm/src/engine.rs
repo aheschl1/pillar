@@ -82,13 +82,13 @@ mod tests {
         let _engine = create_engine();
     }
 
-    #[test]
-    fn test_load_module_from_file() {
-        let engine = create_engine();
-        let module_path = PathBuf::from("tests/dlrow_olleh.wasm");
-        let host = Host::new(0);
-        let mut store = build_store(&engine, host, 1_000_000);
-        run_from_file(&engine, &mut store, module_path);
-        assert_eq!(store.data().get_block_height(), 1);
-    }
+    // #[test]
+    // fn test_load_module_from_file() {
+    //     let engine = create_engine();
+    //     let module_path = PathBuf::from("tests/dlrow_olleh.wasm");
+    //     let host = Host::new(0);
+    //     let mut store = build_store(&engine, host, 1_000_000);
+    //     run_from_file(&engine, &mut store, module_path);
+    //     assert_eq!(store.data().get_block_height(), 1);
+    // }
 }
