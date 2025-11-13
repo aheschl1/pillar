@@ -61,6 +61,12 @@ pub enum Message {
     PercentileFilteredPeerRequest(f32, f32),
     // response with peers filtered between a lower percentile and an upper percentile based on reputation
     PercentileFilteredPeerResponse(Vec<Peer>),
+    // encrypted message
+    EncryptedMessage(Vec<u8>),
+    // privacy request -- holds public key
+    PrivacyRequest(StdByteArray),
+    // privacy response, holds public key
+    PrivacyResponse(StdByteArray),
     // error message
     Error(String)
 }
@@ -93,6 +99,9 @@ impl Message{
             Message::ChainSyncResponse(_) => "ChainSyncResponse".to_string(),
             Message::PercentileFilteredPeerRequest(_, _) => "PercentileFilteredPeerRequest".to_string(),
             Message::PercentileFilteredPeerResponse(_) => "PercentileFilteredPeerResponse".to_string(),
+            Message::EncryptedMessage(_) => "EncryptedMessage".to_string(),
+            Message::PrivacyRequest(_) => "PrivacyRequest".to_string(),
+            Message::PrivacyResponse(_) => "PrivacyResponse".to_string(),
             Message::Error(_) => "Error".to_string(),
         }
     }
@@ -125,6 +134,17 @@ impl Message{
             Message::Error(_) => 23,
             Message::DiscoveryRequest => 24,
             Message::DiscoveryResponse(_) => 25,
+            Message::EncryptedMessage(_) => 26,
+            Message::PrivacyRequest(_) => 27,
+            Message::PrivacyResponse(_) => 28,
+        }
+    }
+
+    /// Indicates whether a node should support encryption for this message type
+    pub fn encryption_supported(&self) -> bool {
+        match self{
+            Message::Ping => true,
+            _ => false
         }
     }
 }

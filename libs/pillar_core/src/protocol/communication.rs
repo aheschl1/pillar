@@ -1,4 +1,5 @@
-use pillar_crypto::{hashing::{DefaultHash, Hashable}};
+use pillar_crypto::{encryption::PillarSharedSecret, hashing::{DefaultHash, Hashable}, types::StdByteArray};
+use pillar_serialize::PillarSerialize;
 use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
@@ -55,6 +56,72 @@ pub async fn broadcast_knowledge(node: Node, stop_signal: Option<flume::Receiver
         // this is a hack to simply yield to the runtime
         tokio::time::sleep(Duration::from_millis(1)).await;
     }
+}
+
+#[inline]
+pub async fn join_private_communication(
+    mut node: Node,
+    stream: &mut TcpStream,
+    declaring_peer: crate::nodes::peer::Peer,
+    remote_public_key: StdByteArray,
+) -> Result<(), std::io::Error> {
+    // in this case, finalize a key exchange
+    let shared_secret = PillarSharedSecret::join(remote_public_key).unwrap();
+    // send our public key as privacy response
+    let response = Message::PrivacyResponse(shared_secret.public);
+    let bytes = package_standard_message(&response).map_err(|e| std::io::Error::new(
+        std::io::ErrorKind::Other, 
+        format!("Failed to package privacy response message: {}", e)
+     ))?;
+    stream.write_all(&bytes).await.map_err(|e| std::io::Error::new(
+        std::io::ErrorKind::Other,
+        format!("Failed to send privacy response message: {}", e)
+    ))?;
+    tracing::debug!("Sent {} bytes to peer", bytes.len());
+
+    // now, loop communicating privately, where we always respond
+
+    loop {
+        // read message, expect encrypted message. decode internals
+        if stream.readable().await.is_err() {
+            tracing::debug!("Peer closed the connection");
+            break;
+        }
+        let message: Message = read_standard_message(stream).await?;
+        let decrypted_message = match message {
+            Message::EncryptedMessage(payload) => {
+                let decrypted_bytes = shared_secret.decrypt(payload)?;
+                let message: Message = Message::deserialize_pillar(&decrypted_bytes)?;
+                message
+            },
+            _ => return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Expected EncryptedMessage in private communication",
+                ))
+        };
+        if decrypted_message.encryption_supported() {
+            let response = node.serve_request(&decrypted_message, declaring_peer.clone()).await?;
+            let encrypted_response_bytes = shared_secret.encrypt(response.serialize_pillar()?)?;
+            let encrypted_response = Message::EncryptedMessage(encrypted_response_bytes);
+            let bytes = package_standard_message(&encrypted_response).map_err(|e| std::io
+                ::Error::new(
+                    std::io::ErrorKind::Other, 
+                    format!("Failed to package encrypted response message: {}", e)
+                 ))?;
+            stream.write_all(&bytes).await.map_err(|e| std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to send encrypted response message: {}", e)
+            ))?;
+            tracing::debug!("Sent {} bytes to peer", bytes.len());
+        }else{
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Received unsupported message in private communication",
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 /// This function serves as a loop that accepts incoming requests, and handles the main protocol
@@ -126,12 +193,18 @@ pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
             };
             // read actual the message
             let message: Result<Message, std::io::Error> = read_standard_message(&mut stream).await;
-            if message.is_err() {
-                // halt
-                send_error_message(&mut stream, message.unwrap_err()).await;
+            if let Err(e) = &message {
+                send_error_message(&mut stream, e).await;
                 return;
             }
             let message = message.unwrap();
+            if let Message::PrivacyRequest(public_key) = message {
+                let res = join_private_communication(self_clone, &mut stream, declaring_peer, public_key).await;
+                if let Err(e) = res {
+                    send_error_message(&mut stream, e).await;
+                }
+                return;
+            }
             let response = self_clone.serve_request(&message, declaring_peer).await;
             match response {
                 Err(e) => send_error_message(&mut stream, e).await,
@@ -354,6 +427,80 @@ mod tests {
         let elapsed = now.elapsed();
         // Check that the server stopped within a reasonable time
         assert!(elapsed.as_secs() < 3, "Server did not stop in time");
+    }
+
+    #[tokio::test]
+    async fn test_private_communication() {
+        let ip_address = IpAddr::V4(Ipv4Addr::from_str("127.0.0.1").unwrap());
+        let port = 8086;
+        let node = Node::new([1; 32], [2; 32], ip_address, port, vec![], false);
+        tokio::spawn(serve_peers(node.clone(), None));
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        let mut stream = TcpStream::connect(format!("{ip_address}:{port}"))
+            .await
+            .unwrap();
+        let peer = Peer {
+            public_key: [3; 32],
+            ip_address: ip_address.into(),
+            port: 8087,
+        };
+        let declaration = Message::Declaration(peer.clone());
+        let serialized = package_standard_message(&declaration).unwrap();
+        stream.write_all(&serialized).await.unwrap();
+        // initiate privacy request
+        let mut shared_secret = PillarSharedSecret::initiate();
+        let privacy_request = Message::PrivacyRequest(shared_secret.public);
+        let serialized = package_standard_message(&privacy_request).unwrap();
+        stream.write_all(&serialized).await.unwrap();
+        // read privacy response
+        let response: Message = read_standard_message(&mut stream).await.unwrap();
+        let server_public_key = match response {
+            Message::PrivacyResponse(pk) => pk,
+            _ => panic!("Expected PrivacyResponse message"),
+        };
+        shared_secret.hydrate(server_public_key).unwrap();
+        // now send an encrypted message
+        let original_message = Message::Ping;
+        let encrypted_bytes = shared_secret.encrypt(original_message.serialize_pillar().unwrap()).unwrap();
+        let encrypted_message = Message::EncryptedMessage(encrypted_bytes);
+        let serialized = package_standard_message(&encrypted_message).unwrap();
+        stream.write_all(&serialized).await.unwrap();
+        // read encrypted response
+        let response: Message = read_standard_message(&mut stream).await.unwrap();
+        let decrypted_message = match response {
+            Message::EncryptedMessage(payload) => {
+                let decrypted_bytes = shared_secret.decrypt(payload).unwrap();
+                let message: Message = Message::deserialize_pillar(&decrypted_bytes).unwrap();
+                message
+            },
+            _ => panic!("Expected EncryptedMessage in private communication"),
+        };
+        match decrypted_message {
+            Message::Ping => {},
+            _ => panic!("Expected Ping message"),
+        };
+
+        // second round, same secret
+
+        let original_message = Message::Ping;
+        let encrypted_bytes = shared_secret.encrypt(original_message.serialize_pillar().unwrap()).unwrap();
+        let encrypted_message = Message::EncryptedMessage(encrypted_bytes);
+        let serialized = package_standard_message(&encrypted_message).unwrap();
+        stream.write_all(&serialized).await.unwrap();
+        // read encrypted response
+        let response: Message = read_standard_message(&mut stream).await.unwrap();
+        let decrypted_message = match response {
+            Message::EncryptedMessage(payload) => {
+                let decrypted_bytes = shared_secret.decrypt(payload).unwrap();
+                let message: Message = Message::deserialize_pillar(&decrypted_bytes).unwrap();
+                message
+            },
+            _ => panic!("Expected EncryptedMessage in private communication"),
+        };
+        match decrypted_message {
+            Message::Ping => {},
+            _ => panic!("Expected Ping message"),
+        };
     }
 
 }

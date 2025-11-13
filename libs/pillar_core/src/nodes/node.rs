@@ -461,6 +461,9 @@ impl Node {
             Message::DiscoveryRequest => {
                 Ok(Message::DiscoveryResponse(self.clone().into()))
             },
+            Message::Ping => {
+                Ok(Message::Ping)
+            },
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "Expected a request",

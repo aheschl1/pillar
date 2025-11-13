@@ -13,3 +13,8 @@ sha3 = "0.10.8"
 slotmap = "1.0.7"
 rand = "0.9.1"
 lz4_flex = "0.11.5"
+
+x25519-dalek = "2"
+flume = "0.11.1"
+hkdf = "0.12.4"
+chacha20poly1305 = "0.10.1"
