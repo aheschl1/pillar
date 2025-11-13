@@ -33,3 +33,14 @@ This crate provides the core cryptographic primitives for the Pillar protocol.
   - Values serialized with `PillarSerialize` and stored as raw bytes.
   - Branching (`branch`): clones only necessary path nodes; reference counts track sharing.
   - Trimming (`trim_branch`): decrements references, removes unique nodes.
+
+## Encryption (`pillar_crypto::encryption`)
+
+- Shared secret via X25519 key exchange.
+- Symmetric encryption with XChaCha20-Poly1305.
+- `SharedSecret` struct encapsulates key exchange and encryption/decryption methods.
+- Usage:
+  - Generate ephemeral key pair.
+  - Exchange public keys.
+  - Derive shared secret.
+  - Encrypt/decrypt messages with the shared secret.

@@ -6,7 +6,7 @@ Pillar is a zero-trust decentralized ledger that implements a Proof of Reputatio
 
 - [`pillar/`](pillar/) – Entrypoint for managing a Pillar node.
 - [`libs/pillar_core/`](libs/pillar_core/) – Core protocol logic and data structures.
-- [`libs/pillar_crypto/`](libs/pillar_crypto/) – Cryptographic primitives, including hashing, signing, and Merkle structures.
+- [`libs/pillar_crypto/`](libs/pillar_crypto/) – Cryptographic primitives, including hashing, signing, encryption, and Merkle structures.
 - [`libs/pillar_serialize/`](libs/pillar_serialize/) – Lightweight serialization utilities.
 - [`pillar_monitor/`](pillar_monitor/) – A web-based frontend for monitoring a node.
 - [`vm_mesh/`](vm_mesh/) – A framework for distributed testing and simulation using QEMU.
