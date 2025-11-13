@@ -1,7 +1,8 @@
 use std::{fmt::{Debug}, net::IpAddr, time::Duration};
 
 use bytemuck::{Pod, Zeroable};
-use pillar_crypto::types::StdByteArray;
+use pillar_crypto::{encryption::PillarSharedSecret, types::StdByteArray};
+use pillar_serialize::PillarSerialize;
 use tokio::{io::AsyncWriteExt, net::TcpStream, time::timeout};
 use tracing::instrument;
 use crate::protocol::serialization::{package_standard_message, read_standard_message};
@@ -63,6 +64,7 @@ pub struct Peer{
 }
 
 impl Peer{
+
     /// Create a new peer
     pub fn new(public_key: [u8; 32], ip_address: IpAddr, port: u16) -> Self {
         Peer {
@@ -101,6 +103,43 @@ impl Peer{
         let stream = timeout(Duration::from_secs(1), self.send_initial(message, initializing_peer)).await??;
         let response = self.read_response(stream).await?;
         Ok(response)
+    }
+
+    /// start a persistent encrypted communication channel with the peer
+    /// each message put into the `messages` receiver will be sent to the peer
+    /// each message sent will expect a response, which will be sent to the `responses` sender
+    /// 
+    /// This is meant to be spawned as a separate task.
+    /// 
+    /// Returns an error if the communication fails
+    pub async fn encrypted_communicate(
+        &self, 
+        messages: flume::Receiver<Message>, 
+        responses: flume::Sender<Message>,
+        initializing_peer: &Peer
+    ) -> Result<(), std::io::Error> {
+        let mut shared_secret = PillarSharedSecret::initiate();
+        let m = Message::PrivacyRequest(shared_secret.public);
+        let response = self.communicate(&m, initializing_peer).await?;
+        let remote_public = match response {
+            Message::PrivacyResponse(pubkey) => pubkey,
+            _ => return Err(std::io::Error::new(std::io::ErrorKind::Other, "Invalid response to privacy request")),
+        };
+        shared_secret.hydrate(remote_public)?;
+        while let Ok(message) = messages.recv_async().await {
+            let encrypted_bytes = shared_secret.encrypt(message.serialize_pillar()?)?;
+            let encrypted_message = Message::EncryptedMessage(encrypted_bytes);
+            let response = self.communicate(&encrypted_message, initializing_peer).await?;
+            let decrypted_response = match response {
+                Message::EncryptedMessage(payload) => {
+                    let decrypted_bytes = shared_secret.decrypt(payload)?;
+                    Message::deserialize_pillar(&decrypted_bytes)?
+                },
+                _ => return Err(std::io::Error::new(std::io::ErrorKind::Other, "Invalid encrypted message response")),
+            };
+            responses.send_async(decrypted_response).await.map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "Failed to send response"))?;
+        }
+        Ok(())
     }
 }
 
@@ -202,5 +241,4 @@ mod tests{
         }
         handle.await.unwrap(); // wait for the listener to finish
     }
-
 }

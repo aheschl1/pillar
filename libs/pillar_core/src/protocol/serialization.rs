@@ -92,6 +92,9 @@ impl PillarSerialize for crate::primitives::messages::Message {
             },
             Self::PercentileFilteredPeerResponse(c) => c.serialize_pillar(),
             Self::DiscoveryResponse(c) => c.serialize_pillar(),
+            Self::EncryptedMessage(c) => c.serialize_pillar(),
+            Self::PrivacyRequest(c) => c.serialize_pillar(),
+            Self::PrivacyResponse(c) => c.serialize_pillar(),
             Self::Error(c) => c.serialize_pillar(),
             _ => Ok(vec![])
         }?;
@@ -159,6 +162,9 @@ impl PillarSerialize for crate::primitives::messages::Message {
             23 => Message::Error(String::deserialize_pillar(&data[n..])?),
             24 => Message::DiscoveryRequest,
             25 => Message::DiscoveryResponse(Peer::deserialize_pillar(&data[n..])?),
+            26 => Message::EncryptedMessage(Vec::<u8>::deserialize_pillar(&data[n..])?),
+            27 => Message::PrivacyRequest(StdByteArray::deserialize_pillar(&data[n..])?),
+            28 => Message::PrivacyResponse(StdByteArray::deserialize_pillar(&data[n..])?),
             _ => return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Unknown message code")),
         };
         Ok(result)

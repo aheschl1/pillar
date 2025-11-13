@@ -30,7 +30,7 @@ use std::collections::HashMap;
 
 use bytemuck::{bytes_of, Pod, Zeroable};
 
-const STANDARD_ARRAY_LENGTH: usize = 32;
+pub const STANDARD_ARRAY_LENGTH: usize = 32;
 pub type StdByteArray = [u8; STANDARD_ARRAY_LENGTH];
 
 /// Convert integer fields of a type to little-endian in-place.

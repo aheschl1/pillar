@@ -21,3 +21,5 @@ pub mod merkle_trie;
 pub mod proofs;
 /// Common type aliases and constants used by this crate.
 pub mod types;
+
+pub mod encryption;
