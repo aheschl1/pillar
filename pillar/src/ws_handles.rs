@@ -1,5 +1,6 @@
 use axum::extract::ws::{Message, WebSocket};
 use pillar_core::{accounting::wallet::Wallet, nodes::node::Node, protocol::transactions::submit_transaction};
+use crate::run::{remember_sent, SentTransactions};
 use pillar_crypto::types::StdByteArray;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -31,7 +32,8 @@ pub(crate) async fn handle_transaction_post(
     websocket: &mut WebSocket,
     request: TransactionPost,
     node: &mut Node,
-    wallet: &RwLock<Wallet>
+    wallet: &RwLock<Wallet>,
+    sent: &SentTransactions
 ){
     tracing::info!("Handling transaction post");
 
@@ -49,6 +51,7 @@ pub(crate) async fn handle_transaction_post(
 
     match result {
         Ok(tx) => {
+            remember_sent(sent, tx.1);
             let message = TransactionResponse {
                 success: true,
                 message: "Transaction submitted successfully".to_string(),

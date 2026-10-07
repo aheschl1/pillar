@@ -236,6 +236,17 @@ impl Chain {
         self.get_top_block().and_then(|block| block.header.completion.as_ref().map(|c| c.state_root))
     }
 
+    /// The main chain (the deepest fork) as (hash, block), from the tip back to genesis.
+    pub fn main_chain(&self) -> impl Iterator<Item = (StdByteArray, &Block)> + '_ {
+        let mut next = Some(self.deepest_hash);
+        std::iter::from_fn(move || {
+            let hash = next?;
+            let block = self.blocks.get(&hash)?;
+            next = (block.header.depth > 0).then_some(block.header.previous_hash);
+            Some((hash, block))
+        })
+    }
+
     pub fn get_block(&self, hash: &StdByteArray) -> Option<&Block> {
         self.blocks.get(hash)
     }
@@ -506,6 +517,51 @@ mod tests {
         );
         let result = chain.add_new_block(block);
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_main_chain_walks_deepest_fork_to_genesis() {
+        let mut chain = Chain::new_with_genesis();
+        let mut signing_key = DefaultSigner::generate_random();
+        let sender = signing_key.get_verifying_function().to_bytes();
+        let genesis_hash = chain.deepest_hash;
+
+        // mines a block of one transaction on parent, at depth, and adds it
+        let mut add = async |chain: &mut Chain, parent: StdByteArray, depth: u64, nonce: u64, skew: u64| {
+            let mut transaction = Transaction::new(sender, [2; 32], 0, 0, nonce, &mut DefaultHash::new());
+            transaction.sign(&mut signing_key);
+            let mut block = Block::new(
+                parent,
+                0,
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + depth + skew,
+                vec![transaction],
+                None,
+                BlockTail::default().stamps,
+                depth,
+                None,
+                None,
+                &mut DefaultHash::new(),
+            );
+            let prev_header = chain.headers.get(&parent).expect("Previous block header not found");
+            let state_root = chain.state_manager.branch_from_block_internal(&block, prev_header, &sender);
+            mine(&mut block, sender, state_root, vec![], None, DefaultHash::new()).await;
+            let hash = block.header.completion.as_ref().unwrap().hash;
+            chain.add_new_block(block).unwrap();
+            hash
+        };
+
+        let mut main = vec![genesis_hash];
+        for depth in 1..=3 {
+            let parent = *main.last().unwrap();
+            main.push(add(&mut chain, parent, depth, depth - 1, 0).await);
+        }
+        let fork = add(&mut chain, genesis_hash, 1, 0, 30).await;
+
+        let walked: Vec<(StdByteArray, u64)> = chain.main_chain().map(|(hash, block)| (hash, block.header.depth)).collect();
+        main.reverse();
+        assert_eq!(walked.iter().map(|(hash, _)| *hash).collect::<Vec<_>>(), main);
+        assert_eq!(walked.iter().map(|(_, depth)| *depth).collect::<Vec<_>>(), vec![3, 2, 1, 0]);
+        assert!(walked.iter().all(|(hash, _)| *hash != fork));
     }
 
     #[tokio::test]
