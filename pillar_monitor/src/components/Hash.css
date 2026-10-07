@@ -1,0 +1,26 @@
+.hash { display: inline-flex; align-items: center; gap: 0.4rem; max-width: 100%; min-width: 0; }
+
+.hash-text {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+a.hash-text { color: var(--accent); }
+a.hash-text:hover { text-decoration: underline; }
+
+.hash-copy {
+  flex-shrink: 0;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.7rem;
+  background: var(--bg);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.hash:hover .hash-copy, .hash-copy:focus-visible { opacity: 1; }
+.hash-copy:hover:not(:disabled) { background: var(--subtle); color: var(--text); border-color: var(--border-strong); }
+
+/* touch screens have no hover */
+@media (hover: none) { .hash-copy { opacity: 1; } }

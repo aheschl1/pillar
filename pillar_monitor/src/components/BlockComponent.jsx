@@ -1,124 +1,90 @@
-import React, { useState } from 'react';
-import { toHex } from '../api/utils';
-import { useNavigate } from 'react-router-dom'; // import this
+import React, { useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { formatTimestamp, blockLink, accountLink } from '../api/utils';
+import Hash from './Hash';
 import './BlockComponent.css';
 
-const ShortHash = ({ hash }) => {
-    const fullHash = toHex(hash);
-    const shortHash = `${fullHash.substring(0, 8)}...${fullHash.substring(fullHash.length - 6)}`;
-    return <span className="monospace">{shortHash}</span>;
-};
+const Field = ({ label, children }) => (
+    <div className="block-field">
+        <span className="field-label">{label}</span>
+        <span className="field-value">{children}</span>
+    </div>
+);
 
+/**
+ * A block, collapsed to its vitals or expanded to its whole header.
+ * `forceExpanded` (the Block page) always shows everything and drops the toggle.
+ */
 const BlockComponent = ({ block, forceExpanded = false }) => {
     const [isExpanded, setIsExpanded] = useState(!!forceExpanded);
-    const navigate = useNavigate(); // for programmatic navigation
+    const pressedAt = useRef(null);
+    const navigate = useNavigate();
 
     if (!block) {
         return null;
     }
 
     const { hash, header, transaction_hashs } = block;
+    const expanded = forceExpanded || isExpanded;
 
+    // Selecting text ends in a click too. A press that moved, or left a selection, is a
+    // selection, not a toggle.
+    const press = (e) => { pressedAt.current = { x: e.clientX, y: e.clientY }; };
     const toggleExpand = (e) => {
-        e.stopPropagation();
-        if (forceExpanded) return; // don't allow toggling when forced
+        if (forceExpanded) return;
+        const start = pressedAt.current;
+        const dragged = start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 4;
+        if (dragged || window.getSelection()?.toString()) return;
         setIsExpanded(!isExpanded);
     };
 
-    const handleViewInExplorer = (e) => {
+    const open = (e) => {
         e.stopPropagation();
-        const hexHash = toHex(hash);
-        navigate(`/block?hash=${hexHash}`);
+        navigate(blockLink(hash));
     };
 
     return (
-        <div className={`block-card ${isExpanded ? 'expanded' : ''}`} onClick={toggleExpand}>
-            <span className="expand-indicator">{isExpanded ? '−' : '+'}</span>
+        <div className={`block-card ${expanded ? 'expanded' : ''} ${forceExpanded ? 'static' : ''}`} onMouseDown={press} onClick={toggleExpand}>
+            <div className="block-card-top">
+                <span className="block-depth">Block {header.depth}</span>
+                <Hash value={hash} short />
+                <span className="block-txs">{transaction_hashs.length} tx{transaction_hashs.length === 1 ? '' : 's'}</span>
+                {!forceExpanded && (
+                    <span className="block-actions">
+                        <button type="button" className="block-open" onClick={open}>Open</button>
+                        <span className="expand-indicator" aria-hidden>{isExpanded ? '−' : '+'}</span>
+                    </span>
+                )}
+            </div>
 
-            {!isExpanded ? (
-                <div className="block-content-collapsed">
-                    <div className="block-field-vital">
-                        <strong>Hash:</strong>
-                        <ShortHash hash={hash} />
-                    </div>
-                    <div className="block-field-vital">
-                        <strong>Depth:</strong>
-                        <span>{header.depth}</span>
-                    </div>
-                    <div className="block-field-vital">
-                        <strong>Txs:</strong>
-                        <span>{transaction_hashs.length}</span>
-                    </div>
-                </div>
-            ) : (
+            {expanded && (
                 <div className="block-content">
-                    <div className="block-field">
-                        <strong>Hash:</strong>
-                        <span className="monospace">{toHex(hash)}</span>
-                    </div>
-                    <div className="block-field">
-                        <strong>Previous Hash:</strong>
-                        <span className="monospace">{toHex(header.previous)}</span>
-                    </div>
-                    <div className="block-field">
-                        <strong>Merkle Root:</strong>
-                        <span className="monospace">{toHex(header.merkle_root)}</span>
-                    </div>
-                    <div className="block-field">
-                        <strong>Miner:</strong>
-                        <span className="monospace">{toHex(header.miner)}</span>
-                    </div>
-                    <div className="block-field">
-                        <strong>State Root:</strong>
-                        <span className="monospace">{toHex(header.state_root)}</span>
-                    </div>
+                    <Field label="Hash"><Hash value={hash} /></Field>
+                    <Field label="Previous">
+                        {header.depth === 0 ? <span className="small">none (genesis)</span> : <Hash value={header.previous} to={blockLink(header.previous)} />}
+                    </Field>
+                    <Field label="Miner"><Hash value={header.miner} to={accountLink(header.miner)} /></Field>
+                    <Field label="Merkle root"><Hash value={header.merkle_root} /></Field>
+                    <Field label="State root"><Hash value={header.state_root} /></Field>
 
                     <div className="integer-fields-row">
-                        <div className="integer-field">
-                            <strong>Depth</strong>
-                            <span>{header.depth}</span>
-                        </div>
-                        <div className="integer-field">
-                            <strong>Nonce</strong>
-                            <span>{header.nonce}</span>
-                        </div>
-                        <div className="integer-field">
-                            <strong>Difficulty</strong>
-                            <span>{header.difficulty_target}</span>
-                        </div>
-                        <div className="integer-field">
-                            <strong>Txs</strong>
-                            <span>{transaction_hashs.length}</span>
-                        </div>
+                        <div className="integer-field"><span className="field-label">Depth</span><span>{header.depth}</span></div>
+                        <div className="integer-field"><span className="field-label">Nonce</span><span>{header.nonce}</span></div>
+                        <div className="integer-field"><span className="field-label">Difficulty</span><span>{header.difficulty_target}</span></div>
+                        <div className="integer-field"><span className="field-label">Txs</span><span>{transaction_hashs.length}</span></div>
                     </div>
 
-                    <div className="block-field">
-                        <strong>Timestamp:</strong>
-                        <span>{new Date(header.timestamp).toLocaleString()}</span>
-                    </div>
-                    
+                    <Field label="Time">{formatTimestamp(header.timestamp)}</Field>
+
                     {header.stampers && header.stampers.length > 0 && (
-                        <div className="block-field">
-                            <strong>Stampers:</strong>
-                            <div className="stampers-list">
+                        <Field label={`Stampers (${header.stampers.length})`}>
+                            <span className="stampers-list">
                                 {header.stampers.map((stamper, idx) => (
-                                    <div key={idx} className="monospace small">
-                                        {toHex(stamper)}
-                                    </div>
+                                    <Hash key={idx} value={stamper} to={accountLink(stamper)} />
                                 ))}
-                            </div>
-                        </div>
+                            </span>
+                        </Field>
                     )}
-
-                    {/* Add this button at the bottom */}
-                    <div className="view-explorer-container">
-                        <button
-                            className="view-explorer-btn"
-                            onClick={handleViewInExplorer}
-                        >
-                            View in Explorer
-                        </button>
-                    </div>
                 </div>
             )}
         </div>

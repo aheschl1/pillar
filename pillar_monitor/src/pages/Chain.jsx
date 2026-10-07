@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useServer } from '../contexts/serverContext';
 import { useBlocks } from '../hooks/useBlocks';
 import BlockComponent from '../components/BlockComponent';
 import { toHex } from '../api/utils';
@@ -12,46 +13,54 @@ const Chain = () => {
     const [maxDepth, setMaxDepth] = useState('');
     const [limit, setLimit] = useState('10');
 
+    const { isConnected } = useServer();
+
     const handleFetchBlocks = () => {
         fetchBlockHashes(minDepth, maxDepth, limit);
     };
+
+    // show the newest blocks as soon as there is a node to ask
+    useEffect(() => {
+        if (isConnected) fetchBlockHashes('', '', limit);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isConnected, fetchBlockHashes]);
 
     return (
         <div className="chain-container">
             <div className="chain-header">
                 {
-                    blocks.length > 0 && <h2>Blockchain Explorer ({blocks.length} blocks)</h2>
+                    blocks.length > 0 && <h2>Chain <span className="small">({blocks.length} blocks)</span></h2>
                 }
                 {
-                    !blocks.length && <h2>Blockchain Explorer</h2>
+                    !blocks.length && <h2>Chain</h2>
                 }
             </div>
 
             <div className="query-form">
-                <h3>Query Parameters</h3>
+                
                 <div className="form-fields">
                     <div className="form-field">
-                        <label htmlFor="minDepth">Min Depth:</label>
+                        <label htmlFor="minDepth">From depth</label>
                         <input
                             id="minDepth"
                             type="number"
-                            placeholder="Optional"
+                            placeholder="any"
                             value={minDepth}
                             onChange={(e) => setMinDepth(e.target.value)}
                         />
                     </div>
                     <div className="form-field">
-                        <label htmlFor="maxDepth">Max Depth:</label>
+                        <label htmlFor="maxDepth">To depth</label>
                         <input
                             id="maxDepth"
                             type="number"
-                            placeholder="Optional"
+                            placeholder="any"
                             value={maxDepth}
                             onChange={(e) => setMaxDepth(e.target.value)}
                         />
                     </div>
                     <div className="form-field">
-                        <label htmlFor="limit">Limit:</label>
+                        <label htmlFor="limit">Newest</label>
                         <input
                             id="limit"
                             type="number"
@@ -65,7 +74,7 @@ const Chain = () => {
                         onClick={handleFetchBlocks}
                         disabled={loading}
                     >
-                        {loading ? 'Loading...' : 'Fetch Blocks'}
+                        {loading ? 'Loading…' : 'Refresh'}
                     </button>
                 </div>
                 {error && <p className="error-message">Error: {error}</p>}
@@ -82,7 +91,7 @@ const Chain = () => {
                                 <TreeView blocks={blocks} />
                             </div>
                         ) : (!fetchingBlocks && !loading) ? (
-                            <p className="info-message">Use the form above to query blocks from the blockchain.</p>
+                            <p className="info-message">No blocks yet.</p>
                         ) : null}
                     </div>
                 </div>

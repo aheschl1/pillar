@@ -19,7 +19,5 @@ html, body, #root {
   overflow: hidden; /* keeps children from stretching the flex layout */
 }
 
-.log-view-wrapper {
-  height: 22vh;
-  border-top: 1px solid var(--ink-border);
-}
+.log-view-wrapper { height: 22vh; flex-shrink: 0; }
+.log-view-wrapper.collapsed { height: auto; }

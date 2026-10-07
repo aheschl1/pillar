@@ -1,8 +1,7 @@
 .block-card {
-  position: relative;
   width: 340px;
   margin: 0.5rem 0;
-  padding: 0.9rem 1rem;
+  padding: 0.75rem 0.9rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
@@ -10,29 +9,31 @@
   transition: border-color 0.15s;
 }
 .block-card:hover { border-color: var(--accent); }
-.block-card.expanded { width: 520px; border-color: var(--accent); }
+.block-card.expanded { width: 560px; cursor: auto; }
+.block-card.static { width: 100%; margin: 0; cursor: auto; }
+.block-card.static:hover { border-color: var(--border); }
 
-.expand-indicator {
-  position: absolute;
-  top: 0.4rem;
-  right: 0.6rem;
-  font-size: 0.9rem;
-  color: var(--muted);
-}
+.block-card-top { display: flex; align-items: center; gap: 0.75rem; }
+.block-depth { font-weight: 600; white-space: nowrap; }
+.block-txs { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
+.block-actions { margin-left: auto; display: flex; align-items: center; gap: 0.5rem; }
+.block-open { padding: 0.15rem 0.55rem; font-size: 0.8rem; }
+.expand-indicator { width: 1rem; text-align: center; color: var(--muted); }
 .block-card:hover .expand-indicator { color: var(--accent); }
 
-.block-content-collapsed { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; }
+.block-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  cursor: auto;
+}
 
-.block-field-vital { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; }
-
-.block-header { padding-bottom: 0.6rem; margin-bottom: 0.75rem; border-bottom: 1px solid var(--border); }
-.block-header h3 { margin: 0; }
-
-.block-content { display: flex; flex-direction: column; gap: 0.6rem; }
-
-.block-field { display: flex; flex-direction: column; gap: 0.2rem; }
-.block-field strong { font-size: 0.75rem; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
-.block-field span { font-size: 0.85rem; overflow-wrap: anywhere; }
+.block-field { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: 0.75rem; align-items: baseline; }
+.field-label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.field-value { min-width: 0; font-size: 0.88rem; }
 
 .integer-fields-row {
   display: flex;
@@ -42,10 +43,8 @@
   border-radius: var(--radius);
 }
 .integer-field { display: flex; flex-direction: column; align-items: center; gap: 0.1rem; }
-.integer-field strong { font-size: 0.7rem; font-weight: 500; color: var(--muted); text-transform: uppercase; }
-.integer-field span { font-size: 0.95rem; font-weight: 600; }
+.integer-field span:last-child { font-weight: 600; }
 
-.stampers-list { display: flex; flex-direction: column; gap: 0.25rem; padding-left: 0.5rem; }
+.stampers-list { display: flex; flex-direction: column; gap: 0.2rem; }
 
-.view-explorer-container { display: flex; justify-content: center; margin-top: 0.75rem; }
-.view-explorer-btn { font-size: 0.85rem; }
+.block-card-top .hash-text { white-space: nowrap; }

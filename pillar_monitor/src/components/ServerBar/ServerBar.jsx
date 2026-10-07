@@ -1,5 +1,5 @@
-import React, { useContext, useState, useEffect } from 'react';
-import { ServerContext, useServer } from '../../contexts/serverContext';
+import React from 'react';
+import { useServer } from '../../contexts/serverContext';
 import { useNodeData } from '../../hooks/useNodeData';
 import { useHttp } from '../../hooks/useHttp';
 import './ServerBar.css';
@@ -15,21 +15,14 @@ const ServerBar = () => {
     const { nodeData, error: nodeError } = useNodeData();
     const { post } = useHttp();
 
-    const handleConnectToggle = (event) => {
-        if (isConnected) {
-            setIsConnected(false);
-        } else {
-            // On connect, we read the values directly from the form fields
-            const form = event.currentTarget.closest('.server-bar-controls');
-            const newIp = form.querySelector('#ipAddressInput').value;
-            const newHttp = form.querySelector('#httpPortInput').value;
-            const newLogWs = form.querySelector('#logWsPortInput').value;
-
-            setIpAddress(newIp);
-            setHttpPort(newHttp);
-            setLogWsPort(newLogWs);
-            setIsConnected(true);
-        }
+    // a form, so Enter in any field connects
+    const handleConnect = (event) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        setIpAddress(form.querySelector('#ipAddressInput').value.trim());
+        setHttpPort(form.querySelector('#httpPortInput').value.trim());
+        setLogWsPort(form.querySelector('#logWsPortInput').value.trim());
+        setIsConnected(true);
     };
 
     const handleDisconnect = () => {
@@ -41,7 +34,7 @@ const ServerBar = () => {
 
     return (
         <div className="server-bar">
-            <div className="server-bar-controls">
+            <form className="server-bar-controls" onSubmit={handleConnect}>
                 <div className="server-bar-item">
                     <label>IP Address:</label>
                     <input 
@@ -73,12 +66,12 @@ const ServerBar = () => {
                 </div>
                 <div className="server-bar-item">
                     {isConnected ? (
-                        <button onClick={handleDisconnect} className="connect-button disconnect">Disconnect</button>
+                        <button type="button" onClick={handleDisconnect} className="connect-button disconnect">Disconnect</button>
                     ) : (
-                        <button onClick={handleConnectToggle} className="connect-button">Connect</button>
+                        <button type="submit" className="connect-button">Connect</button>
                     )}
                 </div>
-            </div>
+            </form>
             <div className="server-bar-info">
                 {isConnected && nodeData && (
                     <div className="server-bar-item">

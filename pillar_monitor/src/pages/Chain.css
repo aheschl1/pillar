@@ -82,3 +82,6 @@
 .blocks-graph { display: flex; flex-direction: column; align-items: stretch; }
 .block-with-arrow { display: flex; flex-direction: column; align-items: center; }
 .arrow { font-size: 1.25rem; color: var(--border-strong); margin: 0.25rem 0; }
+
+/* only a fork needs the rail; a single child just gets its line and arrow */
+.children:not(:has(> .child-wrapper + .child-wrapper))::before { display: none; }

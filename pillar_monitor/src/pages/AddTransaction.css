@@ -10,8 +10,6 @@
 .add-tx-right { flex: 1 1 320px; }
 
 .connection-status { font-size: 0.9rem; color: var(--muted); margin-bottom: 1rem; }
-.status-open { color: var(--success); }
-.status-closed { color: var(--danger); }
 
 .add-tx-form {
   display: flex;
@@ -22,7 +20,8 @@
   border-radius: var(--radius);
 }
 
-.add-tx-form input[type="text"], .add-tx-form input[type="number"] { font-family: var(--mono); }
+.add-tx-form label { font-size: 0.85rem; color: var(--muted); }
+.add-tx-form input[type="text"] { font-family: var(--mono); }
 
 .checkbox-line { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; }
 
@@ -47,19 +46,21 @@
 .log-line {
   display: flex;
   gap: 0.5rem;
-  align-items: flex-start;
-  padding: 0.25rem 0;
+  align-items: baseline;
+  padding: 0.3rem 0;
   border-bottom: 1px solid var(--ink-border);
-}
-.log-line pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: var(--mono);
-  font-size: 0.8rem;
+  font-size: 0.85rem;
 }
 
-.prompt { color: var(--accent); font-weight: 700; }
+.prompt { width: 1rem; flex-shrink: 0; color: var(--ink-muted); font-weight: 700; }
+.log-ok .prompt { color: #4ade80; }
+.log-error { color: #f87171; }
+.log-error .prompt { color: #f87171; }
+
+/* hashes on the black console */
+.ws-logs .hash-text { color: var(--ink-text); }
+.ws-logs a.hash-text { color: #93b4fb; }
+.ws-logs .hash-copy { background: transparent; border-color: var(--ink-border); color: var(--ink-muted); }
 
 .empty-log { color: var(--ink-muted); font-size: 0.85rem; text-align: center; padding: 0.5rem; }
 
