@@ -42,3 +42,8 @@
   position: relative;
   background: var(--bg);
 }
+
+.nav-title { padding: 0 0.75rem 1rem; font-weight: 700; letter-spacing: -0.01em; }
+
+.not-connected { max-width: 420px; margin: 4rem auto; padding: 0 1.5rem; text-align: center; }
+.not-connected h3 { margin-bottom: 0.25rem; }

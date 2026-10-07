@@ -26,10 +26,4 @@
 .state-table tbody tr:last-child td { border-bottom: none; }
 .state-table tbody tr:hover { background: var(--subtle); }
 
-.state-table .monospace {
-  display: block;
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.state-table .num { text-align: right; font-variant-numeric: tabular-nums; }

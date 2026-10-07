@@ -1,5 +1,6 @@
 import React from 'react';
-import { toHex } from '../api/utils';
+import Hash from './Hash';
+import { accountLink } from '../api/utils';
 import './StateView.css';
 
 const StateView = ({ accounts }) => {
@@ -9,24 +10,24 @@ const StateView = ({ accounts }) => {
 
     return (
         <div className="state-view">
-            <h4>Account States ({accounts.length})</h4>
+            <h4>Accounts after this block ({accounts.length})</h4>
             <div className="state-table-container">
                 <table className="state-table">
                     <thead>
                         <tr>
                             <th>Address</th>
-                            <th>Balance</th>
-                            <th>Nonce</th>
-                            <th>Reputation</th>
+                            <th className="num">Balance</th>
+                            <th className="num">Nonce</th>
+                            <th className="num">Reputation</th>
                         </tr>
                     </thead>
                     <tbody>
                         {accounts.map((account, idx) => (
                             <tr key={idx}>
-                                <td className="monospace" title={toHex(account.address)}>{toHex(account.address)}</td>
-                                <td>{account.balance}</td>
-                                <td>{account.nonce}</td>
-                                <td>{account.reputation.toFixed(4)}</td>
+                                <td><Hash value={account.address} short to={accountLink(account.address)} /></td>
+                                <td className="num">{account.balance}</td>
+                                <td className="num">{account.nonce}</td>
+                                <td className="num">{account.reputation.toFixed(2)}</td>
                             </tr>
                         ))}
                     </tbody>

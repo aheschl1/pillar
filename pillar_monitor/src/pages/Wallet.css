@@ -20,7 +20,8 @@
   padding-bottom: 1rem;
   border-bottom: 1px solid var(--border);
 }
-.card-balance { font-size: 1.5rem; font-weight: 600; color: var(--accent); }
+.card-balance { font-size: 1.6rem; font-weight: 600; color: var(--accent); }
+.card-balance span { font-size: 0.95rem; font-weight: 400; color: var(--muted); }
 
 .card-body {
   margin-top: 1rem;

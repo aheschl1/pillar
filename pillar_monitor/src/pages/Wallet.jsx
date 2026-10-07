@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useHttp } from '../hooks/useHttp';
-import { toHex } from '../api/utils';
+import Hash from '../components/Hash';
+import { accountLink } from '../api/utils';
 import './Wallet.css';
 
 const Wallet = () => {
@@ -25,24 +26,23 @@ const Wallet = () => {
             <div className="wallet-header">
                 <h2>Wallet</h2>
                 <div>
-                    <button onClick={refetch} className="refresh">Refresh</button>
+                    <button onClick={refetch} className="secondary">Refresh</button>
                 </div>
             </div>
 
-            {loading && <p>Loading wallet...</p>}
-            {error && <p className="error-message">{error}</p>}
+            <p className="small">The wallet this node signs with. Its address is where coins sent to this node arrive.</p>
+            {loading && <p className="small">Loading…</p>}
+            {error && <div className="error-box">{error}</div>}
 
             {data && (
                 <div className="wallet-card">
                     <div className="card-top">
-                        <div className="card-balance">{data.balance} native currency</div>
+                        <div className="card-balance">{data.balance} <span>coins</span></div>
                     </div>
                     <div className="card-body">
                         <div className="card-row">
-                            <div className="label">Public Key</div>
-                            <div className="value"><code>{toHex(data.public_key)}</code>
-                                <button className="copy" onClick={() => copyToClipboard(toHex(data.public_key))}>Copy</button>
-                            </div>
+                            <div className="label">Address</div>
+                            <div className="value"><Hash value={data.public_key} to={accountLink(data.public_key)} /></div>
                         </div>
                         <div className="card-row">
                             <div className="label">Nonce</div>

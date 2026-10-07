@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { usePeers } from '../hooks/usePeers';
 import { useAddPeer } from '../hooks/useAddPeer';
 import { useDiscoverPeers } from '../hooks/useDiscoverPeers';
+import Hash from '../components/Hash';
+import { accountLink } from '../api/utils';
 import './Peers.css';
 
 const AddPeerForm = ({ onPeerAdded }) => {
@@ -62,7 +64,7 @@ const AddPeerForm = ({ onPeerAdded }) => {
                     <button type="submit" disabled={loading}>
                         {loading ? 'Adding...' : 'Add Peer'}
                     </button>
-                    {showSuccess && <p className="success-message">✅ Peer added successfully</p>}
+                    {showSuccess && <p className="success-message">Peer added</p>}
                 </div>
                 {error && <p className="error-message">{error}</p>}
             </form>
@@ -102,7 +104,7 @@ const Peers = () => {
     return (
         <div className="peers-wrapper">
             <div className="peers-header">
-                <h2>Connected Peers</h2>
+                <h2>Peers</h2>
                 <div className="header-actions">
                     <input
                         type="text"
@@ -118,7 +120,7 @@ const Peers = () => {
                         className={`add-peer-toggle ${showAddPanel ? 'open' : ''}`}
                         onClick={() => setShowAddPanel(s => !s)}
                     >
-                        {showAddPanel ? '− Hide Form' : '+ Add Peer'}
+                        {showAddPanel ? 'Cancel' : 'Add peer'}
                     </button>
                 </div>
             </div>
@@ -127,28 +129,26 @@ const Peers = () => {
                 <AddPeerForm onPeerAdded={() => { refetch(); setShowAddPanel(false); }} />
             </div>
 
-            {loading && <p className="status-message">Loading peers...</p>}
+            {loading && peersArr.length === 0 && <p className="status-message">Loading…</p>}
             {error && <p className="error-message">{error}</p>}
-            {showDiscoverSuccess && <p className="success-message">✅ Peer discovery initiated.</p>}
+            {showDiscoverSuccess && <p className="success-message">Asked known peers for theirs.</p>}
             {discoverError && <p className="error-message">{discoverError}</p>}
 
             <div className="peers-grid">
                 {filteredPeers.map(peer => (
                     <div key={peer.public_key} className="peer-card">
                         <div className="peer-top">
-                            <h4>Peer</h4>
-                            <span className="peer-address">
-                                {peer.ip_address}:{peer.port}
-                            </span>
+                            <h4>{peer.ip_address}</h4>
+                            <span className="peer-address">port {peer.port}</span>
                         </div>
                         <div className="peer-body">
                             <label>Public Key</label>
-                            <p className="peer-key">{peer.public_key || 'N/A'}</p>
+                            <p className="peer-key">{peer.public_key ? <Hash value={peer.public_key} to={accountLink(peer.public_key)} /> : 'unknown'}</p>
                         </div>
                     </div>
                 ))}
                 {filteredPeers.length === 0 && !loading && (
-                    <p className="empty-message">No peers found</p>
+                    <p className="empty-message">{searchTerm ? 'No peers match' : 'No peers yet. Add one, or Discover to ask the ones it knows.'}</p>
                 )}
             </div>
         </div>
