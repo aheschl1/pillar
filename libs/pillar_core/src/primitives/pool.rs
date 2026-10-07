@@ -8,11 +8,11 @@ use super::{block::Block, transaction::Transaction};
 #[derive(Clone)]
 pub struct MinerPool {
     // receiver channel
-    transactions_queue: Arc<lfqueue::UnboundedQueue<Transaction>>,
+    transactions_queue: Arc<crossbeam_queue::SegQueue<Transaction>>,
     // proposition blocks
-    block_propositions_queue: Arc<lfqueue::UnboundedQueue<Block>>,
+    block_propositions_queue: Arc<crossbeam_queue::SegQueue<Block>>,
     // ready blocks
-    mine_ready_blocks_queue: Arc<lfqueue::UnboundedQueue<Block>>,
+    mine_ready_blocks_queue: Arc<crossbeam_queue::SegQueue<Block>>,
     // mine abort signal
     pub mine_abort_sender: Sender<u64>,
     pub mine_abort_receiver: Receiver<u64>,
@@ -30,9 +30,9 @@ impl Default for MinerPool {
 impl MinerPool{
     pub fn new() -> Self {
         let (mine_abort_sender, mine_abort_receiver) = flume::unbounded();
-        let transactions_queue = Arc::new(lfqueue::UnboundedQueue::new());
-        let block_propositions_queue = Arc::new(lfqueue::UnboundedQueue::new());
-        let mine_ready_blocks_queue = Arc::new(lfqueue::UnboundedQueue::new());
+        let transactions_queue = Arc::new(crossbeam_queue::SegQueue::new());
+        let block_propositions_queue = Arc::new(crossbeam_queue::SegQueue::new());
+        let mine_ready_blocks_queue = Arc::new(crossbeam_queue::SegQueue::new());
         MinerPool {
             transactions_queue,
             block_propositions_queue,
@@ -45,34 +45,34 @@ impl MinerPool{
     /// Adds a transaction to the pool
     pub fn add_transaction(&self, transaction: Transaction) {
         // send the transaction to the receiver
-        self.transactions_queue.enqueue(transaction);
+        self.transactions_queue.push(transaction);
     }
 
     /// Returns the transaction at the front of the pool
     pub fn pop_transaction(&self) -> Option<Transaction> {
         // receive the transaction from the sender
-        self.transactions_queue.dequeue()
+        self.transactions_queue.pop()
     }
 
     /// Returns the block at the front of the pool
     pub fn pop_block_proposition(&self) -> Option<Block> {
-        self.block_propositions_queue.dequeue()
+        self.block_propositions_queue.pop()
     }
 
     /// Adds a block to the pool
     pub fn add_block_proposition(&self, block: Block) {
         // send the block to the receiver
-        self.block_propositions_queue.enqueue(block);
+        self.block_propositions_queue.push(block);
     }
 
     pub fn add_mine_ready_block(&self, block: Block) {
         // send the block to the receiver
-        self.mine_ready_blocks_queue.enqueue(block);
+        self.mine_ready_blocks_queue.push(block);
     }
     
     pub fn pop_mine_ready_block(&self) -> Option<Block> {
         // receive the block from the sender
-        self.mine_ready_blocks_queue.dequeue()
+        self.mine_ready_blocks_queue.pop()
     }
 
 }

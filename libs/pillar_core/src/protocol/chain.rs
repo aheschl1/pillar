@@ -285,7 +285,7 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
             && signal.try_recv().is_ok() {break;}
         let state = node.inner.state.read().await.clone();
         if !state.is_consume() {continue;}
-        if let Some(block) = node.inner.late_settle_queue.dequeue(){
+        if let Some(block) = node.inner.late_settle_queue.pop(){
             tracing::debug!("Block poped from settle queue");
             let mut chain_lock = node.inner.chain.lock().await;
             let mut chain = chain_lock.as_mut().unwrap();

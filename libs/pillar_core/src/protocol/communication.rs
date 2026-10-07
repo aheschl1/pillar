@@ -38,7 +38,7 @@ pub async fn broadcast_knowledge(node: Node, stop_signal: Option<flume::Receiver
             }
         }
         let mut i = 0;
-        while i < 10 && let Some(broadcast) = node.inner.broadcast_queue.dequeue() {
+        while i < 10 && let Some(broadcast) = node.inner.broadcast_queue.pop() {
             // receive the transaction from the sender
             let hash = broadcast.hash(&mut hasher).unwrap();
             // do not broadcast if already broadcasted

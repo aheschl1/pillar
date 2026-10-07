@@ -82,13 +82,13 @@ pub struct NodeInner {
     // the blockchain
     pub chain: Mutex<Option<Chain>>,
     /// transactions to be broadcasted
-    pub broadcast_queue: lfqueue::UnboundedQueue<Message>,
+    pub broadcast_queue: crossbeam_queue::SegQueue<Message>,
     // a collection of things already broadcasted
     pub broadcasted_already: RwLock<HashSet<StdByteArray>>,
     // transaction filter queue
     pub transaction_filters: Mutex<Vec<(TransactionFilter, Peer)>>,
     /// A queue of blocks which are to be settled to the chain
-    pub late_settle_queue: lfqueue::UnboundedQueue<Block>,
+    pub late_settle_queue: crossbeam_queue::SegQueue<Block>,
     /// the state represents the nodes ability to communicate with other nodes
     pub state: RwLock<NodeState>,
     /// registered filters for the local node - producer will be this node, and consumer will be some backgroung thread that polls
@@ -169,8 +169,8 @@ impl Node {
         chain: Option<Chain>,
         state: NodeState,
     ) -> Self {
-        let broadcast_queue = lfqueue::UnboundedQueue::new();
-        let late_settle_queue = lfqueue::UnboundedQueue::new();
+        let broadcast_queue = crossbeam_queue::SegQueue::new();
+        let late_settle_queue = crossbeam_queue::SegQueue::new();
         let transaction_filters = Mutex::new(Vec::new());
         let broadcasted_already = RwLock::new(HashSet::new());
         let peer_map = peers
@@ -306,7 +306,7 @@ impl Node {
         self.inner.transaction_filters.lock().await.push((filter.clone(), self.clone().into()));
         tracing::info!("Transaction filter registered, starting brodcast");
         // broadcast the filter to all peers
-        self.inner.broadcast_queue.enqueue(Message::TransactionFilterRequest(filter, self.clone().into()));
+        self.inner.broadcast_queue.push(Message::TransactionFilterRequest(filter, self.clone().into()));
         // return the receiver
         receiver
     }
@@ -345,7 +345,7 @@ impl Node {
                 // to be broadcasted
                 if state.is_forward(){
                     tracing::info!("Broadcasting transaction");
-                    self.inner.broadcast_queue.enqueue(Message::TransactionBroadcast(transaction.to_owned()));
+                    self.inner.broadcast_queue.push(Message::TransactionBroadcast(transaction.to_owned()));
                 }
                 Ok(Message::TransactionAck)
             }
@@ -360,7 +360,7 @@ impl Node {
                 // and handle callback if mined
                 if (state.is_track() || state.is_consume()) && block.header.completion.is_some() {
                     tracing::info!("Handling callbacks and settle for mined block.");
-                    self.inner.late_settle_queue.enqueue(block.clone());
+                    self.inner.late_settle_queue.push(block.clone());
                     self.handle_callbacks(&block).await;
                 }
                 
@@ -371,7 +371,7 @@ impl Node {
                         tracing::info!("Stamping and broadcasting only because not ");
                         let _ = self.stamp_block(&mut block);
                     }
-                    self.inner.broadcast_queue.enqueue(Message::BlockTransmission(block)); // forward
+                    self.inner.broadcast_queue.push(Message::BlockTransmission(block)); // forward
                 }
                 Ok(Message::BlockAck)
             },
@@ -417,7 +417,7 @@ impl Node {
                 // place into the transaction filter queue - if it is not already there
                 let mut transaction_filters = self.inner.transaction_filters.lock().await;
                 if transaction_filters.iter().any(|(f, p)| f == filter && p == peer) {
-                    self.inner.broadcast_queue.enqueue(Message::TransactionFilterRequest(filter.to_owned(), peer.to_owned()));
+                    self.inner.broadcast_queue.push(Message::TransactionFilterRequest(filter.to_owned(), peer.to_owned()));
                     transaction_filters.push((filter.to_owned(), peer.to_owned()));
                 }
                 // to be broadcasted

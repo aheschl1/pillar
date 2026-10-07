@@ -18,7 +18,7 @@ ctor = "0.4.2"
 tracing-appender = "0.2.3"
 chrono = "0.4.41"
 tracing-tree = "0.4.0"
-lfqueue = "0.5.0"
+crossbeam-queue = "0.3"
 lz4_flex = "0.11.5"
 bytemuck = {version="1.23.2", features=["derive"]}
 bytes = "1.10.1"
