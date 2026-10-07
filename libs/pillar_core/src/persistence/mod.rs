@@ -12,7 +12,8 @@ use crate::{
 };
 pub mod manager;
 
-pub(crate) trait Persistable
+#[allow(async_fn_in_trait)] // only awaited directly; no caller needs the futures to be Send
+pub trait Persistable
 where
     Self: PillarSerialize,
 {

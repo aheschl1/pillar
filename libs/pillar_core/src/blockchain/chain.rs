@@ -5,7 +5,7 @@ use pillar_crypto::{hashing::DefaultHash, signing::{DefaultVerifier, SigVerFunct
 use tracing::instrument;
 
 use crate::{
-    accounting::{account::Account, state::StateManager}, primitives::{block::{Block, BlockHeader}, errors::BlockValidationError, transaction::Transaction}, protocol::{chain::get_genesis_block, pow::get_difficulty_for_block, reputation::{get_current_reputations_for_stampers, get_current_reputations_for_stampers_from_state}}
+    accounting::{account::Account, state::StateManager}, primitives::{block::{Block, BlockHeader}, errors::BlockValidationError, transaction::Transaction}, protocol::{chain::{get_genesis_account, get_genesis_block}, pow::get_difficulty_for_block, reputation::{get_current_reputations_for_stampers, get_current_reputations_for_stampers_from_state}}
 };
 
 use super::TrimmableChain;
@@ -32,9 +32,10 @@ impl Chain {
     /// Creates a new blockchain with a genesis block.
     pub fn new_with_genesis() -> Self {
         let mut state_manager = StateManager::new();
+        let (genesis_address, genesis_account) = get_genesis_account();
         let state_root = state_manager
             .state_trie
-            .create_genesis([0; 32], Account::default())
+            .create_genesis(genesis_address, genesis_account)
             .expect("Failed to create genesis state root");
 
         let genesis_block = get_genesis_block(Some(state_root));

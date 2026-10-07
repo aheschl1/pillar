@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use pillar_crypto::{hashing::DefaultHash, types::StdByteArray};
 
 
-use crate::{accounting::{account::Account, state::StateManager}, primitives::{block::BlockHeader, errors::BlockValidationError}, protocol::chain::get_genesis_block};
+use crate::{accounting::state::StateManager, primitives::{block::BlockHeader, errors::BlockValidationError}, protocol::chain::{get_genesis_account, get_genesis_block}};
 
 use super::{chain::Chain, TrimmableChain};
 
@@ -21,8 +21,9 @@ impl ChainShard{
     pub fn validate(&self) -> Result<(), BlockValidationError>{
         let mut genesis_found = false;
         let mut state_manager = StateManager::new();
+        let (genesis_address, genesis_account) = get_genesis_account();
         let state_root = state_manager.state_trie
-            .create_genesis([0; 32], Account::default()).unwrap();
+            .create_genesis(genesis_address, genesis_account).unwrap();
 
         for (declared_hash, header) in &self.headers {
             if header.depth == 0{
