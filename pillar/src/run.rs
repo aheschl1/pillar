@@ -3,7 +3,7 @@ use std::sync::{Arc};
 use axum::{extract::{Path, Query, State}, http::HeaderMap, response::IntoResponse, routing::{get, post}, Json, Router};
 use pillar_core::{accounting::wallet::Wallet, nodes::{miner::Miner, node::Node, peer::Peer}, persistence::manager::PersistenceManager, protocol::{peers::{discover_peer, discover_peers}, transactions::submit_transaction}};
 use pillar_serialize::PillarSerialize;
-use pillar_crypto::{signing::SigFunction, types::StdByteArray};
+use pillar_crypto::{signing::{DefaultVerifier, SigFunction, SigVerFunction}, types::StdByteArray};
 use serde::{Deserialize, Serialize};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use tokio::{signal::unix::{signal, SignalKind}, sync::RwLock};
@@ -595,6 +595,63 @@ async fn handle_account_get(
     Json(StatusResponse::success(AccountResponse { address: hex::encode(address), balance, nonce }))
 }
 
+#[derive(Serialize, Deserialize)]
+struct VerifyTransactionRequest {
+    transaction_hash: String,
+    signature: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct VerifiedTransaction {
+    hash: String,
+    block_hash: String,
+    sender: String,
+    receiver: String,
+    amount: u64,
+    nonce: u64,
+}
+
+/// Check that a transaction is in the main chain and that the given signature is its
+/// signature, made by its sender. Succeeds with the transaction's details.
+async fn handle_transaction_verify(
+    State(state): State<AppState>,
+    Json(request): Json<VerifyTransactionRequest>,
+) -> Json<StatusResponse<VerifiedTransaction>> {
+    let Some(hash) = hex::decode(request.transaction_hash.trim()).ok().and_then(|b| <StdByteArray>::try_from(b).ok()) else {
+        return Json(StatusResponse::error("Transaction hash must be 32 hex-encoded bytes".to_string()));
+    };
+    let Some(signature) = hex::decode(request.signature.trim()).ok().and_then(|b| <[u8; 64]>::try_from(b).ok()) else {
+        return Json(StatusResponse::error("Signature must be 64 hex-encoded bytes".to_string()));
+    };
+    let chain = state.node.lock_chain().await;
+    let Some(chain) = chain.as_ref() else {
+        return Json(StatusResponse::error("Node has no chain".to_string()));
+    };
+    // walk the main chain only, from the tip back to genesis
+    let mut block_hash = chain.deepest_hash;
+    while let Some(block) = chain.get_block(&block_hash) {
+        if let Some(transaction) = block.transactions.iter().find(|tx| tx.hash == hash) {
+            let verifier = DefaultVerifier::from_bytes(&transaction.header.sender);
+            if signature != transaction.signature || !verifier.verify(&signature, transaction) {
+                return Json(StatusResponse::error("Signature does not match the transaction".to_string()));
+            }
+            return Json(StatusResponse::success(VerifiedTransaction {
+                hash: hex::encode(transaction.hash),
+                block_hash: hex::encode(block_hash),
+                sender: hex::encode(transaction.header.sender),
+                receiver: hex::encode(transaction.header.receiver),
+                amount: transaction.header.amount,
+                nonce: transaction.header.nonce,
+            }));
+        }
+        if block.header.depth == 0 {
+            break;
+        }
+        block_hash = block.header.previous_hash;
+    }
+    Json(StatusResponse::error("Transaction is not in the chain".to_string()))
+}
+
 async fn handle_init_download(
     State(state): State<AppState>,
 ) -> Json<StatusResponse<()>> {
@@ -695,6 +752,7 @@ pub async fn launch_node(
         .route("/peer/discover", post(handle_peer_discover)) // do peer discovery
         .route("/init", post(handle_init_download))
         .route("/faucet", post(handle_faucet_post))
+        .route("/verify_transaction", post(handle_transaction_verify))
         .with_state(state.clone())
         .layer(cors);
     
