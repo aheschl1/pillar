@@ -1,5 +1,4 @@
 import React, { useState, useMemo } from 'react';
-import PanZoom from 'react-easy-panzoom';
 import { useBlocks } from '../hooks/useBlocks';
 import BlockComponent from '../components/BlockComponent';
 import { toHex } from '../api/utils';
@@ -73,13 +72,7 @@ const Chain = () => {
             </div>
 
             <div className="chain-viewport">
-                <PanZoom
-                    minZoom={0.5}
-                    maxZoom={2}
-                    autoCenter
-                    enableBoundingBox
-                    style={{ width: '100%', height: '80vh', background: '#f9f9f9' }}
-                >
+                <div className="chain-canvas">
                     <div className="chain-visualization">
                         {fetchingBlocks && <p className="loading-message">Loading block details...</p>}
 
@@ -92,7 +85,7 @@ const Chain = () => {
                             <p className="info-message">Use the form above to query blocks from the blockchain.</p>
                         ) : null}
                     </div>
-                </PanZoom>
+                </div>
             </div>
         </div>
     );

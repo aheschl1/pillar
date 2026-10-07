@@ -1,246 +1,84 @@
 .chain-container {
-    display: flex;
-    flex-direction: column;
-    height: 100%; /* or 100% if parent already controls height */
-    width: 100%;
-    background-color: #fff;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
 }
 
-
-.chain-header {
-    padding: 15px 20px;
-    border-bottom: 1px solid #e0e0e0;
-}
-
-.chain-header h2 {
-    margin: 0;
-}
+.chain-header { padding: 1.5rem 1.5rem 0; }
+.chain-header h2 { margin: 0; }
 
 .query-form {
-    padding: 20px;
-    background-color: #f8f9fa;
-    border-bottom: 1px solid #e0e0e0;
+  padding: 1rem 1.5rem 1.25rem;
+  border-bottom: 1px solid var(--border);
 }
+.query-form h3 { color: var(--muted); font-size: 0.9rem; font-weight: 500; }
 
-.query-form h3 {
-    margin-top: 0;
-    margin-bottom: 15px;
-    color: #333;
-}
+.form-fields { display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap; }
 
-.form-fields {
-    display: flex;
-    gap: 15px;
-    align-items: flex-end;
-    flex-wrap: wrap;
-}
+.form-field { display: flex; flex-direction: column; gap: 0.3rem; }
+.form-field label { font-size: 0.8rem; color: var(--muted); }
+.form-field input { width: 9rem; }
 
-.form-field {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-}
+.chain-viewport { flex: 1; min-height: 0; display: flex; }
 
-.form-field label {
-    font-weight: 600;
-    font-size: 14px;
-    color: #555;
-}
+/* scrolls both ways when the tree is wider or taller than the page */
+.chain-canvas { flex: 1; overflow: auto; }
 
-.form-field input {
-    padding: 8px 12px;
-    border: 1px solid #ccc;
-    border-radius: 5px;
-    font-size: 14px;
-    width: 150px;
-}
+.chain-visualization { padding: 0.75rem; width: max-content; min-width: 100%; }
 
-.form-field input:focus {
-    outline: none;
-    border-color: #007bff;
-}
-
-.fetch-button {
-    padding: 8px 20px;
-    background-color: #007bff;
-    color: white;
-    border: none;
-    border-radius: 5px;
-    font-size: 14px;
-    cursor: pointer;
-    transition: background-color 0.2s;
-}
-
-.fetch-button:hover:not(:disabled) {
-    background-color: #0056b3;
-}
-
-.fetch-button:disabled {
-    background-color: #ccc;
-    cursor: not-allowed;
-}
-
-.error-message {
-    color: #d9534f;
-    margin-top: 10px;
-    font-size: 14px;
-}
-
-.loading-message {
-    color: #007bff;
-    padding: 20px;
-    text-align: center;
-    font-size: 16px;
-}
-
-.info-message {
-    color: #666;
-    padding: 20px;
-    text-align: center;
-}
-
-.chain-viewport {
-    flex: 1;               /* fills remaining vertical space */
-    width: 100vw;
-    height: 100vh;
-    display: flex;
-    overflow: hidden;      /* prevent double scrollbars */
-}
-
-.react-transform-wrapper,
-.react-transform-component {
-    width: 100vw;
-    height: 10vh;
-}
-
-.react-transform-component {
-    display: flex;
-    justify-content: center;
-    align-items: center; /* optional, adjust as needed */
-}
-
-.chain-visualization {
-    flex-grow: 1;
-    /* allow the pan/zoom wrapper to control panning; remove nested scroll */
-    padding: 10px;
-    width: 100%;
-    height: 100%;
-}
-
-.chain-visualization h3 {
-    margin-top: 0;
-    color: #333;
-}
-
-.blocks-graph {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0;
-}
-
-.block-with-arrow {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-}
-
-.arrow {
-    font-size: 24px;
-    color: #007bff;
-    margin: 5px 0;
-}
-
-/* Tree layout styles */
-.tree-root {
-    display: flex;
-    justify-content: flex-start;
-    align-items: flex-start;
-    padding: 20px;
-}
-
-.tree-container {
-    display: flex;
-    flex-direction: column;
-    gap: 18px;
-}
-
-.root-subtree {
-    display: flex;
-    flex-direction: column;
-}
-
-.tree-node {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-}
+/* Block tree */
+.tree-root { display: flex; justify-content: flex-start; align-items: flex-start; padding: 1.25rem; }
+.tree-container { display: flex; flex-direction: column; gap: 1rem; }
+.root-subtree { display: flex; flex-direction: column; }
+.tree-node { display: flex; flex-direction: column; align-items: center; }
 
 .children {
-    display: flex;
-    gap: 24px;
-    margin-top: 12px;
-    align-items: flex-start;
+  position: relative;
+  display: flex;
+  gap: 1.5rem;
+  margin-top: 0.75rem;
+  align-items: flex-start;
 }
 
-.child-wrapper {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-}
+.connector-v { width: 1px; height: 16px; background: var(--border-strong); margin-top: 6px; }
 
-.connector-v {
-    width: 2px;
-    height: 16px;
-    background: #c0c0c0;
-    margin-top: 6px;
-}
-
-/* horizontal rail connecting children under the parent */
+/* rail across a block's children, with a line and arrowhead down into each */
 .children::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: #c0c0c0;
-    top: -6px; /* sits just above the children's vertical connectors */
-    z-index: 0;
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -6px;
+  height: 1px;
+  background: var(--border-strong);
 }
 
-/* each child gets a vertical connector and arrowhead */
-.child-wrapper {
-    position: relative;
-    padding-top: 8px;
-}
+.child-wrapper { position: relative; display: flex; flex-direction: column; align-items: center; padding-top: 8px; }
 
 .child-wrapper::before {
-    /* vertical line from rail down to the child */
-    content: '';
-    position: absolute;
-    top: -6px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 2px;
-    height: 18px;
-    background: #c0c0c0;
-    z-index: 1;
+  content: '';
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 1px;
+  height: 18px;
+  background: var(--border-strong);
 }
 
 .child-wrapper::after {
-    /* arrowhead pointing down into the child */
-    content: '';
-    position: absolute;
-    top: 12px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-top: 8px solid #c0c0c0;
-    z-index: 2;
+  content: '';
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid var(--border-strong);
 }
 
+/* Linear view */
+.blocks-graph { display: flex; flex-direction: column; align-items: stretch; }
+.block-with-arrow { display: flex; flex-direction: column; align-items: center; }
+.arrow { font-size: 1.25rem; color: var(--border-strong); margin: 0.25rem 0; }

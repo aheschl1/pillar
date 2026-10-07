@@ -36,8 +36,8 @@ const ServerBar = () => {
         setIsConnected(false);
     };
 
-    const httpStatusColor = isConnected && nodeData && !nodeError ? 'green' : 'red';
-    const wsStatusColor = isConnected ? 'green' : 'red'; // This assumes ws connects if isConnected is true
+    const httpStatusColor = isConnected && nodeData && !nodeError ? 'var(--success)' : 'var(--danger)';
+    const wsStatusColor = isConnected ? 'var(--success)' : 'var(--danger)'; // This assumes ws connects if isConnected is true
 
     return (
         <div className="server-bar">
