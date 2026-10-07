@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use pillar_crypto::hashing::DefaultHash;
+use pillar_crypto::{hashing::DefaultHash, types::StdByteArray};
 use tracing::instrument;
 
 use crate::{primitives::{block::{Block, BlockTail}, messages::Message}, protocol::{pow::mine, reputation::get_current_reputations_for_stampers}};
@@ -54,16 +54,31 @@ async fn monitor_transaction_pool(miner: Miner) {
     // monitor the pool for transactions
     let mut transactions = HashSet::new();
     let mut last_polled_at: Option<u64> = None;
+    // A transaction reaches the pool once per peer that relays it. Mine each one once:
+    // remember what went into proposed blocks (until the chain has settled them), and drop
+    // copies whose nonce the chain has already used.
+    let mut proposed: HashSet<StdByteArray> = HashSet::new();
     loop {
         tracing::trace!("waiting for transactions to mine...");
 
         if let Some(transaction) = miner.node.miner_pool.as_ref().unwrap().pop_transaction(){
+            if proposed.contains(&transaction.hash) {
+                continue; // a relayed copy of one already in a proposed block
+            }
             let chain = miner.node.inner.chain.lock().await;
             if let Some(chain) = chain.as_ref() {
+                let state_root = chain.get_state_root().unwrap();
                 // check if the transaction is valid
-                if chain.validate_transaction(&transaction, chain.get_state_root().unwrap()).is_err() {
+                if chain.validate_transaction(&transaction, state_root).is_err() {
                     tracing::warn!("Invalid transaction received: {:?}", transaction);
                     continue; // skip invalid transactions
+                }
+                let account_nonce = chain.state_manager
+                    .get_account(&transaction.header.sender, state_root)
+                    .map_or(0, |account| account.nonce);
+                if transaction.header.nonce < account_nonce {
+                    tracing::debug!("Skipping transaction {:?}: already in the chain", transaction.hash);
+                    continue;
                 }
             } else {
                 tracing::error!("Chain is not initialized, cannot validate transaction.");
@@ -102,6 +117,11 @@ async fn monitor_transaction_pool(miner: Miner) {
             // let address = *self.node.public_key;
             let pool = miner.node.miner_pool.clone();
             pool.as_ref().unwrap().add_block_proposition(block);
+            // once settled, the nonce check catches copies, so this only has to cover blocks in flight
+            if proposed.len() > 10_000 {
+                proposed.clear();
+            }
+            proposed.extend(transactions.iter().map(|transaction| transaction.hash));
             // reset for next mine
             last_polled_at = None;
             transactions = HashSet::new();

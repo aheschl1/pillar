@@ -356,12 +356,10 @@ impl Node {
                     self.settle_unmined_block(&mut block).await?;
                 }
                 
-                // send block to be settled, 
-                // and handle callback if mined
+                // send block to be settled; callbacks fire once it is in the chain
                 if (state.is_track() || state.is_consume()) && block.header.completion.is_some() {
-                    tracing::info!("Handling callbacks and settle for mined block.");
+                    tracing::info!("Queueing mined block for settlement.");
                     self.inner.late_settle_queue.push(block.clone());
-                    self.handle_callbacks(&block).await;
                 }
                 
                 if state.is_forward(){
@@ -426,11 +424,9 @@ impl Node {
             Message::TransactionFilterResponse(filter, header) => {
                 if state.is_track(){
                     let mut callbacks = self.inner.filter_callbacks.lock().await;
-                    if let Some(sender) = callbacks.get_mut(filter) {
-                        // send the block header to the sender
-                        sender.send(*header).unwrap();
-                        // remove the callback - one time only
-                        callbacks.remove(filter);
+                    if let Some(sender) = callbacks.remove(filter) {
+                        // one time only; whoever was waiting may have gone away
+                        let _ = sender.send(*header);
                     }
                 }
                 Ok(Message::TransactionFilterAck)
@@ -503,7 +499,9 @@ impl Node {
 
     /// Spawn a task to match registered transaction filters against this block.
     #[instrument(name = "Node::handle_callbacks", skip(self, block))]
-    async fn handle_callbacks(&self, block: &Block){
+    /// Tell whoever registered a filter that a block matching it is in the chain. Called only
+    /// for blocks that were validated and added, and each filter fires once.
+    pub(crate) async fn handle_callbacks(&self, block: &Block){
         let block_clone = block.clone();
         let initpeer: Peer = self.clone().into();
         let selfclone = self.clone();
@@ -511,21 +509,26 @@ impl Node {
         tokio::spawn(async move {
             // check filters for callback
             let mut filters = selfclone.inner.transaction_filters.lock().await;
-            for ( filter, peer) in filters.iter_mut() {
-                if filter.matches(&block_clone){
-                    tracing::info!("Found callback for filter: {:?}", filter);
-                    peer.communicate(&Message::TransactionFilterResponse(filter.clone(), block_clone.header), &initpeer).await.unwrap();
-                    // check if there is a registered callback
-                    let mut callbacks: tokio::sync::MutexGuard<'_, HashMap<TransactionFilter, Sender<BlockHeader>>> = selfclone.inner.filter_callbacks.lock().await;
-                    // TODO maybe this is not nececarry - some rework?
-                    if let Some(sender) = callbacks.get_mut(filter) {
-                        // send the block header to the sender
-                        sender.send(block_clone.header).unwrap();
-                        // remove the callback - one time only
-                        callbacks.remove(filter);
-                    } // we will get the callback here if and only if the current active node is the one that resgistered the callback
-                    // otherwise, it will come in the FilterResponse
+            let matched: Vec<(TransactionFilter, Peer)> = filters.iter()
+                .filter(|(filter, _)| filter.matches(&block_clone))
+                .cloned()
+                .collect();
+            // one time only, like the local callback below
+            filters.retain(|(filter, _)| !filter.matches(&block_clone));
+            drop(filters);
+            for (filter, peer) in matched.iter() {
+                tracing::info!("Found callback for filter: {:?}", filter);
+                if let Err(e) = peer.communicate(&Message::TransactionFilterResponse(filter.clone(), block_clone.header), &initpeer).await {
+                    tracing::warn!("Could not deliver callback to {}:{}: {}", peer.ip_address, peer.port, e);
                 }
+                // check if there is a registered callback
+                let mut callbacks: tokio::sync::MutexGuard<'_, HashMap<TransactionFilter, Sender<BlockHeader>>> = selfclone.inner.filter_callbacks.lock().await;
+                // TODO maybe this is not nececarry - some rework?
+                if let Some(sender) = callbacks.remove(filter) {
+                    // one time only; whoever was waiting may have gone away
+                    let _ = sender.send(block_clone.header);
+                } // we will get the callback here if and only if the current active node is the one that resgistered the callback
+                // otherwise, it will come in the FilterResponse
             }
         });
     }

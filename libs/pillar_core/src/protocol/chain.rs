@@ -343,6 +343,8 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
             if chain.add_new_block(block.clone()).is_err() {continue;} // failed to add the block
             tracing::info!("Valid block added to chain.");
             drop(chain_lock); // free lock cause why not
+            // only now is the block known to be valid, so only now tell anyone waiting on it
+            node.handle_callbacks(&block).await;
             if let Some(ref pool) = node.miner_pool{
                 // signal to stop trying to mine the current block
                 let _ = pool.mine_abort_sender.send(block.header.depth);

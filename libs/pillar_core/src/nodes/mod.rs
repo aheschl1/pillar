@@ -1610,6 +1610,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_relayed_copy_not_mined_again(){
+        // A transaction reaches a miner once per peer that relays it. A copy arriving after the
+        // original was mined must not be mined again: alongside a new transaction it would make
+        // that block invalid, and the new transaction would be lost with it.
+        let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 40));
+        let port_a = 8040;
+        let ip_address_b = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 41));
+        let port_b = 8041;
+        let (node_b, wallet_b) = create_empty_node_genisis(
+            ip_address_b,
+            port_b,
+            vec![],
+            true,
+        )
+        .await;
+        let (mut node_a, mut wallet_a) = create_empty_node_genisis(
+            ip_address_a,
+            port_a,
+            vec![Peer::new(wallet_b.address, ip_address_b, port_b)],
+            true,
+        )
+        .await;
+
+        let mut miner_b = Miner::new(node_b.clone()).unwrap();
+        miner_b.serve().await;
+        node_a.serve().await;
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await; // wait for the nodes to connect
+        discover_peers(&mut node_a).await.unwrap();
+
+        // a callback now means the block is in the chain, so wait on those
+        let (channel, first) = submit_transaction(&mut node_a, &mut wallet_a, wallet_b.address, 0, true, None).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(30), channel.unwrap().recv_async())
+            .await.expect("first transaction was not mined").unwrap();
+
+        // a late relay of the first transaction, then a new one in the same batch
+        miner_b.node.miner_pool.as_ref().unwrap().add_transaction(first);
+        let (channel, second) = submit_transaction(&mut node_a, &mut wallet_a, wallet_b.address, 0, true, None).await.unwrap();
+        let header = tokio::time::timeout(std::time::Duration::from_secs(30), channel.unwrap().recv_async())
+            .await.expect("second transaction was not mined").unwrap();
+
+        // the block the callback names is in the chain, and holds only the new transaction
+        let chain_a = node_a.inner.chain.lock().await;
+        let block = chain_a.as_ref().unwrap()
+            .get_block(&header.completion.as_ref().expect("callback for an unmined block").hash)
+            .expect("callback for a block that is not in the chain");
+        assert_eq!(block.transactions.iter().map(|t| t.hash).collect::<Vec<_>>(), vec![second.hash]);
+    }
+
+    #[tokio::test]
     async fn test_invalid_transaction_not_included(){
         let ip_address_a = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 14));
         let port_a = 8004;
