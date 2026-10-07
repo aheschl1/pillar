@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useHttp } from '../hooks/useHttp';
+import { toHex } from '../api/utils';
 import './Wallet.css';
 
 const Wallet = () => {
@@ -39,8 +40,8 @@ const Wallet = () => {
                     <div className="card-body">
                         <div className="card-row">
                             <div className="label">Public Key</div>
-                            <div className="value"><code>{Array.isArray(data.public_key) ? data.public_key.map(b => b.toString(16).padStart(2, '0')).join('') : data.public_key}</code>
-                                <button className="copy" onClick={() => copyToClipboard(Array.isArray(data.public_key) ? data.public_key.join(',') : data.public_key)}>Copy</button>
+                            <div className="value"><code>{toHex(data.public_key)}</code>
+                                <button className="copy" onClick={() => copyToClipboard(toHex(data.public_key))}>Copy</button>
                             </div>
                         </div>
                         <div className="card-row">
