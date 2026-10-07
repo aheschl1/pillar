@@ -99,17 +99,25 @@ pub async fn discover_chain(node: Node) -> Result<(), QueryError> {
     // broadcast the chain shard request to all peers
     let peers = node.inner.peers.read().await;
     let mut chain_shards = Vec::new();
+    // one unreachable or misbehaving peer must not stop the download; deepest_shard fails
+    // if no peer gave a valid shard
     for (_, peer) in peers.iter() {
         // send the chain shard request to the peer
-        let response = peer.communicate(&Message::ChainShardRequest, &(node.clone().into())).await
-            .map_err(QueryError::IOError)?;
+        let response = match peer.communicate(&Message::ChainShardRequest, &(node.clone().into())).await {
+            Ok(response) => response,
+            Err(e) => {
+                warn!("Skipping peer {}:{} for chain discovery: {}", peer.ip_address, peer.port, e);
+                continue;
+            }
+        };
         if let Message::ChainShardResponse(shard) = response {
             // add the shard to the chain   
-            shard.validate().map_err(
-                QueryError::BadBlock
-            )?;
+            if let Err(e) = shard.validate() {
+                // TODO perhaps blacklist the peer
+                warn!("Skipping invalid chain shard from {}:{}: {:?}", peer.ip_address, peer.port, e);
+                continue;
+            }
             chain_shards.push(shard);
-            // TODO perhaps blacklist the peer
         }  
 
     }

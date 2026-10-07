@@ -19,9 +19,14 @@ pub async fn discover_peers(node: &Node) -> Result<(), std::io::Error> {
     let mut new_peers: Vec<Peer> = vec![];
     // send a message to the peers
     for (_, peer) in node.inner.peers.read().await.iter() {
-        let peers = peer
-            .communicate(&Message::PeerRequest, &node.clone().into())
-            .await?;
+        // peers go offline; ask the rest instead of giving up
+        let peers = match peer.communicate(&Message::PeerRequest, &node.clone().into()).await {
+            Ok(peers) => peers,
+            Err(e) => {
+                tracing::warn!("Skipping peer {}:{} for peer discovery: {}", peer.ip_address, peer.port, e);
+                continue;
+            }
+        };
         match peers {
             Message::PeerResponse(peers) => {
                 for peer in peers {
