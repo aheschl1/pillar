@@ -1,4 +1,4 @@
-use std::cmp::min;
+use std::cmp::max;
 
 use flume::Receiver;
 use pillar_crypto::{hashing::{HashFunction, Hashable}, types::StdByteArray};
@@ -44,8 +44,9 @@ pub fn get_difficulty_for_block(
 
     if cummulative_reputation > POR_THRESHOLD {
         // if the cummulative reputation is above the threshold, we use the depth to determine difficulty
-        // reduce the depth argument. -1 depth for every 10 reputation points
-        return (_get_base_difficulty_from_depth(min(1, header.depth - (cummulative_reputation / 10.0) as u64)), true);
+        // reduce the depth argument. -1 depth for every 10 reputation points, down to depth 1
+        let discount = (cummulative_reputation / 10.0) as u64;
+        return (_get_base_difficulty_from_depth(max(1, header.depth.saturating_sub(discount))), true);
     }
     (_get_base_difficulty_from_depth(header.depth), false)
 }
@@ -85,5 +86,37 @@ pub async fn mine(
                 if d == block.header.depth {return;}
             }
         block.header.nonce += 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pillar_crypto::hashing::DefaultHash;
+
+    use crate::primitives::{block::{Block, BlockTail}, transaction::Transaction};
+    use super::{get_difficulty_for_block, _get_base_difficulty_from_depth};
+
+    fn header_at(depth: u64) -> crate::primitives::block::BlockHeader {
+        let transaction = Transaction::new([0; 32], [0; 32], 0, 0, 0, &mut DefaultHash::new());
+        Block::new([0; 32], 0, 0, vec![transaction], None, BlockTail::default().stamps, depth, None, None, &mut DefaultHash::new()).header
+    }
+
+    #[test]
+    fn test_reputation_discounts_depth() {
+        // 60 reputation takes 6 off the depth: 1003 -> 997, back below the step at 1000
+        assert_eq!(get_difficulty_for_block(&header_at(1003), &vec![60.0]), (_get_base_difficulty_from_depth(997), true));
+        assert!(get_difficulty_for_block(&header_at(1003), &vec![60.0]).0 < get_difficulty_for_block(&header_at(1003), &vec![]).0);
+    }
+
+    #[test]
+    fn test_reputation_discount_stops_at_depth_one() {
+        // a discount larger than the depth must not underflow
+        assert_eq!(get_difficulty_for_block(&header_at(3), &vec![100.0]), (_get_base_difficulty_from_depth(1), true));
+    }
+
+    #[test]
+    fn test_low_reputation_gets_no_discount() {
+        // below POR_THRESHOLD, and reputations under POR_INCLUSION_MINIMUM don't count
+        assert_eq!(get_difficulty_for_block(&header_at(1204), &vec![40.0, 0.5]), (_get_base_difficulty_from_depth(1204), false));
     }
 }
