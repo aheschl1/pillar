@@ -613,7 +613,7 @@ pub async fn launch_node(
 ) {
 
     let persistence_manager = PersistenceManager::new(Some(root));
-    let wallet = match persistence_manager.load_wallet().await.expect("Failed to access wallet on disk") {
+    let mut wallet = match persistence_manager.load_wallet().await.expect("Failed to access wallet on disk") {
         Some(wallet) => {
             tracing::info!("Loaded existing wallet from disk with address: {}", hex::encode(wallet.address));
             wallet
@@ -642,6 +642,18 @@ pub async fn launch_node(
         )
     };
     node.ip_address = ip_address; // override ip address to bind to, as it may have changed
+
+    // The transaction pool isn't saved, so nothing this wallet sent before a restart is still
+    // pending, but the saved nonce counts it. Continue from the chain's nonce instead, or every
+    // later transaction would leave a gap and be rejected.
+    if let Some(chain) = node.inner.chain.lock().await.as_ref() {
+        let account = chain.get_state_root().and_then(|root| chain.state_manager.get_account(&wallet.address, root));
+        let chain_nonce = account.map_or(0, |account| account.nonce);
+        if *wallet.nonce_mut() != chain_nonce {
+            tracing::info!("Wallet nonce {} reset to the chain's {}", wallet.nonce(), chain_nonce);
+            *wallet.nonce_mut() = chain_nonce;
+        }
+    }
 
     
     for peer in &wkps {
