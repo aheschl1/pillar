@@ -308,7 +308,11 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
         if let Some(signal) = &stop_signal
             && signal.try_recv().is_ok() {break;}
         let state = node.inner.state.read().await.clone();
-        if !state.is_consume() {continue;}
+        // nothing to do: wait instead of spinning, which kept a core busy on an idle node
+        if !state.is_consume() || node.inner.late_settle_queue.is_empty() {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            continue;
+        }
         if let Some(block) = node.inner.late_settle_queue.pop(){
             tracing::debug!("Block poped from settle queue");
             let mut chain_lock = node.inner.chain.lock().await;
