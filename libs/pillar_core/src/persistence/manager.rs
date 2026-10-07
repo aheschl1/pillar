@@ -53,7 +53,9 @@ impl PersistenceManager {
     }
 
     pub async fn save_node(&self, node: &Node) -> Result<(), std::io::Error>{
-        if let Some(chain) = node.inner.chain.lock().await.as_ref() {
+        // a copy, so the chain is not held while every block is written out
+        let chain = node.inner.chain.lock().await.clone();
+        if let Some(chain) = chain {
             chain.save(&self.chain_root).await?;
         }
 

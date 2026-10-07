@@ -25,16 +25,16 @@ pub async fn broadcast_knowledge(node: Node, stop_signal: Option<flume::Receiver
             while let Some(proposed_block) = pool.pop_block_proposition(){
                 let m: Message = Message::BlockTransmission(proposed_block);
                 let hash = m.hash(&mut hasher).unwrap();
-                let mut broadcased = node.inner.broadcasted_already.write().await;
-                // do not broadcast if already broadcasted
-                if broadcased.contains(&hash) {
+                // do not broadcast if already broadcasted; the set is not held while peers answer,
+                // since our own request handlers need it (two nodes doing this to each other
+                // used to wait on each other until the 30s timeout)
+                if !node.inner.broadcasted_already.write().await.insert(hash) {
                     continue;
                 }
-                // add the message to the broadcasted list
-                broadcased.insert(hash);
-                // drop(broadcased);
                 // broadcast the message
-                node.broadcast(&m).await?;
+                if let Err(e) = node.broadcast(&m).await {
+                    tracing::error!("Failed to broadcast a block proposal: {e}");
+                }
             }
         }
         let mut i = 0;
@@ -49,12 +49,14 @@ pub async fn broadcast_knowledge(node: Node, stop_signal: Option<flume::Receiver
                 }
                 broadcasted_already.insert(hash);
             }
-            node.broadcast(&broadcast).await?;
+            if let Err(e) = node.broadcast(&broadcast).await {
+                tracing::error!("Failed to broadcast {}: {e}", broadcast.name());
+            }
             // add the message to the broadcasted list
             i += 1; // We want to make sure we check back at the mining pool
         }
-        // this is a hack to simply yield to the runtime
-        tokio::time::sleep(Duration::from_millis(1)).await;
+        // this is a hack to simply yield to the runtime; 1ms woke the node 1000 times a second
+        tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
 
@@ -91,7 +93,7 @@ pub async fn join_private_communication(
         let decrypted_message = match message {
             Message::EncryptedMessage(payload) => {
                 let decrypted_bytes = shared_secret.decrypt(payload)?;
-                let message: Message = Message::deserialize_pillar(&decrypted_bytes)?;
+                let message: Message = crate::protocol::serialization::decode_message(&decrypted_bytes)?;
                 message
             },
             _ => return Err(std::io::Error::new(
@@ -138,7 +140,9 @@ pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
         let mut stream = match timeout(tokio::time::Duration::from_secs(3),listener.accept()).await {
             Ok(Ok((stream, _))) => stream,
             Ok(Err(e)) => {
+                // e.g. out of file descriptors; this fails at once again, so don't spin on it
                 tracing::error!("Error accepting connection: {}", e);
+                tokio::time::sleep(Duration::from_millis(100)).await;
                 continue;
             },
             Err(_) => {
@@ -192,7 +196,11 @@ pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
                 }
             };
             // read actual the message
-            let message: Result<Message, std::io::Error> = read_standard_message(&mut stream).await;
+            // a peer that connects and sends nothing would otherwise hold this task forever
+            let message: Result<Message, std::io::Error> = match timeout(Duration::from_secs(10), read_standard_message(&mut stream)).await {
+                Ok(message) => message,
+                Err(_) => Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "Request timeout.")),
+            };
             if let Err(e) = &message {
                 send_error_message(&mut stream, e).await;
                 return;
@@ -211,11 +219,10 @@ pub async fn serve_peers(node: Node, stop_signal: Option<flume::Receiver<()>>) {
                 Ok(message) => {
                     let bytes = package_standard_message(&message).unwrap();
                     // write the size of the message as 4 bytes - 4 bytes because we are using u32
-                    stream
-                        .write_all(&bytes)
-                        .await
-                        .unwrap();
-                    tracing::debug!("Sent {} bytes to peer", bytes.len());
+                    // fails only if the peer has gone
+                    if stream.write_all(&bytes).await.is_ok() {
+                        tracing::debug!("Sent {} bytes to peer", bytes.len());
+                    }
                 }
             };
         });

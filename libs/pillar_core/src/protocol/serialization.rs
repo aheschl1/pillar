@@ -30,12 +30,31 @@ pub fn package_standard_message(message: &Message) -> Result<Vec<u8>, std::io::E
 ///
 /// Expects the stream to provide a 4-byte little-endian length, then exactly that many
 /// bytes comprising a serialized `Message` (code + payload). Returns the decoded `Message`.
+/// Largest message a peer may send. The biggest real messages carry a whole chain, which is
+/// far smaller; without a limit a peer could claim up to 4 GiB and make us hold it.
+pub const MAX_MESSAGE_SIZE: u32 = 64 * 1024 * 1024;
+
 pub async fn read_standard_message(stream: &mut TcpStream) -> Result<Message, std::io::Error>{    
     let length = stream.read_u32_le().await?;
+    if length > MAX_MESSAGE_SIZE {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Message of {length} bytes is over the {MAX_MESSAGE_SIZE} byte limit"),
+        ));
+    }
     let mut buffer = vec![0u8; length as usize];
     stream.read_exact(&mut buffer).await?;
-    let message = PillarSerialize::deserialize_pillar(&buffer)?;
-    Ok(message)
+    decode_message(&buffer)
+}
+
+/// Decode a message a peer sent. Several decoders index or assert on lengths taken from the
+/// data, so a malformed message can panic; that panic would end whichever background task
+/// was reading, so it is turned into an error here. Decoding only reads the buffer.
+pub fn decode_message(bytes: &[u8]) -> Result<Message, std::io::Error> {
+    std::panic::catch_unwind(|| Message::deserialize_pillar(bytes)).unwrap_or_else(|_| Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        "Malformed message",
+    )))
 }
 
 impl PillarSerialize for crate::primitives::messages::Message {

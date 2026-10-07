@@ -6,21 +6,22 @@ import { toHex, hexToBytes, blockLink } from '../api/utils';
 import Hash from '../components/Hash';
 import './AddTransaction.css';
 
-// The node answers with {success, message, transaction_hash}; its completion message names
-// the block as a byte array, e.g. "Transaction [..] completed in block: [..]".
+// The node answers with {success, message, transaction_hash}.
 const describe = (msg) => {
     if (typeof msg !== 'object' || msg === null) return { kind: 'info', text: String(msg) };
     if (!msg.success) return { kind: 'error', text: msg.error || msg.message || 'The node rejected it' };
-    const arrays = [...(msg.message || '').matchAll(/\[([\d,\s]+)\]/g)].map((m) => m[1].split(',').map(Number));
-    if (/completed in block/.test(msg.message || '') && arrays.length >= 2) {
-        return { kind: 'ok', text: 'Mined in block', block: toHex(arrays[1]) };
-    }
     return {
         kind: 'ok',
         text: msg.message || 'Accepted',
         hash: msg.transaction_hash ? toHex(msg.transaction_hash) : null,
     };
 };
+
+// Whether it's mined comes from polling /transaction/{hash}, not the node's completion
+// callback: that callback needs other nodes to reach this one, and when they can't (a
+// firewall), it never comes and the send looks stuck.
+const POLL_MS = 3000;
+const POLL_FOR_MS = 15 * 60 * 1000;
 
 const AddTransaction = () => {
     const { connected, messages, connect, send } = useWs('/ws');
@@ -29,13 +30,43 @@ const AddTransaction = () => {
     const [receiver, setReceiver] = useState(searchParams.get('to') || '');
     const [amount, setAmount] = useState('');
     const [registerCb, setRegisterCb] = useState(true);
+    const watchMined = useRef(true);
     const [logs, setLogs] = useState([]);
     const logRef = useRef(null);
+    const polls = useRef([]);
 
     const log = (entry) => setLogs((l) => [...l, entry]);
 
+    const watch = (hash) => {
+        const started = Date.now();
+        const timer = setInterval(async () => {
+            try {
+                const res = await fetch(`http://${ipAddress}:${httpPort}/transaction/${hash}`);
+                const body = await res.json();
+                if (body.success && body.body.status === 'confirmed') {
+                    clearInterval(timer);
+                    log({ kind: 'ok', text: 'Mined in block', block: toHex(body.body.block) });
+                    return;
+                }
+            } catch {
+                // the node is briefly unreachable; keep trying
+            }
+            if (Date.now() - started > POLL_FOR_MS) {
+                clearInterval(timer);
+                log({ kind: 'info', text: 'Not mined after 15 minutes; check its status later', hash });
+            }
+        }, POLL_MS);
+        polls.current.push(timer);
+    };
+
+    useEffect(() => () => polls.current.forEach(clearInterval), []);
+
     useEffect(() => {
-        if (messages.length) log(describe(messages[messages.length - 1]));
+        if (!messages.length) return;
+        const entry = describe(messages[messages.length - 1]);
+        log(entry);
+        if (entry.kind === 'ok' && entry.hash && watchMined.current) watch(entry.hash);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [messages]);
 
     useEffect(() => {
@@ -66,11 +97,12 @@ const AddTransaction = () => {
             }
         }
 
+        watchMined.current = registerCb;
         const ok = send({
             type: 'TransactionPost',
             receiver: bytes,
             amount: coins,
-            register_completion_callback: registerCb
+            register_completion_callback: false
         });
         log(ok ? { kind: 'info', text: `Sending ${coins} coins…` } : { kind: 'error', text: 'The websocket is not open' });
     };

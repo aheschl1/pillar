@@ -93,7 +93,16 @@ pub struct NodeInner {
     pub state: RwLock<NodeState>,
     /// registered filters for the local node - producer will be this node, and consumer will be some backgroung thread that polls
     pub filter_callbacks: Mutex<HashMap<TransactionFilter, Sender<BlockHeader>>>,
+    /// broadcasts in a row each peer has failed; peers are dropped at MAX_PEER_FAILURES
+    pub peer_failures: Mutex<HashMap<StdByteArray, u32>>,
 }
+
+/// A peer that fails this many broadcasts in a row is forgotten; nodes that leave would
+/// otherwise cost every broadcast a timeout forever. A peer that comes back declares itself again.
+const MAX_PEER_FAILURES: u32 = 3;
+
+/// Filters kept for peers; the oldest go first, since unmatched filters never leave otherwise.
+const MAX_TRANSACTION_FILTERS: usize = 10_000;
 
 /// A Pillar network node capable of participating in consensus and gossip.
 #[derive(Clone)]
@@ -188,6 +197,7 @@ impl Node {
             transaction_filters,
             broadcast_queue,
             filter_callbacks: Mutex::new(HashMap::new()), // initially no callbacks
+            peer_failures: Mutex::new(HashMap::new()),
             state: RwLock::new(state), // initially in discovery mode
             late_settle_queue,
             }.into(),
@@ -216,9 +226,19 @@ impl Node {
         
         self.initialize_chain().await;
        
-        let _ = tokio::spawn(serve_peers(self.clone(), Some(serve_killer.1.clone())));
-        let _ = tokio::spawn(broadcast_knowledge(self.clone(), Some(broadcast_killer.1.clone())));
-        let _ = tokio::spawn(block_settle_consumer(self.clone(), Some(settle_killer.1.clone())));
+        let (node, killer) = (self.clone(), serve_killer.1.clone());
+        supervise("serve_peers", move || serve_peers(node.clone(), Some(killer.clone())));
+        let (node, killer) = (self.clone(), broadcast_killer.1.clone());
+        supervise("broadcast_knowledge", move || {
+            let (node, killer) = (node.clone(), killer.clone());
+            async move {
+                if let Err(e) = broadcast_knowledge(node, Some(killer)).await {
+                    tracing::error!("broadcast_knowledge stopped: {e}");
+                }
+            }
+        });
+        let (node, killer) = (self.clone(), settle_killer.1.clone());
+        supervise("block_settle_consumer", move || block_settle_consumer(node.clone(), Some(killer.clone())));
         self.kill_broadcast = Some(broadcast_killer.0);
         self.kill_serve = Some(serve_killer.0);
         self.kill_settle = Some(settle_killer.0);
@@ -247,9 +267,12 @@ impl Node {
                 Some(handle)
             },
             _ => {
-                panic!("Unexpected node state for initialization: {state:?}");
+                // already loading, syncing or serving (e.g. a second /init)
+                tracing::warn!("Not initializing the chain in state {state:?}");
+                None
             }
         };
+        let syncing = matches!(state, NodeState::ChainOutdated | NodeState::FailedChainSync);
         if let Some(handle) = handle {
             let self_clone = self.clone();
             tokio::spawn(async move {
@@ -263,13 +286,21 @@ impl Node {
                     },
                     Ok(Err(e)) => {
                         tracing::error!(target: "node_serve", "Node failed to initialize chain: {:?}", e);
-                        *self_clone.inner.state.write().await = if state == NodeState::ChainSyncing {
+                        *self_clone.inner.state.write().await = if syncing {
                             NodeState::FailedChainSync
                         } else {
                             NodeState::FailedChainLoad
-                        }; // back to previous state
+                        };
                     },
-                    Err(e) => tracing::error!(target: "node_serve", "Failed to start node: {:?}", e),
+                    Err(e) => {
+                        // a panic; without this the node would stay loading for good
+                        tracing::error!(target: "node_serve", "Chain initialization panicked: {:?}", e);
+                        *self_clone.inner.state.write().await = if syncing {
+                            NodeState::FailedChainSync
+                        } else {
+                            NodeState::FailedChainLoad
+                        };
+                    },
                 }
             });
         }
@@ -323,7 +354,8 @@ impl Node {
             Message::PeerRequest => {
                 // send all peers
                 let response = Message::PeerResponse(self.inner.peers.read().await.values().cloned().collect());
-                tracing::debug!("Sending {:?}", response);
+                // not the whole response, which can list every peer
+                tracing::debug!("Sending {}", response.name());
                 Ok(response)
             }
             Message::ChainRequest => {
@@ -332,7 +364,8 @@ impl Node {
                 }else{
                     Ok(Message::Error("Chain not downloaded for peer".into()))
                 };
-                tracing::debug!("Sending {:?}", response);
+                // not the whole response, which can be the entire chain
+                tracing::debug!("Sending {}", response.as_ref().map_or("an error".to_string(), |m| m.name()));
                 response
             },
             Message::TransactionBroadcast(transaction) => {
@@ -396,14 +429,15 @@ impl Node {
             },
             Message::TransactionProofRequest(stub) => {
                 if state.is_consume(){
+                    // one block is needed, so look it up rather than copying the chain
                     let lock = self.inner.chain.lock().await;
-                    let chain = lock.as_ref().unwrap().clone();
-
-                    let block = chain.get_block(&stub.block_hash);
+                    let block = lock.as_ref().unwrap().get_block(&stub.block_hash);
                     
                     if let Some(block) = block{
-                        let proof = block.get_proof_for_transaction(stub.transaction_hash);
-                        Ok(Message::TransactionProofResponse(proof.unwrap()))
+                        match block.get_proof_for_transaction(stub.transaction_hash) {
+                            Some(proof) => Ok(Message::TransactionProofResponse(proof)),
+                            None => Ok(Message::Error("Transaction is not in the block".into())),
+                        }
                     }else{
                         Ok(Message::Error("Block does not exist".into()))
                     }                 
@@ -414,8 +448,11 @@ impl Node {
             Message::TransactionFilterRequest(filter, peer) => {
                 // place into the transaction filter queue - if it is not already there
                 let mut transaction_filters = self.inner.transaction_filters.lock().await;
-                if transaction_filters.iter().any(|(f, p)| f == filter && p == peer) {
+                if !transaction_filters.iter().any(|(f, p)| f == filter && p == peer) {
                     self.inner.broadcast_queue.push(Message::TransactionFilterRequest(filter.to_owned(), peer.to_owned()));
+                    if transaction_filters.len() >= MAX_TRANSACTION_FILTERS {
+                        transaction_filters.remove(0);
+                    }
                     transaction_filters.push((filter.to_owned(), peer.to_owned()));
                 }
                 // to be broadcasted
@@ -482,8 +519,10 @@ impl Node {
             );
         tracing::debug!("Block has {} stamps, our stamp: {}, already broadcasted: {}", n_stamps, has_our_stamp, already_broadcasted);
         
-        if n_stamps < N_TRANSMISSION_SIGNATURES && !has_our_stamp {
-            assert!(!already_broadcasted, "Block already broadcasted, but not stamped by us. This should not happen.");
+        if n_stamps < N_TRANSMISSION_SIGNATURES && !has_our_stamp && already_broadcasted {
+            // a peer sent back a block we relayed without our stamp on it; don't stamp it twice
+            tracing::warn!("Block already broadcasted, but not stamped by us; not stamping it again.");
+        } else if n_stamps < N_TRANSMISSION_SIGNATURES && !has_our_stamp {
             tracing::info!("Stamping block with our signature.");
             let _ = self.stamp_block(block);
             n_stamps += 1; // we have stamped the block
@@ -589,6 +628,29 @@ impl From<Node> for Peer {
     }
 }
 
+/// Run a background task, starting it again if it panics; a task that panicked used to just
+/// stop, leaving the node up but no longer serving, gossiping or settling blocks.
+pub(crate) fn supervise<F, Fut>(name: &'static str, make: F)
+where
+    F: Fn() -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = ()> + Send + 'static,
+{
+    // started here rather than inside the watcher, so it starts as soon as a plain spawn would
+    let mut task = tokio::spawn(make());
+    tokio::spawn(async move {
+        loop {
+            match task.await {
+                Err(e) if e.is_panic() => {
+                    tracing::error!("{name} panicked; restarting it: {e}");
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    task = tokio::spawn(make());
+                }
+                _ => break, // stopped on purpose
+            }
+        }
+    });
+}
+
 pub(crate) trait Broadcaster {
     /// Broadcast a message to all peers.
     async fn broadcast(&self, message: &Message) -> Result<Vec<Message>, std::io::Error>;
@@ -600,16 +662,41 @@ impl Broadcaster for Node {
         message = ?message.name()
     ))]
     async fn broadcast(&self, message: &Message) -> Result<Vec<Message>, std::io::Error> {
-        // send a message to all peers
+        // send to all peers at once, so peers that are gone cost one timeout, not one each
+        let peers: Vec<Peer> = self.inner.peers.read().await.values().copied().collect();
+        let initializing_peer: Peer = self.into();
+        let results = futures_util::future::join_all(
+            peers.iter().map(|peer| peer.communicate(message, &initializing_peer))
+        ).await;
         let mut responses = Vec::new();
-        let peers = self.inner.peers.read().await.clone();
-        for (_, peer) in peers.iter(){
-            let response = peer.communicate(message, &self.into()).await;
-            if let Err(e) = response {
-                tracing::error!("Failed to communicate with peer {:?}: {:?}", peer.public_key, e);
-                continue; // skip this peer
+        let mut forget = Vec::new();
+        {
+            let mut failures = self.inner.peer_failures.lock().await;
+            for (peer, result) in peers.iter().zip(results) {
+                match result {
+                    Ok(response) => {
+                        failures.remove(&peer.public_key);
+                        responses.push(response);
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to communicate with peer {:?}: {:?}", peer.public_key, e);
+                        let count = failures.entry(peer.public_key).or_insert(0);
+                        *count += 1;
+                        if *count >= MAX_PEER_FAILURES {
+                            tracing::warn!("Forgetting peer {}:{} after {} failed broadcasts", peer.ip_address, peer.port, count);
+                            failures.remove(&peer.public_key);
+                            forget.push(peer.public_key);
+                        }
+                    }
+                }
             }
-            responses.push(response.unwrap());
+        }
+        // not under `failures`, which every broadcast needs, while waiting for the peer list
+        if !forget.is_empty() {
+            let mut known = self.inner.peers.write().await;
+            for public_key in forget {
+                known.remove(&public_key);
+            }
         }
         Ok(responses)
     }

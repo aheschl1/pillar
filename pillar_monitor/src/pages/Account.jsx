@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useServer } from '../contexts/serverContext';
-import { toHex, hexToBytes } from '../api/utils';
+import { toHex, hexToBytes, blockLink, accountLink } from '../api/utils';
 import Hash from '../components/Hash';
 import './Account.css';
 
-// Any account's balance and nonce at the chain's tip: ?address=...
+// Any account's balance and nonce at the chain's tip, and its transactions: ?address=...
 const Account = () => {
     const { ipAddress, httpPort, isConnected } = useServer();
     const [searchParams, setSearchParams] = useSearchParams();
@@ -13,22 +13,26 @@ const Account = () => {
     const address = (searchParams.get('address') || '').toLowerCase();
     const [input, setInput] = useState(address);
     const [account, setAccount] = useState(null);
+    const [history, setHistory] = useState(null);
     const [error, setError] = useState(null);
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
         setInput(address);
         setAccount(null);
+        setHistory(null);
         setError(null);
         if (!address || !isConnected) return;
         let cancelled = false;
         setLoading(true);
-        fetch(`http://${ipAddress}:${httpPort}/account/${address}`)
-            .then((res) => res.json())
-            .then((body) => {
+        const get = (path) => fetch(`http://${ipAddress}:${httpPort}${path}`).then((res) => res.json());
+        Promise.all([get(`/account/${address}`), get(`/account/${address}/transactions?limit=100`)])
+            .then(([body, transactions]) => {
                 if (cancelled) return;
                 if (body.success) setAccount(body.body);
                 else setError(body.error || 'Lookup failed');
+                // an older node has no history endpoint; the balance is still worth showing
+                if (transactions.success) setHistory(transactions.body);
             })
             .catch((e) => { if (!cancelled) setError(e.message); })
             .finally(() => { if (!cancelled) setLoading(false); });
@@ -68,6 +72,38 @@ const Account = () => {
                             Send coins to this address
                         </button>
                     </div>
+                </div>
+            )}
+
+            {account && history && (
+                <div className="account-history">
+                    <h3>Transactions</h3>
+                    {history.length === 0 ? (
+                        <p className="small">None in the main chain yet.</p>
+                    ) : (
+                        <table>
+                            <thead>
+                                <tr><th></th><th>Coins</th><th>With</th><th>Block</th><th>Confirmations</th><th>Transaction</th></tr>
+                            </thead>
+                            <tbody>
+                                {history.map((entry) => {
+                                    const tx = entry.transaction;
+                                    const other = entry.direction === 'received' ? tx.sender : tx.receiver;
+                                    return (
+                                        <tr key={toHex(tx.hash)} className={`direction-${entry.direction}`}>
+                                            <td>{entry.direction === 'received' ? 'in' : entry.direction === 'sent' ? 'out' : 'self'}</td>
+                                            <td>{entry.direction === 'sent' ? '−' : entry.direction === 'received' ? '+' : ''}{tx.amount}</td>
+                                            <td><Hash value={toHex(other)} short to={accountLink(other)} /></td>
+                                            <td><Hash value={toHex(entry.block)} short to={blockLink(entry.block)} /> <span className="small">#{entry.depth}</span></td>
+                                            <td>{entry.confirmations}</td>
+                                            <td><Hash value={toHex(tx.hash)} short /></td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    )}
+                    {history.length === 100 && <p className="small">Showing the latest 100.</p>}
                 </div>
             )}
             {!address && !error && (

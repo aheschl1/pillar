@@ -43,6 +43,9 @@ async fn query_block_from_peer(
     Ok(block)
 }
 
+/// How many times a block is asked for (from random peers) before the download fails
+const BLOCK_QUERY_ATTEMPTS: usize = 10;
+
 /// Given a shard (validated) uses the node to get the chain
 async fn shard_to_chain(node: &Node, shard: ChainShard) -> Result<Chain, QueryError> {
     let mut threads = Vec::new();
@@ -50,21 +53,23 @@ async fn shard_to_chain(node: &Node, shard: ChainShard) -> Result<Chain, QueryEr
     for (hash, _) in shard.headers{
         let nodeclone = node.clone();
         let handle = tokio::spawn(async move{
-            loop{ // keep asking for the node until we pass
-                let mut peer = *nodeclone.clone().inner.peers.read().await.values().choose(&mut rng()).unwrap(); // random peer
-                let block = query_block_from_peer(&mut peer, &nodeclone.clone().into(), hash).await;
-                if let Ok(block) = block {
-                    // we got the block, send it to the channel
-                    return block;
+            // ask random peers a few times; a block nobody serves fails the download
+            for _ in 0..BLOCK_QUERY_ATTEMPTS {
+                let peer = nodeclone.inner.peers.read().await.values().choose(&mut rng()).copied();
+                let Some(mut peer) = peer else { break }; // no peers left
+                if let Ok(block) = query_block_from_peer(&mut peer, &nodeclone.clone().into(), hash).await {
+                    return Ok(block);
                 }
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             }
+            Err(QueryError::NoReply)
         });
         threads.push(handle);
     }
     // let the threads finish
     let mut blocks: Vec<Block> = Vec::new();
     for thread in threads {
-        blocks.push(thread.await.unwrap());
+        blocks.push(thread.await.map_err(|_| QueryError::NoReply)??);
     }
     // we need to work our way up by depth
     // sort by depth
@@ -74,11 +79,17 @@ async fn shard_to_chain(node: &Node, shard: ChainShard) -> Result<Chain, QueryEr
     for block in &blocks[1..]{ // skip the first - genesis
         let mut block = block.to_owned();
         let hash = block.header.completion.as_ref().expect("Expected complete block").hash;
+        let mut attempts = 0;
         loop{ // we need to keep going until it passes full validation
             match chain.add_new_block(block){
-                Err(_) => { // failed validation
-                    let mut peer = *node.inner.peers.read().await.values().choose(&mut rng()).unwrap(); // random peer
-                    block = query_block_from_peer(&mut peer, &node.clone().into(), hash).await?; // one more attempt, then fail.
+                Err(e) => { // failed validation; ask another peer, a few times
+                    attempts += 1;
+                    if attempts >= BLOCK_QUERY_ATTEMPTS {
+                        return Err(QueryError::BadBlock(e));
+                    }
+                    let peer = node.inner.peers.read().await.values().choose(&mut rng()).copied();
+                    let Some(mut peer) = peer else { return Err(QueryError::NoReply) };
+                    block = query_block_from_peer(&mut peer, &node.clone().into(), hash).await?;
                 }
                 _ => {
                     break;
@@ -96,12 +107,12 @@ pub async fn discover_chain(node: Node) -> Result<(), QueryError> {
     discover_peers(&node).await.map_err(
         QueryError::IOError
     )?;
-    // broadcast the chain shard request to all peers
-    let peers = node.inner.peers.read().await;
+    // broadcast the chain shard request to all peers; from a copy, so the list is free while they answer
+    let peers: Vec<Peer> = node.inner.peers.read().await.values().copied().collect();
     let mut chain_shards = Vec::new();
     // one unreachable or misbehaving peer must not stop the download; deepest_shard fails
     // if no peer gave a valid shard
-    for (_, peer) in peers.iter() {
+    for peer in peers.iter() {
         // send the chain shard request to the peer
         let response = match peer.communicate(&Message::ChainShardRequest, &(node.clone().into())).await {
             Ok(response) => response,
@@ -121,7 +132,6 @@ pub async fn discover_chain(node: Node) -> Result<(), QueryError> {
         }  
 
     }
-    drop(peers);
     // find deepest out of peers
     let shard = deepest_shard(&chain_shards)?;
     // now we have valid shards
@@ -133,7 +143,11 @@ pub async fn discover_chain(node: Node) -> Result<(), QueryError> {
 /// Find the deepest chain shard - they shoudl in theory be the same but we want the longest
 /// TODO: Maybe we should check agreement of hashes and such, but with POW deepest should be accurate
 pub fn deepest_shard(shards: &[ChainShard]) -> Result<ChainShard, QueryError> {
-    let shard = shards.iter().max_by_key(|shard| shard.leaves.iter().max_by_key(|leaf| shard.headers[*leaf].depth).unwrap());
+    // by the depth of each shard's deepest leaf; leaves the shard has no header for don't count
+    let shard = shards.iter()
+        .filter_map(|shard| shard.leaves.iter().filter_map(|leaf| shard.headers.get(leaf)).map(|header| header.depth).max().map(|depth| (shard, depth)))
+        .max_by_key(|(_, depth)| *depth)
+        .map(|(shard, _)| shard);
     match shard {
         Some(shard) => Ok(shard.clone()),
         None => Err(QueryError::NoReply),   
@@ -185,19 +199,24 @@ pub async fn sync_chain(node: Node) -> Result<(), QueryError> {
         tracing::info!("No peers to sync with, skipping chain sync");
         return Ok(());
     }
-    // the sync request
-    let mut chain = node.inner.chain.lock().await;
-    if chain.is_none() {
-        return Err(QueryError::InsufficientInfo("Chain is not initialized".to_string()));
-    }
-    let chain = chain.as_mut().unwrap();
-    let leaves = chain.leaves.clone();
+    // the sync request; the chain is not held while peers answer, which can take a while
+    let leaves = match node.inner.chain.lock().await.as_ref() {
+        Some(chain) => chain.leaves.clone(),
+        None => return Err(QueryError::InsufficientInfo("Chain is not initialized".to_string())),
+    };
     
     let request = Message::ChainSyncRequest(leaves.iter().copied().collect());
     // broadcast the request
     let responses = node.broadcast(&request).await.map_err(
         QueryError::IOError
     )?;
+    let mut chain_lock = node.inner.chain.lock().await;
+    let chain = chain_lock.as_mut().unwrap();
+    if chain.leaves != leaves {
+        // the chain grew while we waited; the answers are for the old leaves
+        tracing::info!("Chain changed during sync, skipping these responses");
+        return Ok(());
+    }
     if responses.is_empty() {
         tracing::info!("No responses to chain sync request, skipping sync");
         return Ok(());
@@ -215,7 +234,10 @@ pub async fn sync_chain(node: Node) -> Result<(), QueryError> {
                     let leaf = &shard.deepest_hash;
                     let mut curr = shard.blocks.get(leaf).cloned();
                     tracing::debug!("Length of shard: {}", shard.blocks.len());
-                    while let Some(current_block) = curr{
+                    // a peer's blocks can point back at each other in a cycle; never walk more than there are
+                    let mut steps = 0;
+                    while let Some(current_block) = curr && steps <= shard.blocks.len() {
+                        steps += 1;
                         // two things can happen here - if the existing chain has the previous block
                         // then we need to validate the block on that chain - otherwise validate on the shard
                         tracing::debug!("Found connection {:?}", leaves.contains(&current_block.header.previous_hash));
@@ -251,7 +273,7 @@ pub async fn sync_chain(node: Node) -> Result<(), QueryError> {
             let mut to_add = vec![]; // record them in order to add shallowest first
             let mut curr = chain_extension.blocks.get(extension_leaf);
             // we need to travel backwards again :()
-            while let Some(current_block) = curr{
+            while let Some(current_block) = curr && to_add.len() <= chain_extension.blocks.len() {
                 to_add.push(current_block.clone());
                 // already been verified :()
                 curr = chain_extension.blocks.get(&current_block.header.previous_hash);
@@ -308,7 +330,11 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
         if let Some(signal) = &stop_signal
             && signal.try_recv().is_ok() {break;}
         let state = node.inner.state.read().await.clone();
-        if !state.is_consume() {continue;}
+        // nothing to do: wait instead of spinning, which kept a core busy on an idle node
+        if !state.is_consume() || node.inner.late_settle_queue.is_empty() {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            continue;
+        }
         if let Some(block) = node.inner.late_settle_queue.pop(){
             tracing::debug!("Block poped from settle queue");
             let mut chain_lock = node.inner.chain.lock().await;
@@ -322,10 +348,16 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
                 drop(chain_lock); // free the lock before we call sync
                 let initial_state = node.inner.state.read().await.clone();
                 *node.inner.state.write().await = NodeState::ChainSyncing;
-                let result = sync_chain(node.clone()).await.map_err(|e| {
-                    warn!("Failed to sync chain: {:?}. Skipping block settlement.", e);
-                    e
-                });
+                // in its own task, so that if it panics the state is still restored
+                let result = match tokio::spawn(sync_chain(node.clone())).await {
+                    Ok(result) => result.map_err(|e| {
+                        warn!("Failed to sync chain: {:?}. Skipping block settlement.", e);
+                    }),
+                    Err(e) => {
+                        tracing::error!("Chain sync panicked: {e}. Skipping block settlement.");
+                        Err(())
+                    }
+                };
                 *node.inner.state.write().await = initial_state; // restore state
                 if result.is_err() {continue;} // failed to sync chain, skip settlement
 
@@ -345,7 +377,7 @@ pub async fn block_settle_consumer(node: Node, stop_signal: Option<flume::Receiv
             drop(chain_lock); // free lock cause why not
             // only now is the block known to be valid, so only now tell anyone waiting on it
             node.handle_callbacks(&block).await;
-            if let Some(ref pool) = node.miner_pool{
+            if let Some(ref pool) = node.miner_pool && pool.is_active() {
                 // signal to stop trying to mine the current block
                 let _ = pool.mine_abort_sender.send(block.header.depth);
             }

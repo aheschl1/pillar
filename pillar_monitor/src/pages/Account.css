@@ -18,3 +18,9 @@
 .account-row { display: grid; grid-template-columns: 6rem minmax(0, 1fr); gap: 0.75rem; align-items: baseline; }
 
 .account-actions { margin-top: 0.5rem; }
+
+.account-history { margin-top: 24px; }
+.account-history table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+.account-history th, .account-history td { text-align: left; padding: 6px 8px; border-bottom: 1px solid rgba(127, 127, 127, 0.25); }
+.account-history .direction-received td:nth-child(2) { color: #2e9e5b; }
+.account-history .direction-sent td:nth-child(2) { color: #c0563c; }

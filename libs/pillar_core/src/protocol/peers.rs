@@ -17,8 +17,10 @@ pub async fn discover_peers(node: &Node) -> Result<(), std::io::Error> {
         .cloned()
         .collect::<HashSet<_>>();
     let mut new_peers: Vec<Peer> = vec![];
-    // send a message to the peers
-    for (_, peer) in node.inner.peers.read().await.iter() {
+    // send a message to the peers; from a copy, since holding the list while they answer
+    // stops every incoming connection (each one may add its sender to the list)
+    let peers: Vec<Peer> = node.inner.peers.read().await.values().copied().collect();
+    for peer in peers.iter() {
         // peers go offline; ask the rest instead of giving up
         let peers = match peer.communicate(&Message::PeerRequest, &node.clone().into()).await {
             Ok(peers) => peers,
