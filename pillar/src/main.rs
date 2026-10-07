@@ -59,6 +59,8 @@ struct Args {
     genesis: bool,
     #[arg(long, help = "Start node as a miner")]
     miner: bool,
+    #[arg(long, help = "Coins POST /faucet sends to each wallet it creates (faucet disabled if unset)")]
+    faucet_amount: Option<u64>,
 }
 
 
@@ -97,7 +99,8 @@ async fn main() -> Result<(), ()> {
         args.miner,
         wkps,
         ip_address,
-        log_dir
+        log_dir,
+        args.faucet_amount
     ).await;
     Ok(())
 }

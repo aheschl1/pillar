@@ -4,7 +4,7 @@ use pillar_crypto::{hashing::{DefaultHash, Hashable}, types::StdByteArray};
 use rand::{rng, seq::{IteratorRandom}};
 use tracing::{instrument, warn};
 
-use crate::{blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, nodes::{node::{Broadcaster, Node, NodeState}, peer::Peer}, primitives::{block::{Block, BlockTail}, errors::{BlockValidationError, QueryError}, messages::Message, transaction::Transaction}, protocol::difficulty::MIN_DIFFICULTY};
+use crate::{accounting::account::Account, blockchain::{chain::Chain, chain_shard::ChainShard, TrimmableChain}, nodes::{node::{Broadcaster, Node, NodeState}, peer::Peer}, primitives::{block::{Block, BlockTail}, errors::{BlockValidationError, QueryError}, messages::Message, transaction::Transaction}, protocol::{difficulty::MIN_DIFFICULTY, pow::is_valid_hash}};
 
 use super::peers::discover_peers;
 
@@ -132,11 +132,27 @@ pub fn deepest_shard(shards: &[ChainShard]) -> Result<ChainShard, QueryError> {
     }
 }
 
+/// The only account in the genesis state: the treasury
+pub fn get_genesis_account() -> (StdByteArray, Account) {
+    (
+        crate::GENESIS_TREASURY_ADDRESS,
+        Account::new(crate::GENESIS_TREASURY_ADDRESS, crate::GENESIS_TREASURY_BALANCE)
+    )
+}
+
 /// The definition of the genisis block
+/// It is never mined, but peers still check its proof of work, so it takes the first nonce
+/// that meets the minimum difficulty; every node derives the same one.
 pub fn get_genesis_block(state_root: Option<StdByteArray>) -> Block{
+    (0..).map(|nonce| genesis_block_with_nonce(state_root, nonce))
+        .find(|block| is_valid_hash(MIN_DIFFICULTY, &block.header.hash(&mut DefaultHash::new()).unwrap()))
+        .unwrap()
+}
+
+fn genesis_block_with_nonce(state_root: Option<StdByteArray>, nonce: u64) -> Block{
     Block::new(
         [0; 32], 
-        0, 
+        nonce, 
         0, 
         vec![
             Transaction::new([0; 32], [0;32], 0, 0, 0, &mut DefaultHash::new())

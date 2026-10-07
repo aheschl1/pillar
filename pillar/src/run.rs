@@ -1,11 +1,12 @@
 use std::sync::{Arc};
 
 use axum::{extract::{Path, Query, State}, http::HeaderMap, response::IntoResponse, routing::{get, post}, Json, Router};
-use pillar_core::{accounting::wallet::Wallet, nodes::{miner::Miner, node::Node, peer::Peer}, persistence::manager::PersistenceManager, protocol::peers::{discover_peer, discover_peers}};
+use pillar_core::{accounting::wallet::Wallet, nodes::{miner::Miner, node::Node, peer::Peer}, persistence::manager::PersistenceManager, protocol::{peers::{discover_peer, discover_peers}, transactions::submit_transaction}};
+use pillar_serialize::PillarSerialize;
 use pillar_crypto::{signing::SigFunction, types::StdByteArray};
 use serde::{Deserialize, Serialize};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use tokio::sync::RwLock;
+use tokio::{signal::unix::{signal, SignalKind}, sync::RwLock};
 use crate::{log_stream::ws_logs, ws_handles::{handle_transaction_post, TransactionPost}};
 use tower_http::cors::{CorsLayer, Any};
 
@@ -13,7 +14,8 @@ use tower_http::cors::{CorsLayer, Any};
 #[derive(Clone)]
 struct AppState {
     node: Node,
-    wallet: Arc<RwLock<Wallet>>
+    wallet: Arc<RwLock<Wallet>>,
+    faucet_amount: Option<u64>
 }
 
 #[derive(Serialize, Deserialize)]
@@ -506,6 +508,93 @@ async fn handle_state_get(
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct FaucetResponse {
+    address: String,
+    private_key: String,
+    /// the wallet as a node stores it (`wallet.bin`), hex encoded
+    wallet_file: String,
+    amount: u64,
+    transaction_hash: String,
+}
+
+/// Create a wallet and pay it from this node's wallet.
+/// The new wallet is returned and never stored; if the caller loses it, the coins are gone.
+async fn handle_faucet_post(
+    State(mut state): State<AppState>,
+) -> Json<StatusResponse<FaucetResponse>> {
+    let Some(amount) = state.faucet_amount else {
+        return Json(StatusResponse::error("Faucet is disabled".to_string()));
+    };
+    let new_wallet = Wallet::generate_random();
+    let wallet_file = match new_wallet.serialize_pillar() {
+        Ok(bytes) => bytes,
+        Err(e) => return Json(StatusResponse::error(format!("Failed to serialize wallet: {e}"))),
+    };
+
+    // held until the broadcast finishes, so faucet payments get consecutive nonces
+    let mut wallet = state.wallet.write().await;
+    // the in-memory nonce runs ahead of the chain while payments are pending, and the copy
+    // on disk can lag behind it after a restart; never go below what the chain has seen
+    let chain_nonce = {
+        let chain = state.node.lock_chain().await;
+        chain.as_ref()
+            .and_then(|chain| chain.get_state_root().and_then(|root| chain.state_manager.get_account(&wallet.address, root)))
+            .map(|account| account.nonce)
+    };
+    if let Some(chain_nonce) = chain_nonce {
+        let nonce = wallet.nonce_mut();
+        *nonce = (*nonce).max(chain_nonce);
+    }
+
+    match submit_transaction(&mut state.node, &mut wallet, new_wallet.address, amount, false, None).await {
+        Ok((_, transaction)) => {
+            tracing::info!("Faucet paid {} to {}", amount, hex::encode(new_wallet.address));
+            Json(StatusResponse::success(FaucetResponse {
+                address: hex::encode(new_wallet.address),
+                private_key: hex::encode(new_wallet.get_private_key()),
+                wallet_file: hex::encode(wallet_file),
+                amount,
+                transaction_hash: hex::encode(transaction.hash),
+            }))
+        }
+        Err(e) => {
+            // no peer accepted it, so the nonce was not used; hand it back
+            *wallet.nonce_mut() -= 1;
+            Json(StatusResponse::error(format!("Failed to submit transaction: {e:?}")))
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct AccountResponse {
+    address: String,
+    balance: u64,
+    nonce: u64,
+}
+
+/// Balance and nonce of any account at the current chain head
+async fn handle_account_get(
+    Path(address): Path<String>,
+    State(state): State<AppState>,
+) -> Json<StatusResponse<AccountResponse>> {
+    let address: StdByteArray = match hex::decode(&address).ok().and_then(|bytes| bytes.try_into().ok()) {
+        Some(address) => address,
+        None => return Json(StatusResponse::error("Address must be 32 hex-encoded bytes".to_string())),
+    };
+    let chain = state.node.lock_chain().await;
+    let Some(chain) = chain.as_ref() else {
+        return Json(StatusResponse::error("Node has no chain".to_string()));
+    };
+    let Some(state_root) = chain.get_state_root() else {
+        return Json(StatusResponse::error("Node has no state root".to_string()));
+    };
+    // an address the chain has never seen simply holds nothing yet
+    let (balance, nonce) = chain.state_manager.get_account(&address, state_root)
+        .map_or((0, 0), |account| (account.balance, account.nonce));
+    Json(StatusResponse::success(AccountResponse { address: hex::encode(address), balance, nonce }))
+}
+
 async fn handle_init_download(
     State(state): State<AppState>,
 ) -> Json<StatusResponse<()>> {
@@ -520,6 +609,7 @@ pub async fn launch_node(
     wkps: Vec<Peer>,
     ip_address: std::net::IpAddr,
     root: std::path::PathBuf,
+    faucet_amount: Option<u64>,
 ) {
 
     let persistence_manager = PersistenceManager::new(Some(root));
@@ -581,7 +671,8 @@ pub async fn launch_node(
     let logs_address = format!("{ip_address}:3001");
     let state = AppState {
         node,
-        wallet: Arc::new(RwLock::new(wallet))
+        wallet: Arc::new(RwLock::new(wallet)),
+        faucet_amount
     };
     let cors = CorsLayer::new()
         .allow_origin(Any)      // allow all origins
@@ -597,11 +688,13 @@ pub async fn launch_node(
         .route("/blocks", get(handle_block_list))
         .route("/node", get(handle_node_get))
         .route("/wallet", get(handle_wallet_get))
+        .route("/account/{address}", get(handle_account_get))
         // post
         .route("/peer/{public_key}", post(handle_peer_post)) // allow with public key
         .route("/peer", post(handle_peer_post)) // allow without public key
         .route("/peer/discover", post(handle_peer_discover)) // do peer discovery
         .route("/init", post(handle_init_download))
+        .route("/faucet", post(handle_faucet_post))
         .with_state(state.clone())
         .layer(cors);
     
@@ -613,13 +706,24 @@ pub async fn launch_node(
     tracing::info!("Listening on {}", api_address);
     tracing::info!("Listening for log requests on {}", logs_address);
 
+    // registered before the first save, so a stop at any point is caught
+    let mut terminate = signal(SignalKind::terminate()).expect("Failed to listen for SIGTERM");
     tokio::spawn(async move {
         loop {
             tracing::debug!("Saving...");
             persistence_manager.save_node(&state.node).await.expect("Failed to save node state to disk");
             persistence_manager.save_wallet(&state.wallet.read().await.clone()).await.expect("Failed to save wallet to disk");
-            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => {}
+                // without a save here, a stop loses everything since the last one
+                _ = terminate.recv() => break,
+                _ = tokio::signal::ctrl_c() => break,
+            }
         }
+        tracing::info!("Stopping; saving state");
+        persistence_manager.save_node(&state.node).await.expect("Failed to save node state to disk");
+        persistence_manager.save_wallet(&state.wallet.read().await.clone()).await.expect("Failed to save wallet to disk");
+        std::process::exit(0);
     });
 
     let _ = tokio::join!(
