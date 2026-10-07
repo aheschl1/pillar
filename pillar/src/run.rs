@@ -70,12 +70,11 @@ async fn handle_ws_connection(mut socket: WebSocket, headers: HeaderMap, mut sta
             tracing::debug!("Received WebSocket message: {:?}", msg);
             match serde_json::from_str::<ClientMessage>(msg.to_text().unwrap_or("")) {
                 Ok(ClientMessage::TransactionPost(tx)) => {
-                    let wallet = &mut state.wallet.write().await;
                     handle_transaction_post(
                         &mut socket, 
                         tx,
                         &mut state.node, 
-                        wallet
+                        &state.wallet
                     ).await;
                     Ok(())
                 }
@@ -93,7 +92,8 @@ async fn handle_ws_connection(mut socket: WebSocket, headers: HeaderMap, mut sta
             error: Some(e),
             body: None::<()>,
         };
-        socket.send(Message::Text(serde_json::to_string(&response).unwrap().into())).await.unwrap();
+        // the client may already be gone
+        let _ = socket.send(Message::Text(serde_json::to_string(&response).unwrap().into())).await;
     }
     tracing::info!("Ending WebSocket connection from {:?}", headers.get("sec-websocket-key"));
 }

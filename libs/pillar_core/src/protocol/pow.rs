@@ -58,7 +58,7 @@ pub async fn mine(
     reputations: Vec<f64>,
     abort_signal: Option<Receiver<u64>>, 
     mut hash_function: impl HashFunction
-){
+) -> bool {
     // the block is already pupulated
     let (difficulty, _) = get_difficulty_for_block(&block.header, &reputations);
     block.header.nonce = 0;
@@ -80,13 +80,20 @@ pub async fn mine(
                 panic!("Hashing failed");
             }
         }
-        if let Some(ref signal) = abort_signal
-            && let Ok(d) = signal.try_recv() {
-                // if we receive a signal to abort, we stop mining
-                if d == block.header.depth {return;}
+        // the abort channel collects one signal per settled block; any at this depth or
+        // deeper means the chain has moved past this block
+        if let Some(ref signal) = abort_signal {
+            while let Ok(d) = signal.try_recv() {
+                if d >= block.header.depth {return false;}
             }
+        }
         block.header.nonce += 1;
+        // hashing never awaits; let the node's other tasks run now and then
+        if block.header.nonce % 1024 == 0 {
+            tokio::task::yield_now().await;
+        }
     }
+    true
 }
 
 #[cfg(test)]

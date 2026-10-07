@@ -110,6 +110,11 @@ impl Chain {
             tracing::info!("Block hash is incomplete - Failing");
             return Err(BlockValidationError::MalformedBlock("Complete details are not specified".into()));
         }
+        // reputations are read from the previous block, so it has to exist first
+        if !self.blocks.contains_key(&block.header.previous_hash) {
+            tracing::info!("Previous block is not in the chain - Failing");
+            return Err(BlockValidationError::MalformedBlock("Previous block is not in the chain".into()));
+        }
         // get all reputations according to previous block
         let reputations = get_current_reputations_for_stampers(self, &block.header).values().cloned().collect::<Vec<f64>>();
 

@@ -1,14 +1,19 @@
-use std::collections::HashSet;
+use std::{collections::BTreeMap, time::{Duration, Instant}};
 
 use pillar_crypto::{hashing::DefaultHash, types::StdByteArray};
 use tracing::instrument;
 
-use crate::{primitives::{block::{Block, BlockTail}, messages::Message}, protocol::{pow::mine, reputation::get_current_reputations_for_stampers}};
+use crate::{blockchain::chain::Chain, primitives::{block::{Block, BlockTail}, messages::Message, transaction::Transaction}, protocol::{pow::mine, reputation::get_current_reputations_for_stampers}};
 
-use super::{node::{Broadcaster, Node}};
+use super::{node::{supervise, Broadcaster, Node}};
 
 pub const MAX_TRANSACTION_WAIT_TIME: u64 = 5; // seconds
 pub const MAX_BLOCK_TRANSACTION_SIZE: usize = 10; // number of transactions to mine at once
+/// A proposed block that has not reached the chain in this long (its stamps never came back,
+/// or nobody mined it) is proposed again.
+const PROPOSAL_TIMEOUT: Duration = Duration::from_secs(30);
+/// A transaction that cannot go in a block for this long (a nonce gap that never fills) is dropped.
+const PENDING_EXPIRY: Duration = Duration::from_secs(600);
 
 #[derive(Clone)]
 pub struct Miner {
@@ -32,111 +37,146 @@ impl Miner{
         }
     }
 
-    /// Starts monitoring of the pool in a background process
-    /// and serves the node
+    /// Serves the node, and starts mining once the node has a chain to mine on
+    /// (a new node downloads it first).
     pub async fn serve(&mut self){
-        if self.node.inner.chain.lock().await.is_none(){
-            panic!("Cannot serve the miner before initial chain download.")
-        }
+        self.node.miner_pool.as_ref().unwrap().activate();
         self.node.serve().await;
-        // start the miner
-        tokio::spawn(monitor_transaction_pool(self.clone()));
-        tokio::spawn(monitor_block_pool(self.clone()));
+        let miner = self.clone();
+        tokio::spawn(async move {
+            loop {
+                let ready = miner.node.inner.state.read().await.is_consume()
+                    && miner.node.inner.chain.lock().await.is_some();
+                if ready { break; }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            let pool_miner = miner.clone();
+            supervise("monitor_transaction_pool", move || monitor_transaction_pool(pool_miner.clone()));
+            supervise("monitor_block_pool", move || monitor_block_pool(miner.clone()));
+        });
     }
 
 }
 
-/// monitors the nodes transaction pool
-/// Takes ownership of a copy of the miner
-/// TODO: decide how many transactions to mine at once
+/// Collects transactions and proposes blocks of them.
+///
+/// A transaction stays pending until the chain has it (the sender's nonce has passed it), so
+/// none are lost when another block wins, or when a proposal never comes back. Only one
+/// proposal is out at a time, and it holds, for each sender, the unbroken run of nonces that
+/// starts at the sender's nonce on the chain; so whichever block wins, the next one is valid.
 #[instrument(skip_all, name="Miner::monitor_transaction_pool")]
 async fn monitor_transaction_pool(miner: Miner) {
-    // monitor the pool for transactions
-    let mut transactions = HashSet::new();
-    let mut last_polled_at: Option<u64> = None;
-    // A transaction reaches the pool once per peer that relays it. Mine each one once:
-    // remember what went into proposed blocks (until the chain has settled them), and drop
-    // copies whose nonce the chain has already used.
-    let mut proposed: HashSet<StdByteArray> = HashSet::new();
+    let pool = miner.node.miner_pool.as_ref().unwrap();
+    // by sender then nonce; copies relayed by several peers collapse into one
+    let mut pending: BTreeMap<(StdByteArray, u64), (Transaction, Instant)> = BTreeMap::new();
+    // the top our proposal extends, and when it was made
+    let mut in_flight: Option<(StdByteArray, Instant)> = None;
     loop {
         tracing::trace!("waiting for transactions to mine...");
-
-        if let Some(transaction) = miner.node.miner_pool.as_ref().unwrap().pop_transaction(){
-            if proposed.contains(&transaction.hash) {
-                continue; // a relayed copy of one already in a proposed block
-            }
-            let chain = miner.node.inner.chain.lock().await;
-            if let Some(chain) = chain.as_ref() {
-                let state_root = chain.get_state_root().unwrap();
-                // check if the transaction is valid
+        let mut arrived = vec![];
+        while let Some(transaction) = pool.pop_transaction() {
+            arrived.push(transaction);
+        }
+        if !arrived.is_empty() || !pending.is_empty() {
+            let chain_lock = miner.node.inner.chain.lock().await;
+            let chain = chain_lock.as_ref().expect("Miner runs only once the chain is loaded");
+            let top_hash = chain.get_top_block().unwrap().header.completion.as_ref().expect("Expected complete block").hash;
+            let state_root = chain.get_state_root().unwrap();
+            for transaction in arrived {
+                let key = (transaction.header.sender, transaction.header.nonce);
+                if pending.contains_key(&key) {
+                    continue; // a relayed copy
+                }
                 if chain.validate_transaction(&transaction, state_root).is_err() {
                     tracing::warn!("Invalid transaction received: {:?}", transaction);
-                    continue; // skip invalid transactions
-                }
-                let account_nonce = chain.state_manager
-                    .get_account(&transaction.header.sender, state_root)
-                    .map_or(0, |account| account.nonce);
-                if transaction.header.nonce < account_nonce {
-                    tracing::debug!("Skipping transaction {:?}: already in the chain", transaction.hash);
                     continue;
                 }
-            } else {
-                tracing::error!("Chain is not initialized, cannot validate transaction.");
-                continue; // skip if chain is not initialized
+                pending.insert(key, (transaction, Instant::now()));
             }
-            drop(chain); // cause i feel like it
-            transactions.insert(transaction);
-            // grab unix timestamp
-            last_polled_at = Some(std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs());
-        }
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        if (last_polled_at.is_some() && now - last_polled_at.unwrap() >= MAX_TRANSACTION_WAIT_TIME) || transactions.len() >= MAX_BLOCK_TRANSACTION_SIZE {
-            // mining time
-            // mine
-            let chain_lock = miner.node.inner.chain.lock().await;
-            let chain = chain_lock.as_ref().unwrap();
-            let block = Block::new(
-                chain.get_top_block().unwrap().header.completion.as_ref().expect("Expected complete block").hash,
-                0, // undefined nonce
-                now,
-                transactions.iter().copied().collect(),
-                None, // because this is a proposition on an unmined node
-                BlockTail::default().stamps,
-                chain.depth + 1,
-                None, // undefined state
-                None, // undefined difficulty
-                &mut DefaultHash::new()
-            );
-            // spawn off the mining process
-            // let address = *self.node.public_key;
-            let pool = miner.node.miner_pool.clone();
-            pool.as_ref().unwrap().add_block_proposition(block);
-            // once settled, the nonce check catches copies, so this only has to cover blocks in flight
-            if proposed.len() > 10_000 {
-                proposed.clear();
+            // drop what the chain has taken, and what has waited too long to fit
+            pending.retain(|(sender, nonce), (_, since)| {
+                *nonce >= chain.state_manager.get_account_or_default(sender, state_root).nonce
+                    && since.elapsed() < PENDING_EXPIRY
+            });
+            // the chain moved past our proposal (it won, or another block did), or it is lost
+            if in_flight.is_some_and(|(previous, since)| previous != top_hash || since.elapsed() >= PROPOSAL_TIMEOUT) {
+                in_flight = None;
             }
-            proposed.extend(transactions.iter().map(|transaction| transaction.hash));
-            // reset for next mine
-            last_polled_at = None;
-            transactions = HashSet::new();
+            if in_flight.is_none() {
+                let ready = ready_transactions(chain, &pending, state_root);
+                let waited = ready.iter()
+                    .filter_map(|transaction| pending.get(&(transaction.header.sender, transaction.header.nonce)))
+                    .any(|(_, since)| since.elapsed().as_secs() >= MAX_TRANSACTION_WAIT_TIME);
+                if !ready.is_empty() && (ready.len() >= MAX_BLOCK_TRANSACTION_SIZE || waited) {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs();
+                    let block = Block::new(
+                        top_hash,
+                        0, // undefined nonce
+                        now,
+                        ready,
+                        None, // because this is a proposition on an unmined node
+                        BlockTail::default().stamps,
+                        chain.depth + 1,
+                        None, // undefined state
+                        None, // undefined difficulty
+                        &mut DefaultHash::new()
+                    );
+                    tracing::info!("Proposing a block of {} transactions", block.transactions.len());
+                    pool.add_block_proposition(block);
+                    in_flight = Some((top_hash, Instant::now()));
+                }
+            }
         }
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+/// The transactions that can go in the next block: for each sender, consecutive nonces from the
+/// sender's nonce on the chain, while the balance covers them; at most MAX_BLOCK_TRANSACTION_SIZE.
+fn ready_transactions(
+    chain: &Chain,
+    pending: &BTreeMap<(StdByteArray, u64), (Transaction, Instant)>,
+    state_root: StdByteArray,
+) -> Vec<Transaction> {
+    let mut ready = vec![];
+    // the sender being walked, its next nonce, and what it has left to spend
+    let mut current: Option<(StdByteArray, u64, u64)> = None;
+    for ((sender, nonce), (transaction, _)) in pending {
+        if ready.len() >= MAX_BLOCK_TRANSACTION_SIZE {
+            break;
+        }
+        if current.is_none_or(|(address, _, _)| address != *sender) {
+            let account = chain.state_manager.get_account_or_default(sender, state_root);
+            current = Some((*sender, account.nonce, account.balance));
+        }
+        let (_, next_nonce, balance) = current.as_mut().unwrap();
+        if *nonce == *next_nonce && transaction.header.amount <= *balance {
+            *next_nonce += 1;
+            *balance -= transaction.header.amount;
+            ready.push(*transaction);
+        }
+    }
+    ready
 }
 
 async fn monitor_block_pool(miner: Miner) {
+    let pool = miner.node.miner_pool.as_ref().unwrap();
     loop {
         // check if there is a block to mine
-        if let Some(mut block) = miner.node.miner_pool.as_ref().unwrap().pop_mine_ready_block(){
+        if let Some(mut block) = pool.pop_mine_ready_block(){
             block.header.tail.clean(&block.header.clone()); // removes broken signatures
             let mut chain_lock = miner.node.inner.chain.lock().await;
             let chain = chain_lock.as_mut().unwrap();
+            // another block got in since this one was proposed, so it could only become a fork;
+            // its transactions are still pending, and go in the next proposal
+            let top = chain.get_top_block().unwrap().header.completion.as_ref().expect("Expected complete block").hash;
+            if block.header.previous_hash != top {
+                tracing::info!("Skipping a block that was beaten before mining");
+                continue;
+            }
             let prev_block = chain
                 .headers
                 .get(&block.header.previous_hash)
@@ -150,22 +190,23 @@ async fn monitor_block_pool(miner: Miner) {
             ).values().cloned().collect::<Vec<f64>>();
             drop(chain_lock); // drop the lock before mining
             // the block is already pupulated
-            mine(
+            let mined = mine(
                 &mut block, 
                 miner.node.inner.public_key,
                 state_root,
                 reputations,
-                Some(miner.node.miner_pool.as_ref().unwrap().mine_abort_receiver.clone()),
+                Some(pool.mine_abort_receiver.clone()),
                 DefaultHash::new()
             ).await;
+            if !mined {
+                // another block at this depth reached the chain first
+                tracing::info!("Stopped mining a block that was beaten");
+                continue;
+            }
             // after mining the block, just transmit
-            // TODO this doesnt fully belong here - also handle broadcast error
             let _ = miner.node.broadcast(&Message::BlockTransmission(block)).await;
         }else{
-            // TODO THIS IS KIND OF ASS
-            // there is a bug where if we do not yield, then the runtime locks up
-            // however, this sleep also cannot be too long or else we break.
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
 }

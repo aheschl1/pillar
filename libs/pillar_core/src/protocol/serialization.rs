@@ -44,8 +44,17 @@ pub async fn read_standard_message(stream: &mut TcpStream) -> Result<Message, st
     }
     let mut buffer = vec![0u8; length as usize];
     stream.read_exact(&mut buffer).await?;
-    let message = PillarSerialize::deserialize_pillar(&buffer)?;
-    Ok(message)
+    decode_message(&buffer)
+}
+
+/// Decode a message a peer sent. Several decoders index or assert on lengths taken from the
+/// data, so a malformed message can panic; that panic would end whichever background task
+/// was reading, so it is turned into an error here. Decoding only reads the buffer.
+pub fn decode_message(bytes: &[u8]) -> Result<Message, std::io::Error> {
+    std::panic::catch_unwind(|| Message::deserialize_pillar(bytes)).unwrap_or_else(|_| Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        "Malformed message",
+    )))
 }
 
 impl PillarSerialize for crate::primitives::messages::Message {

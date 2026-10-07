@@ -91,14 +91,19 @@ pub struct DefaultSigner{
 
 /// Default ed25519 verifying function.
 pub struct DefaultVerifier{
-    public_key: VerifyingKey
+    /// The key as given; kept so `to_bytes` returns it even when it is not a valid key
+    bytes: StdByteArray,
+    /// None when the bytes are not a valid ed25519 key, which then verifies nothing
+    public_key: Option<VerifyingKey>
 }
 
 impl DefaultVerifier{
     /// Create a new verifier from public key bytes.
     pub fn new(public_key: StdByteArray) -> Self{
+        // keys come from peers too; a bad one must fail verification, not panic
         DefaultVerifier{
-            public_key: VerifyingKey::from_bytes(&public_key).expect("Invlaid public key")
+            bytes: public_key,
+            public_key: VerifyingKey::from_bytes(&public_key).ok()
         }
     }
 }
@@ -137,11 +142,11 @@ impl SigVerFunction<32, 64> for DefaultVerifier{
     fn verify(&self, signature: &[u8; 64], target: &impl Signable<64>) -> bool{
         let signature = ed25519::Signature::from_bytes(signature);
 
-        self.public_key.verify_strict(target.get_signing_bytes().as_ref(), &signature).is_ok()
+        self.public_key.as_ref().is_some_and(|key| key.verify_strict(target.get_signing_bytes().as_ref(), &signature).is_ok())
     }
 
     fn to_bytes(&self) -> StdByteArray{
-        self.public_key.to_bytes()
+        self.bytes
     }
 
     fn from_bytes(bytes: &StdByteArray) -> Self{

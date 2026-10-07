@@ -134,7 +134,7 @@ impl Peer{
             let decrypted_response = match response {
                 Message::EncryptedMessage(payload) => {
                     let decrypted_bytes = shared_secret.decrypt(payload)?;
-                    Message::deserialize_pillar(&decrypted_bytes)?
+                    crate::protocol::serialization::decode_message(&decrypted_bytes)?
                 },
                 _ => return Err(std::io::Error::new(std::io::ErrorKind::Other, "Invalid encrypted message response")),
             };
@@ -201,7 +201,7 @@ mod tests{
     async fn test_read_response(){
         // setup a dummy socket, use it for the initializing_peer. read reponses
         let initializing_peer = Peer::new([1u8; 32], IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
-        let peer = Peer::new([2u8; 32], IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), 8081);
+        let peer = Peer::new([2u8; 32], IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), 8082); // not 8081: test_send_initial binds that, and tests run at once
         // bind to peer socket - we will receive the message here
         let initializing_clone = initializing_peer.clone();
         let listener = tokio::net::TcpListener::bind(format!("{}:{}", peer.ip_address, peer.port)).await.unwrap();

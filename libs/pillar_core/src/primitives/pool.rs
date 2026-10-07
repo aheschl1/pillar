@@ -16,6 +16,8 @@ pub struct MinerPool {
     // mine abort signal
     pub mine_abort_sender: Sender<u64>,
     pub mine_abort_receiver: Receiver<u64>,
+    // every node has a pool, but only a miner empties it; until one starts, nothing is kept
+    active: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Transaction pool for now is just a vector of transactions
@@ -39,11 +41,23 @@ impl MinerPool{
             mine_ready_blocks_queue,
             mine_abort_sender,
             mine_abort_receiver,
+            active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
+    }
+
+    /// Called when a miner starts on this pool
+    pub fn activate(&self) {
+        self.active.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether a miner takes work from this pool
+    pub fn is_active(&self) -> bool {
+        self.active.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Adds a transaction to the pool
     pub fn add_transaction(&self, transaction: Transaction) {
+        if !self.is_active() { return; } // nobody would take it out
         // send the transaction to the receiver
         self.transactions_queue.push(transaction);
     }
@@ -66,6 +80,7 @@ impl MinerPool{
     }
 
     pub fn add_mine_ready_block(&self, block: Block) {
+        if !self.is_active() { return; } // nobody would take it out
         // send the block to the receiver
         self.mine_ready_blocks_queue.push(block);
     }

@@ -43,8 +43,9 @@ pub fn block_worth_scaling_fn(block_time: u64, current_time: u64) -> f64 {
 /// # Returns
 /// * A vector of peers that are in the n-th percentile
 pub fn nth_percentile_peer(lower_n: f32, upper_n: f32, chain: &Chain) -> Vec<StdByteArray>{
+    // peers send these; an out-of-range (or NaN) request gets no peers rather than a panic
     if !(0.0..=1.0).contains(&lower_n)  || !(0.0..=1.0).contains(&upper_n) {
-        panic!("n must be between 0 and 1");
+        return vec![];
     }
 
     let accounts = chain.state_manager.get_all_accounts(chain.get_state_root().unwrap());
@@ -56,7 +57,7 @@ pub fn nth_percentile_peer(lower_n: f32, upper_n: f32, chain: &Chain) -> Vec<Std
         let rep = rep.clone().unwrap();
         (a.address, rep.compute_reputation(chain.get_top_block().unwrap().header.timestamp))
     }).collect::<Vec<_>>();
-    reputations.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap()); // this is ordering in ascending order
+    reputations.sort_by(|a, b| a.1.total_cmp(&b.1)); // this is ordering in ascending order
     let lower_n = (lower_n * reputations.len() as f32).round() as usize;
     let upper_n = (upper_n * reputations.len() as f32).round() as usize;
     let mut peers = Vec::new();
