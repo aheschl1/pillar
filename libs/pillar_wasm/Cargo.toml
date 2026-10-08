@@ -5,4 +5,4 @@ edition = "2024"
 
 [dependencies]
 pillar_crypto = { path = "../pillar_crypto" }
-wasmtime = "38.0.3"
+wasmtime = "49.0.2"
