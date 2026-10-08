@@ -1,5 +1,3 @@
-# <img src="./figures/logo.svg" alt="Pillar Logo" width="30" style="vertical-align: middle; margin-right: 8px;" /> Pillar <!-- markdownlint-disable-line MD033 -->
-
 Pillar is a zero-trust decentralized ledger that implements a Proof of Reputation (PoR) trust layer. It combines a conventional transaction layer with a reputation-driven incentive layer to reduce wasted computation and provide a trust metric for network participants.
 
 goto andrewheschl.ca and solve the CTF to access the public network, and receive some complimentary andrewcoins
