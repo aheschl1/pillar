@@ -32,6 +32,8 @@ pub(crate) fn create_engine() -> Engine {
     config.consume_fuel(true);
     config.wasm_multi_value(false);
     config.wasm_reference_types(false);
+    // Enabled by default in newer wasmtime and requires reference types.
+    config.wasm_component_model_async(false);
     Engine::new(&config).unwrap()
 }
 
