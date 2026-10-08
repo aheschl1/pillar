@@ -1,14 +1,14 @@
-Pillar is a zero-trust decentralized ledger that implements a Proof of Reputation (PoR) trust layer. It combines a conventional transaction layer with a reputation-driven incentive layer to reduce wasted computation and provide a trust metric for network participants.
+Blockchain is a zero-trust decentralized ledger that implements a Proof of Reputation (PoR) trust layer. It combines a conventional transaction layer with a reputation-driven incentive layer to reduce wasted computation and provide a trust metric for network participants.
 
 goto andrewheschl.ca and solve the CTF to access the public network, and receive some complimentary andrewcoins
 
 ## Repository Layout
 
-- [`pillar/`](pillar/) – Entrypoint for managing a Pillar node.
-- [`libs/pillar_core/`](libs/pillar_core/) – Core protocol logic and data structures.
-- [`libs/pillar_crypto/`](libs/pillar_crypto/) – Cryptographic primitives, including hashing, signing, encryption, and Merkle structures.
-- [`libs/pillar_serialize/`](libs/pillar_serialize/) – Lightweight serialization utilities.
-- [`pillar_monitor/`](pillar_monitor/) – A web-based frontend for monitoring a node.
+- [`blockchain/`](blockchain/) – Entrypoint for managing a blockchain node.
+- [`libs/blockchain_core/`](libs/blockchain_core/) – Core protocol logic and data structures.
+- [`libs/blockchain_crypto/`](libs/blockchain_crypto/) – Cryptographic primitives, including hashing, signing, encryption, and Merkle structures.
+- [`libs/blockchain_serialize/`](libs/blockchain_serialize/) – Lightweight serialization utilities.
+- [`blockchain_monitor/`](blockchain_monitor/) – A web-based frontend for monitoring a node.
 - [`vm_mesh/`](vm_mesh/) – A framework for distributed testing and simulation using QEMU.
 
 ## High-Level Architecture
@@ -29,7 +29,7 @@ The network data flow, chain structure, and block settlement process are illustr
 
 ### Running a Node
 
-The recommended method for running a Pillar node is via Docker.
+The recommended method for running a blockchain node is via Docker.
 
 1. **Build the Docker image:**
 
@@ -45,7 +45,7 @@ The recommended method for running a Pillar node is via Docker.
     ./run.sh --work-dir=<WORK_DIR> --ip-address=<IP_ADDRESS> --wkps=<WKP_SERVERS> --name=<NODE_NAME> --config=<CONFIG_FILE>
     ```
 
-A convenience script, `./kill_all.sh`, is provided to stop all running Pillar containers.
+A convenience script, `./kill_all.sh`, is provided to stop all running blockchain containers.
 
 ### Testing
 
@@ -61,12 +61,12 @@ Test logs are written to `./test_output/{timestamp}/output.log`.
 
 A web-based dashboard is available for monitoring a running node.
 
-1. **Launch a Pillar node** using the instructions above.
+1. **Launch a blockchain node** using the instructions above.
 
 2. **Start the frontend application:**
 
     ```bash
-    cd pillar_monitor
+    cd blockchain_monitor
     npm install
     npm run dev
     ```

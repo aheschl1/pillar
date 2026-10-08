@@ -1,0 +1,28 @@
+[package]
+name = "blockchain_core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1.44.2", features = ["full"] }
+blockchain_crypto = { path = "../blockchain_crypto" }
+blockchain_serialize = { path = "../blockchain_serialize" }
+slotmap = "1.0.7"
+rand = "0.9.1"
+sled = "0.34.7"
+flume = "0.11.1"
+futures-util = "0.3.31"
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"
+ctor = "0.4.2"
+tracing-appender = "0.2.3"
+chrono = "0.4.41"
+tracing-tree = "0.4.0"
+crossbeam-queue = "0.3"
+lz4_flex = "0.11.5"
+bytemuck = {version="1.23.2", features=["derive"]}
+bytes = "1.10.1"
+byteorder = "1.5.0"
+hex = "0.4.3"
+tempfile = "3.23.0"
+dirs = "6.0.0"

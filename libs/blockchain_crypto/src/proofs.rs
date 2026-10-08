@@ -1,0 +1,277 @@
+//! Merkle and Merkle trie proof generation and verification.
+//!
+//! This module offers compact proofs of inclusion for both the binary Merkle
+//! tree (`MerkleProof`) and the state `MerkleTrie` (`TrieMerkleProof`).
+
+use std::hash::Hash;
+
+
+use blockchain_serialize::{BlockchainFixedSize, BlockchainSerialize};
+
+use crate::{hashing::{HashFunction, Hashable}, merkle::MerkleTree, merkle_trie::{to_nibbles, MerkleTrie}, types::StdByteArray};
+
+
+
+/// Direction of a sibling hash used when reconstructing a Merkle branch.
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub enum HashDirection {
+    Left,
+    Right,
+}
+
+impl BlockchainSerialize for HashDirection {
+    fn serialize_blockchain(&self) -> Result<Vec<u8>, std::io::Error> {
+        match self{
+            Self::Left => Ok(vec![0]),
+            Self::Right => Ok(vec![1]),
+        }
+    }
+
+    fn deserialize_blockchain(data: &[u8]) -> Result<Self, std::io::Error> {
+        match data {
+            [0] => Ok(Self::Left),
+            [1] => Ok(Self::Right),
+            _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid HashDirection")),
+        }
+    }
+}
+
+// note that no optimization will pik up on this for now
+// because it is not a zeroable pod
+impl BlockchainFixedSize for HashDirection {}
+
+
+/// A binary Merkle proof for a single leaf.
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct MerkleProof {
+    pub hashes: Vec<StdByteArray>,
+    pub directions: Vec<HashDirection>,
+    pub root: StdByteArray,
+}
+
+impl BlockchainSerialize for MerkleProof {
+    fn serialize_blockchain(&self) -> Result<Vec<u8>, std::io::Error> {
+        let mut buffer = vec![];
+        let hashes = self.hashes.serialize_blockchain()?;
+        let directions = self.directions.serialize_blockchain()?;
+        let root = self.root.serialize_blockchain()?;
+
+        buffer.extend((hashes.len() as u32).to_le_bytes());
+        buffer.extend(hashes);
+        buffer.extend((directions.len() as u32).to_le_bytes());
+        buffer.extend(directions);
+        buffer.extend(root);
+        Ok(buffer)
+    }
+
+    fn deserialize_blockchain(data: &[u8]) -> Result<Self, std::io::Error> {
+        let hlen = u32::from_le_bytes(data[..4].try_into().unwrap()) as usize;
+        let hashes = Vec::<StdByteArray>::deserialize_blockchain(&data[4..4 + hlen])?;
+        let dlen = u32::from_le_bytes(data[4 + hlen..8 + hlen].try_into().unwrap()) as usize;
+        let directions = Vec::<HashDirection>::deserialize_blockchain(&data[8 + hlen..8 + hlen + dlen])?;
+        let root = StdByteArray::deserialize_blockchain(&data[8 + hlen + dlen..])?;
+        Ok(MerkleProof { hashes, directions, root })
+    }
+}
+
+/// Generate a Merkle proof of inclusion for a specific leaf value.
+pub fn generate_proof_of_inclusion(merkle_tree: &MerkleTree, data: StdByteArray, hash_function: &mut impl HashFunction) -> Option<MerkleProof> {
+    let leaves = merkle_tree.leaves.as_ref()?;
+    let nodes = &merkle_tree.nodes;
+    let root_key = merkle_tree.root?;
+
+    // Hash the data
+    hash_function.update(data);
+    let target_hash = hash_function.digest().expect("Hashing failed");
+
+    // Find matching leaf
+    let mut current_key = *leaves.iter().find(|&&key| nodes[key].hash == target_hash)?;
+    
+    let mut hashes = Vec::new();
+    let mut directions = Vec::new();
+
+    while let Some(parent_key) = nodes[current_key].parent {
+        let parent = &nodes[parent_key];
+        if parent.left == Some(current_key) {
+            if let Some(right_key) = parent.right {
+                hashes.push(nodes[right_key].hash);
+                directions.push(HashDirection::Right);
+            }
+        } else if parent.right == Some(current_key)
+            && let Some(left_key) = parent.left {
+                hashes.push(nodes[left_key].hash);
+                directions.push(HashDirection::Left);
+            }
+        current_key = parent_key;
+    }
+
+    Some(MerkleProof {
+        hashes,
+        directions,
+        root: nodes[root_key].hash,
+    })
+}
+
+
+/// Verify a binary Merkle proof against a root hash.
+pub fn verify_proof_of_inclusion<T: Into<StdByteArray>>(data: T, proof: &MerkleProof, root: StdByteArray, hash_function: &mut impl HashFunction) -> bool {
+    hash_function.update(data.into());
+    let mut current_hash = hash_function.digest().expect("Hashing failed");
+
+    for (hash, direction) in proof.hashes.iter().zip(proof.directions.iter()) {
+        match direction {
+            HashDirection::Left => {
+                hash_function.update(hash);
+                hash_function.update(current_hash);
+            }
+            HashDirection::Right => {
+                hash_function.update(current_hash);
+                hash_function.update(hash);
+            }
+        }
+        current_hash = hash_function.digest().expect("Hashing failed");
+    }
+
+    current_hash == root
+}
+
+// ============================================================================================
+// Trie proofs to follow
+// TODO generalize
+
+/// A step in a trie proof, describing the position of the target within a level
+/// and the sibling indices and hashes required to reconstruct that level hash.
+#[derive(Debug,  Clone)]
+pub struct TrieMerkleProof {
+    pub steps: Vec<ProofStep>,
+}
+
+impl TrieMerkleProof {
+    pub fn new(steps: Vec<ProofStep>) -> Self {
+        TrieMerkleProof { steps }
+    }
+}
+
+#[derive(Debug,  Clone)]
+pub struct ProofStep {
+    // native is the index of the value on which they are constructing the proof
+    pub native: u8,
+    // Give the indices and hashes of the siblings in the trie
+    // MUST BE SORTED BY THE INDEX
+    pub siblings: Vec<(u8, StdByteArray)>,
+    // Value at this node if present. The `u8` index is a special marker equal
+    // to the number of children (16) to disambiguate it from child indices.
+    pub value: Option<(u8, Vec<u8>)>,
+}
+
+impl ProofStep {
+    fn compute_level(&self, native_data: StdByteArray, hash_function: &mut impl HashFunction) -> StdByteArray {
+        // here, we reconstruct the hash of the level
+        let mut last_index: Option<u8> = None;
+        for (i, (index, hash)) in self.siblings.iter().enumerate() {
+            // sanity check
+            if last_index.is_some() && last_index.unwrap() >= *index{
+                panic!("Invalid proof step: indices must be strictly sorted");
+            }
+            last_index = Some(*index);
+            // actual work
+            // check if we include the native data in this level
+            if *index > self.native && (i == 0 || self.siblings[i-1].0 < self.native) {
+                hash_function.update([self.native]);
+                hash_function.update(native_data);
+            }
+            // update the hash with the sibling hash
+            hash_function.update([*index]);
+            hash_function.update(hash);
+        }
+        // maybe native comes last
+        if last_index.is_none() || last_index.unwrap() < self.native {
+            hash_function.update([self.native]);
+            hash_function.update(native_data);
+        }
+        if let Some((i, value)) = &self.value {
+            hash_function.update([*i]);
+            hash_function.update(value);
+        }
+        hash_function.digest().expect("Hashing failed")
+    }
+
+    fn compute_level_first(&self, native_data: impl AsRef<[u8]>, hash_function: &mut impl HashFunction) -> StdByteArray {
+        // here, we reconstruct the hash of the level
+        let mut last_index: Option<u8> = None;
+        for (index, hash) in self.siblings.iter() {
+            // sanity check
+            if last_index.is_some() && last_index.unwrap() >= *index{
+                panic!("Invalid proof step: indices must be strictly sorted");
+            }
+            last_index = Some(*index);
+            // actual work
+            // update the hash with the sibling hash
+            hash_function.update([*index]);
+            hash_function.update(hash);
+        }
+        hash_function.update([self.value.as_ref().unwrap().0]);
+        hash_function.update(native_data);
+        hash_function.digest().expect("Hashing failed")
+    }      
+}
+
+impl TrieMerkleProof {
+    /// Verify the proof for the provided native data bytes against a root hash.
+    pub fn verify(&self, native_data: Vec<u8>, root_hash: StdByteArray, hash_function: &mut impl HashFunction) -> bool {
+        let steps = self.steps.iter().rev().collect::<Vec<_>>();
+        let mut current_hash = steps[0].compute_level_first(native_data, hash_function);
+        for step in &steps[1..] {
+            current_hash = step.compute_level(current_hash, hash_function);
+        }
+        current_hash == root_hash
+    }
+}
+
+/// Generate a Merkle trie proof for a specific value in the `MerkleTrie`.
+/// # Arguments
+/// * `target_key` - The key for which the proof is generated.
+pub fn generate_proof_of_state<K, V>(
+    merkle_trie: &MerkleTrie<K, V>, 
+    target_key: K, 
+    root: Option<StdByteArray>, 
+    hash_function: &mut impl HashFunction
+) -> Option<(TrieMerkleProof, V)> 
+where K: Hashable, V: BlockchainSerialize
+{
+    let value = merkle_trie.get(&target_key, root.expect("Root must be provided"));
+    value.as_ref()?;
+    let path = to_nibbles(&target_key);
+    let mut steps: Vec<ProofStep> = Vec::new();
+    
+    let mut current_node_key = Some(*merkle_trie.roots.get(&root.expect("Root must be provided")).unwrap());
+    // work the way down, computing the proof steps along the way.
+    let mut nibble = Some(path[0]);
+    let mut i = 0;
+    while let Some(key) = current_node_key {
+        let current_node = merkle_trie.nodes.get(key).expect("Node not found");
+        let mut siblings: Vec<(u8, StdByteArray)> = Vec::new();
+        for (j, child) in current_node.children.iter().enumerate() {
+            if (nibble.is_none() || j != nibble.unwrap() as usize) && child.is_some() {
+                let sibling_key = child.unwrap();
+                let sibling_hash = merkle_trie.get_hash_for(sibling_key, hash_function).expect("Sibling hash not found");
+                siblings.push((j as u8, sibling_hash));
+            }
+        }
+        steps.push(ProofStep {
+            native: nibble.unwrap_or(0), // where is the nibble in the path
+            siblings,
+            value: current_node.value.clone().map(|value| (current_node.children.len() as u8, value))
+        });
+        current_node_key = match nibble {
+            Some(n) => {
+                i += 1;
+                nibble = if i < path.len() { Some(path[i]) } else { None };
+                current_node.children[n as usize]
+            },
+            None => None
+        };
+    }
+        
+    Some((TrieMerkleProof::new(steps), value.unwrap()))
+}

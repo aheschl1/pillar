@@ -240,6 +240,92 @@ dependencies = [
 ]
 
 [[package]]
+name = "blockchain"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "blockchain_core",
+ "blockchain_crypto",
+ "blockchain_serialize",
+ "chrono",
+ "clap",
+ "flume",
+ "hex",
+ "once_cell",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "blockchain_core"
+version = "0.1.0"
+dependencies = [
+ "blockchain_crypto",
+ "blockchain_serialize",
+ "bytemuck",
+ "byteorder",
+ "bytes",
+ "chrono",
+ "crossbeam-queue",
+ "ctor",
+ "dirs",
+ "flume",
+ "futures-util",
+ "hex",
+ "lz4_flex",
+ "rand",
+ "sled",
+ "slotmap",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "tracing-tree",
+]
+
+[[package]]
+name = "blockchain_crypto"
+version = "0.1.0"
+dependencies = [
+ "blockchain_serialize",
+ "chacha20poly1305",
+ "crypto",
+ "ed25519",
+ "ed25519-dalek",
+ "flume",
+ "hkdf",
+ "lz4_flex",
+ "rand",
+ "rand_core 0.6.4",
+ "sha3",
+ "slotmap",
+ "x25519-dalek",
+]
+
+[[package]]
+name = "blockchain_serialize"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "byteorder",
+ "bytes",
+]
+
+[[package]]
+name = "blockchain_wasm"
+version = "0.1.0"
+dependencies = [
+ "blockchain_crypto",
+ "wasmtime",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1605,92 +1691,6 @@ checksum = "b4c5cc86750666a3ed20bdaf5ca2a0344f9c67674cae0515bec2da16fbaa47db"
 dependencies = [
  "fixedbitset",
  "indexmap",
-]
-
-[[package]]
-name = "pillar"
-version = "0.1.0"
-dependencies = [
- "axum",
- "chrono",
- "clap",
- "flume",
- "hex",
- "once_cell",
- "pillar_core",
- "pillar_crypto",
- "pillar_serialize",
- "serde",
- "serde_json",
- "tokio",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "pillar_core"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "byteorder",
- "bytes",
- "chrono",
- "crossbeam-queue",
- "ctor",
- "dirs",
- "flume",
- "futures-util",
- "hex",
- "lz4_flex",
- "pillar_crypto",
- "pillar_serialize",
- "rand",
- "sled",
- "slotmap",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "tracing-tree",
-]
-
-[[package]]
-name = "pillar_crypto"
-version = "0.1.0"
-dependencies = [
- "chacha20poly1305",
- "crypto",
- "ed25519",
- "ed25519-dalek",
- "flume",
- "hkdf",
- "lz4_flex",
- "pillar_serialize",
- "rand",
- "rand_core 0.6.4",
- "sha3",
- "slotmap",
- "x25519-dalek",
-]
-
-[[package]]
-name = "pillar_serialize"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "byteorder",
- "bytes",
-]
-
-[[package]]
-name = "pillar_wasm"
-version = "0.1.0"
-dependencies = [
- "pillar_crypto",
- "wasmtime",
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
 # VM Mesh: Distributed Testing and Simulation
 
-The VM Mesh framework enables distributed testing and simulation of the Pillar protocol across multiple virtual machines, supporting both x86_64 and aarch64 architectures. It automates the provisioning, networking, and orchestration of VMs using QEMU, with unified repository injection and cloud-init configuration. This is used for testing across different architectures, in order to assert serialization compatibility.
+The VM Mesh framework enables distributed testing and simulation of the Blockchain protocol across multiple virtual machines, supporting both x86_64 and aarch64 architectures. It automates the provisioning, networking, and orchestration of VMs using QEMU, with unified repository injection and cloud-init configuration. This is used for testing across different architectures, in order to assert serialization compatibility.
 
 ## Features
 
@@ -22,7 +22,7 @@ python vm_mesh/runner.py --n-x86 2 --n-aarch 1 --name test-mesh
 This will:
 
 - Create a dedicated directory for the mesh and overlays
-- Provision 2 x86_64 and 1 aarch64 VM, each with the Pillar repository injected
+- Provision 2 x86_64 and 1 aarch64 VM, each with the Blockchain repository injected
 - Set up a virtual network bridge for inter-VM communication
 - Wait for all VMs to become responsive, then terminate them after tests
 
