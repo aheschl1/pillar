@@ -1,9 +1,9 @@
 [workspace]
 members = [
-    "libs/pillar_crypto",
-    "libs/pillar_core",
-    "libs/pillar_serialize",
-    "libs/pillar_wasm",
-    "pillar"
+    "libs/blockchain_crypto",
+    "libs/blockchain_core",
+    "libs/blockchain_serialize",
+    "libs/blockchain_wasm",
+    "blockchain"
 , "wasm_samples/samples/dlrow_olleh"]
 resolver="3"

@@ -1,3 +1,3 @@
 #!/bin/bash
 
-docker build -t pillar:latest .
+docker build -t blockchain:latest .

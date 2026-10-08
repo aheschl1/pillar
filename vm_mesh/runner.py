@@ -222,8 +222,8 @@ class Machine:
         network: Network,
         ram: int = 2048,
         cpu_cores: int = 2,
-        repo_name: str = "pillar",
-        repo_url: str = "git@github.com:aheschl1/pillar.git",
+        repo_name: str = "blockchain",
+        repo_url: str = "git@github.com:aheschl1/blockchain.git",
         branch_name: str = "main",
         git_ssh_key: str = "~/.ssh/id_rsa",
         root_dir: Path | None = None,
@@ -517,7 +517,7 @@ class Mesh:
             self.cdrom_path["x86_64"] = build_repo_cdrom( # type: ignore
                 root_dir=root,
                 arch="x86_64",
-                repo_name=self.kwargs.get("repo_name", "pillar"),
+                repo_name=self.kwargs.get("repo_name", "blockchain"),
                 branch_name=self.kwargs.get("branch_name", "main"),
                 repo_url=self.kwargs.get("repo_url", "https://github.com/example/repo.git")
             )
@@ -527,7 +527,7 @@ class Mesh:
                 self.cdrom_path["aarch64"] = build_repo_cdrom( # type: ignore
                     root_dir=root,
                     arch="aarch64",
-                    repo_name=self.kwargs.get("repo_name", "pillar"),
+                    repo_name=self.kwargs.get("repo_name", "blockchain"),
                     branch_name=self.kwargs.get("branch_name", "main"),
                     repo_url=self.kwargs.get("repo_url", "https://github.com/example/repo.git")
                 )
@@ -648,7 +648,7 @@ def parse_args():
     parser.add_argument(
         "--action",
         type=str,
-        default="cd /root && ./pillar/pillar --ip-address={ip_address} --wkps={mesh_peers}",
+        default="cd /root && ./blockchain/blockchain --ip-address={ip_address} --wkps={mesh_peers}",
         help="Command to run machines"
     )
     return parser.parse_args()
@@ -659,7 +659,7 @@ def main():
     """
     args = parse_args()
 
-    with Mesh(name=args.name, unified_cdrom="arch", repo_url="git@github.com:aheschl1/pillar.git") as mesh:
+    with Mesh(name=args.name, unified_cdrom="arch", repo_url="git@github.com:aheschl1/blockchain.git") as mesh:
         for _ in range(args.n_x86):
             mesh.enroll_machine("x86_64")
         for _ in range(args.n_aarch):
@@ -688,7 +688,7 @@ if __name__ == "__main__":
     main()
     # cmnd = ' && '.join([
     #     "cd /root",
-    #     "./pillar/pillar"
+    #     "./blockchain/blockchain"
     # ])
     # with Network() as net:
     #     machine = Machine("aarch64", net, daemonize=False, attach_console=True)

@@ -1,16 +1,16 @@
 # ---- Build Stage ----
 FROM rustlang/rust:nightly AS builder
 WORKDIR /app
-COPY pillar ./pillar
+COPY blockchain ./blockchain
 COPY libs ./libs
-WORKDIR /app/pillar
+WORKDIR /app/blockchain
 RUN cargo +nightly build --release
 
 # ---- Runtime Stage ----
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /usr/local/bin
-COPY --from=builder /app/pillar/target/release/pillar /usr/local/bin/pillar
+COPY --from=builder /app/blockchain/target/release/blockchain /usr/local/bin/blockchain
 
-ENTRYPOINT ["/usr/local/bin/pillar"]
+ENTRYPOINT ["/usr/local/bin/blockchain"]
 CMD []

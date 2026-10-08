@@ -1,0 +1,914 @@
+use std::sync::{Arc};
+
+use axum::{extract::{Path, Query, State}, http::HeaderMap, response::IntoResponse, routing::{get, post}, Json, Router};
+use blockchain_core::{accounting::wallet::Wallet, nodes::{miner::Miner, node::Node, peer::Peer}, persistence::manager::PersistenceManager, primitives::{block::Block, transaction::Transaction}, protocol::{peers::{discover_peer, discover_peers}, transactions::submit_transaction}};
+use blockchain_serialize::BlockchainSerialize;
+use blockchain_crypto::{signing::SigFunction, types::StdByteArray};
+use serde::{Deserialize, Serialize};
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use tokio::{signal::unix::{signal, SignalKind}, sync::RwLock};
+use crate::{log_stream::ws_logs, ws_handles::{handle_transaction_post, TransactionPost}};
+use tower_http::cors::{CorsLayer, Any};
+
+
+#[derive(Clone)]
+struct AppState {
+    node: Node,
+    wallet: Arc<RwLock<Wallet>>,
+    faucet_amount: Option<u64>,
+    /// transactions sent through this API, so /transaction/{hash} can call them pending until
+    /// they're in a block (the miner's pool can't be read without emptying it)
+    sent: SentTransactions,
+}
+
+/// The most recent transactions sent through this node's API, oldest first.
+pub(crate) type SentTransactions = Arc<std::sync::Mutex<std::collections::VecDeque<Transaction>>>;
+const SENT_KEPT: usize = 256;
+
+pub(crate) fn remember_sent(sent: &SentTransactions, transaction: Transaction) {
+    let mut sent = sent.lock().unwrap();
+    if sent.len() == SENT_KEPT {
+        sent.pop_front();
+    }
+    sent.push_back(transaction);
+}
+
+fn parse_hash(hex_hash: &str) -> Option<StdByteArray> {
+    hex::decode(hex_hash).ok()?.try_into().ok()
+}
+
+#[derive(Serialize, Deserialize)]
+struct StatusResponse<T: Serialize> {
+    success: bool,
+    error: Option<String>,
+    body: Option<T>,
+}
+
+impl<T: Serialize> StatusResponse<T> {
+    fn error(message: String) -> Self {
+        StatusResponse {
+            success: false,
+            error: Some(message),
+            body: None,
+        }
+    }
+
+    fn success(body: T) -> Self {
+        StatusResponse {
+            success: true,
+            error: None,
+            body: Some(body),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type")]
+enum ClientMessage {
+    TransactionPost(TransactionPost),
+    PeerPost(PeerPost)
+}
+
+
+/// Handle a single websocket connection
+/// - Receives messages from the client
+/// - Sends responses back to the client
+/// - Closes the connection when done
+async fn handle_ws_connection(mut socket: WebSocket, headers: HeaderMap, mut state: AppState){
+    tracing::info!("New WebSocket connection from {:?}", headers.get("sec-websocket-key"));
+    let result: Result<(), String> = match socket.recv().await {
+        None => {
+            tracing::info!("WebSocket connection closed by client");
+            Ok(())
+        },
+        Some(Err(e)) => {
+            tracing::error!("WebSocket error: {:?}", e);
+            Err("WebSocket error".into())
+        }
+        Some(Ok(msg)) => {
+            tracing::debug!("Received WebSocket message: {:?}", msg);
+            match serde_json::from_str::<ClientMessage>(msg.to_text().unwrap_or("")) {
+                Ok(ClientMessage::TransactionPost(tx)) => {
+                    handle_transaction_post(
+                        &mut socket, 
+                        tx,
+                        &mut state.node,
+                        &state.wallet,
+                        &state.sent
+                    ).await;
+                    Ok(())
+                }
+                Err(e) => {
+                    tracing::debug!("Failed to parse WebSocket message: {:?}", e);
+                    Err("Invalid message format".into())
+                },
+                _ => Err("Unexpected message at websocket endpoint".into())
+            }
+        }
+    };
+    if let Err(e) = result {
+        let response = StatusResponse {
+            success: false,
+            error: Some(e),
+            body: None::<()>,
+        };
+        // the client may already be gone
+        let _ = socket.send(Message::Text(serde_json::to_string(&response).unwrap().into())).await;
+    }
+    tracing::info!("Ending WebSocket connection from {:?}", headers.get("sec-websocket-key"));
+}
+
+async fn ws_route(ws: WebSocketUpgrade, headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_ws_connection(socket, headers, state))
+}
+
+#[derive(Serialize, Deserialize)]
+pub(crate) struct PeerPost {
+    ip_address: String,
+    port: u16,
+}
+
+/// Handle HTTP post to add a new peer
+/// Not upgraded to WebSocket
+/// 
+/// # Arguments
+/// * `State(state)`: The application state containing the node
+/// * `Json(request)`: The peer post request containing the peer details
+/// * `Path(public_key)`: The public key of the peer to add, in hex format
+async fn handle_peer_post(
+    public_key: Option<Path<String>>,
+    State(mut state): State<AppState>,
+    Json(request): Json<PeerPost>,
+) -> Json<StatusResponse<String>> {
+    let ipaddr = match request.ip_address.parse::<std::net::IpAddr>() {
+        Ok(ip) => ip,
+        Err(_) => {
+            return Json(StatusResponse::error("Invalid IP address".to_string()));
+        }
+    };
+
+    let public_key = if public_key.is_none() {
+        let peer = discover_peer(&mut state.node, ipaddr, request.port).await;
+        if peer.is_err() {
+            return Json(StatusResponse::error(format!("Failed to discover peer at {}:{}", request.ip_address, request.port)));
+        }
+        let peer = peer.unwrap();
+        peer.public_key
+    } else {
+        let publickey_array = match hex::decode(public_key.unwrap().as_str()) {
+            Ok(pk) => pk,
+            Err(_) => {
+                return Json(StatusResponse::error("Invalid public key".to_string()));
+            }
+        }.as_slice()
+        .try_into();
+        if publickey_array.is_err() {
+            return Json(StatusResponse::error("Public key must be 32 bytes".to_string()));
+        }
+        publickey_array.unwrap()
+    };
+
+    tracing::info!("Handling peer post for peer {} at {}:{}", hex::encode(public_key), request.ip_address, request.port);
+
+    let result = state.node.maybe_update_peer(Peer::new(public_key, ipaddr, request.port)).await;
+    let response = if let Err(e) = result {
+        StatusResponse::error(format!("Failed to add peer: {e:?}"))
+    }else{
+        tracing::info!("Successfully added peer {} at {}:{}", hex::encode(public_key), request.ip_address, request.port);
+        StatusResponse::success("success".to_string())
+    };
+    Json(response)
+}
+
+async fn handle_peer_discover(
+    State(state): State<AppState>,
+) -> Json<StatusResponse<()>> { 
+    let result = discover_peers(&state.node).await;
+    match result {
+        Ok(_) => {
+            Json(StatusResponse::success(()))
+        },
+        Err(e) => {
+            Json(StatusResponse::error(format!("Failed to discover peers: {:?}", e)))
+        }
+    }
+}
+#[derive(Serialize, Deserialize)]
+struct PeerResponse {
+    public_key: StdByteArray,
+    ip_address: String,
+    port: u16,
+}
+
+async fn handle_peer_get(
+    State(state): State<AppState>,
+) -> Json<StatusResponse<Vec<PeerResponse>>> {
+    let peers = state.node.inner.peers.read().await.clone();
+    let peer_responses: Vec<PeerResponse> = peers.into_values().map(|peer| PeerResponse {
+        public_key: peer.public_key,
+        ip_address: peer.ip_address.to_string(),
+        port: peer.port,
+    }).collect();
+    Json(StatusResponse::success(peer_responses))
+}
+
+#[derive(Serialize, Deserialize)]
+struct HeaderResponse {
+    previous: StdByteArray,
+    merkle_root: StdByteArray,
+    timestamp: u64,
+    nonce: u32,
+    depth: u64,
+    version: u16,
+    miner: StdByteArray,
+    state_root: StdByteArray,
+    difficulty_target: u64,
+    stampers: Vec<StdByteArray>
+}
+
+#[derive(Serialize, Deserialize)]
+struct BlockResponse {
+    hash: StdByteArray,
+    header: HeaderResponse,
+    transaction_hashs: Vec<StdByteArray>
+}
+
+async fn handle_block_get(
+    Path(hash): Path<String>,
+    State(state): State<AppState>,
+) -> Json<StatusResponse<BlockResponse>> {
+    let hash_bytes = match hex::decode(&hash) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return Json(StatusResponse::error("Invalid block hash".to_string()));
+        }
+    };
+    if hash_bytes.len() != 32 {
+        return Json(StatusResponse::error("Block hash must be 32 bytes".to_string()));
+    }
+    let hash_array: [u8; 32] = hash_bytes.as_slice().try_into().unwrap();
+
+    let chain = state.node.lock_chain().await;
+    let block = match &*chain {
+        Some(chain) => chain.get_block(&hash_array),
+        None => {
+            return Json(StatusResponse::error("Node has no chain".to_string()));
+        }
+    };
+    match block {
+        None => {
+            Json(StatusResponse::error("Block not found".to_string()))
+        }
+        Some(block) => {
+            let header_response = HeaderResponse{
+                previous: block.header.previous_hash,
+                merkle_root: block.header.merkle_root,
+                timestamp: block.header.timestamp,
+                nonce: block.header.nonce as u32,
+                depth: block.header.depth,
+                version: u16::from_le_bytes(block.header.version),
+                miner: block.header.completion.as_ref().map_or([0u8; 32], |c| c.miner_address),
+                state_root: block.header.completion.as_ref().map_or([0u8; 32], |c| c.state_root),
+                difficulty_target: block.header.completion.as_ref().map_or(0, |c| c.difficulty_target),
+                stampers: block.header.tail.get_stampers().iter().cloned().collect()
+            };
+            let response = BlockResponse {
+                hash: block.header.completion.as_ref().unwrap().hash,
+                header: header_response,
+                transaction_hashs: block.transactions.iter().map(|tx| tx.hash).collect()
+            };
+            Json(StatusResponse::success(response))
+        },
+    }
+}
+
+#[derive(Deserialize)]
+struct BlockQuery{
+    min_depth: Option<u64>,
+    max_depth: Option<u64>,
+    limit: Option<usize>
+}
+
+/// Handle HTTP get to list blocks
+/// Returns a list of block hashes
+/// # Arguments
+/// * `State(state)`: The application state containing the node
+/// * `Query(query)`: The block query parameters
+///   - `min_depth`: Minimum depth of blocks to return
+///   - `max_depth`: Maximum depth of blocks to return
+///   - `limit`: Maximum number of blocks to return
+///
+/// The returned blocks are ordered from deepest to shallowest, in DFS order
+async fn handle_block_list(
+    Query(query): Query<BlockQuery>,
+    State(state): State<AppState>,
+) -> Json<StatusResponse<Vec<StdByteArray>>> {
+    let chain = state.node.lock_chain().await;
+    let response = match &*chain {
+        Some(chain) => {
+            let hashes = chain.query_blocks(query.min_depth, query.max_depth, query.limit);
+            StatusResponse::success(hashes)
+        },
+        None => {
+            StatusResponse::error("Node has no chain".to_string())
+        }
+    };
+    Json(response)
+}
+
+#[derive(Serialize, Deserialize)]
+struct NodeInfo {
+    public_key: StdByteArray,
+    ip_address: String,
+    port: u16,
+    peer_count: usize,
+    state: String
+}
+
+async fn handle_node_get(
+    State(state): State<AppState>,
+) -> Json<StatusResponse<NodeInfo>> {
+    let peer_count = state.node.inner.peers.read().await.len();
+    let node_state = state.node.inner.state.read().await.clone();
+    let response = NodeInfo {
+        public_key: state.wallet.read().await.address,
+        ip_address: state.node.ip_address.to_string(),
+        port: state.node.port,
+        peer_count,
+        state: node_state.into()
+    };
+    Json(StatusResponse::success(response))
+}
+
+#[derive(Serialize, Deserialize)]
+struct WalletInfo {
+    private_key: String,
+    public_key: StdByteArray,
+    balance: u64,
+    nonce: u64
+}
+
+async fn handle_wallet_get(
+    State(state): State<AppState>,
+) -> Json<StatusResponse<WalletInfo>> {
+    let wallet = &state.wallet.read().await;
+
+    let chain = state.node
+        .lock_chain()
+        .await;
+
+    if chain.is_none() {
+        return Json(StatusResponse::error("Node has no chain".to_string()));
+    }
+    let chain = chain.as_ref().unwrap();
+
+    let state_root = chain.get_state_root();
+    if state_root.is_none() {
+        return Json(StatusResponse::error("Node has no state root".to_string()));
+    }
+    let state_root = state_root.unwrap();
+
+    let account = chain
+        .state_manager
+        .get_account(&wallet.address, state_root);
+
+    if account.is_none() {
+        return Json(StatusResponse::error("Failed to get account data from the chain (have you used it yet?)".to_string()));
+    }
+    let account = account.unwrap();
+
+    let response = WalletInfo {
+        private_key: hex::encode(wallet.get_private_key()),
+        public_key: wallet.address,
+        balance: account.balance,
+        nonce: account.nonce
+    };
+    Json(StatusResponse::success(response))
+}
+
+#[derive(Serialize, Deserialize)]
+struct TransactionResponse {
+    signature: String,
+    sender: StdByteArray,
+    receiver: StdByteArray,
+    amount: u64,
+    timestamp: u64,
+    nonce: u64,
+    hash: StdByteArray
+}
+
+impl From<&Transaction> for TransactionResponse {
+    fn from(tx: &Transaction) -> Self {
+        TransactionResponse {
+            signature: hex::encode(tx.signature),
+            sender: tx.header.sender,
+            receiver: tx.header.receiver,
+            amount: tx.header.amount,
+            timestamp: tx.header.timestamp,
+            nonce: tx.header.nonce,
+            hash: tx.hash
+        }
+    }
+}
+
+async fn handle_transaction_get(
+    Path((block_hash, hash)): Path<(String, String)>,
+    State(state): State<AppState>,
+) -> Json<StatusResponse<TransactionResponse>> {
+    let block_hash_bytes = match hex::decode(&block_hash) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return Json(StatusResponse::error("Invalid block hash".to_string()));
+        }
+    };
+    if block_hash_bytes.len() != 32 {
+        return Json(StatusResponse::error("Block hash must be 32 bytes".to_string()));
+    }
+    let block_hash_array: [u8; 32] = block_hash_bytes.as_slice().try_into().unwrap();
+
+    let hash_bytes = match hex::decode(&hash) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return Json(StatusResponse::error("Invalid transaction hash".to_string()));
+        }
+    };
+    if hash_bytes.len() != 32 {
+        return Json(StatusResponse::error("Transaction hash must be 32 bytes".to_string()));
+    }
+    let hash_array: [u8; 32] = hash_bytes.as_slice().try_into().unwrap();
+
+    let chain = state.node.lock_chain().await;
+    let block = match &*chain {
+        Some(chain) => chain.get_block(&block_hash_array),
+        None => {
+            return Json(StatusResponse::error("Node has no chain".to_string()));
+        }
+    };
+    match block {
+        None => {
+            Json(StatusResponse::error("Block not found".to_string()))
+        }
+        Some(block) => {
+            let transaction = block.transactions.iter().find(|tx| tx.hash == hash_array);
+            match transaction {
+                None => {
+                    Json(StatusResponse::error("Transaction not found in block".to_string()))
+                }
+                Some(tx) => Json(StatusResponse::success(TransactionResponse::from(tx))),
+            }
+        },
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct AccountInfo {
+    address: StdByteArray,
+    balance: u64,
+    reputation: f64,
+    nonce: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct StateResponse {
+    root: StdByteArray,
+    accounts: Vec<AccountInfo>,
+}
+
+async fn handle_state_get(
+    Path(block_hash): Path<String>,
+    State(state): State<AppState>,
+) -> Json<StatusResponse<StateResponse>> {
+    let block_hash_bytes = match hex::decode(&block_hash) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return Json(StatusResponse::error("Invalid block hash".to_string()));
+        }
+    };
+    if block_hash_bytes.len() != 32 {
+        return Json(StatusResponse::error("Block hash must be 32 bytes".to_string()));
+    }
+    let block_hash_array: [u8; 32] = block_hash_bytes.as_slice().try_into().unwrap();
+
+    let chain = state.node.lock_chain().await;
+    let block = match &*chain {
+        Some(chain) => chain.get_block(&block_hash_array),
+        None => {
+            return Json(StatusResponse::error("Node has no chain".to_string()));
+        }
+    };
+    match block {
+        None => {
+            Json(StatusResponse::error("Block not found".to_string()))
+        }
+        Some(block) => {
+            let state_root = match &block.header.completion.as_ref() {
+                Some(completion) => completion.state_root,
+                None => {
+                    return Json(StatusResponse::error("Block is not completed yet".to_string()));
+                }
+            };
+            let time = block.header.timestamp;
+            let accounts_map = chain.as_ref().unwrap().state_manager.get_all_accounts(state_root);
+            let accounts: Vec<AccountInfo> = accounts_map.iter().map(|account| {
+                let history = account.history.as_ref();
+                AccountInfo {
+                    address: account.address,
+                    balance: account.balance,
+                    reputation: if let Some(history) = history {
+                        history.compute_reputation(time)
+                    } else {
+                        0.0
+                    },
+                    nonce: account.nonce,
+                }
+            }).collect();
+            let response = StateResponse {
+                root: state_root,
+                accounts,
+            };
+            Json(StatusResponse::success(response))
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct FaucetResponse {
+    address: String,
+    private_key: String,
+    /// the wallet as a node stores it (`wallet.bin`), hex encoded
+    wallet_file: String,
+    amount: u64,
+    transaction_hash: String,
+}
+
+/// Create a wallet and pay it from this node's wallet.
+/// The new wallet is returned and never stored; if the caller loses it, the coins are gone.
+async fn handle_faucet_post(
+    State(mut state): State<AppState>,
+) -> Json<StatusResponse<FaucetResponse>> {
+    let Some(amount) = state.faucet_amount else {
+        return Json(StatusResponse::error("Faucet is disabled".to_string()));
+    };
+    let new_wallet = Wallet::generate_random();
+    let wallet_file = match new_wallet.serialize_blockchain() {
+        Ok(bytes) => bytes,
+        Err(e) => return Json(StatusResponse::error(format!("Failed to serialize wallet: {e}"))),
+    };
+
+    // held until the broadcast finishes, so faucet payments get consecutive nonces
+    let mut wallet = state.wallet.write().await;
+    // the in-memory nonce runs ahead of the chain while payments are pending, and the copy
+    // on disk can lag behind it after a restart; never go below what the chain has seen
+    let chain_nonce = {
+        let chain = state.node.lock_chain().await;
+        chain.as_ref()
+            .and_then(|chain| chain.get_state_root().and_then(|root| chain.state_manager.get_account(&wallet.address, root)))
+            .map(|account| account.nonce)
+    };
+    if let Some(chain_nonce) = chain_nonce {
+        let nonce = wallet.nonce_mut();
+        *nonce = (*nonce).max(chain_nonce);
+    }
+
+    match submit_transaction(&mut state.node, &mut wallet, new_wallet.address, amount, false, None).await {
+        Ok((_, transaction)) => {
+            tracing::info!("Faucet paid {} to {}", amount, hex::encode(new_wallet.address));
+            Json(StatusResponse::success(FaucetResponse {
+                address: hex::encode(new_wallet.address),
+                private_key: hex::encode(new_wallet.get_private_key()),
+                wallet_file: hex::encode(wallet_file),
+                amount,
+                transaction_hash: hex::encode(transaction.hash),
+            }))
+        }
+        Err(e) => {
+            // no peer accepted it, so the nonce was not used; hand it back
+            *wallet.nonce_mut() -= 1;
+            Json(StatusResponse::error(format!("Failed to submit transaction: {e:?}")))
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct AccountResponse {
+    address: String,
+    balance: u64,
+    nonce: u64,
+}
+
+/// Balance and nonce of any account at the current chain head
+async fn handle_account_get(
+    Path(address): Path<String>,
+    State(state): State<AppState>,
+) -> Json<StatusResponse<AccountResponse>> {
+    let address: StdByteArray = match hex::decode(&address).ok().and_then(|bytes| bytes.try_into().ok()) {
+        Some(address) => address,
+        None => return Json(StatusResponse::error("Address must be 32 hex-encoded bytes".to_string())),
+    };
+    let chain = state.node.lock_chain().await;
+    let Some(chain) = chain.as_ref() else {
+        return Json(StatusResponse::error("Node has no chain".to_string()));
+    };
+    let Some(state_root) = chain.get_state_root() else {
+        return Json(StatusResponse::error("Node has no state root".to_string()));
+    };
+    // an address the chain has never seen simply holds nothing yet
+    let (balance, nonce) = chain.state_manager.get_account(&address, state_root)
+        .map_or((0, 0), |account| (account.balance, account.nonce));
+    Json(StatusResponse::success(AccountResponse { address: hex::encode(address), balance, nonce }))
+}
+
+#[derive(Serialize, Deserialize)]
+struct TransactionStatusResponse {
+    /// "confirmed" (in the main chain), "pending" (sent through this node, not in a block
+    /// yet) or "unknown"
+    status: String,
+    block: Option<StdByteArray>,
+    depth: Option<u64>,
+    /// the transaction's block and every block on top of it
+    confirmations: Option<u64>,
+    transaction: Option<TransactionResponse>,
+}
+
+/// A transaction by its hash alone: where it is in the main chain, or that it's still pending
+async fn handle_transaction_status_get(
+    Path(hash): Path<String>,
+    State(state): State<AppState>,
+) -> Json<StatusResponse<TransactionStatusResponse>> {
+    let Some(hash) = parse_hash(&hash) else {
+        return Json(StatusResponse::error("Transaction hash must be 32 hex-encoded bytes".to_string()));
+    };
+    let chain = state.node.lock_chain().await;
+    let Some(chain) = chain.as_ref() else {
+        return Json(StatusResponse::error("Node has no chain".to_string()));
+    };
+    let found = chain.main_chain().find_map(|(block_hash, block)| {
+        block.transactions.iter().find(|tx| tx.hash == hash).map(|tx| (block_hash, block.header.depth, tx))
+    });
+    let response = match found {
+        Some((block_hash, depth, tx)) => {
+            state.sent.lock().unwrap().retain(|sent| sent.hash != hash);
+            TransactionStatusResponse {
+                status: "confirmed".to_string(),
+                block: Some(block_hash),
+                depth: Some(depth),
+                confirmations: Some(chain.depth - depth + 1),
+                transaction: Some(TransactionResponse::from(tx)),
+            }
+        }
+        None => match state.sent.lock().unwrap().iter().find(|sent| sent.hash == hash) {
+            Some(tx) => TransactionStatusResponse {
+                status: "pending".to_string(),
+                block: None, depth: None, confirmations: None,
+                transaction: Some(TransactionResponse::from(tx)),
+            },
+            None => TransactionStatusResponse {
+                status: "unknown".to_string(),
+                block: None, depth: None, confirmations: None, transaction: None,
+            },
+        },
+    };
+    Json(StatusResponse::success(response))
+}
+
+#[derive(Deserialize)]
+struct LimitQuery {
+    limit: Option<usize>,
+}
+const DEFAULT_LIMIT: usize = 50;
+const MAX_LIMIT: usize = 500;
+
+#[derive(Serialize, Deserialize)]
+struct AccountTransaction {
+    /// "sent", "received", or "self" (sent to itself)
+    direction: String,
+    block: StdByteArray,
+    depth: u64,
+    confirmations: u64,
+    transaction: TransactionResponse,
+}
+
+/// An account's transactions in the main chain, newest first
+async fn handle_account_transactions_get(
+    Path(address): Path<String>,
+    Query(query): Query<LimitQuery>,
+    State(state): State<AppState>,
+) -> Json<StatusResponse<Vec<AccountTransaction>>> {
+    let Some(address) = parse_hash(&address) else {
+        return Json(StatusResponse::error("Address must be 32 hex-encoded bytes".to_string()));
+    };
+    let limit = query.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT);
+    let chain = state.node.lock_chain().await;
+    let Some(chain) = chain.as_ref() else {
+        return Json(StatusResponse::error("Node has no chain".to_string()));
+    };
+    let history = chain.main_chain()
+        .flat_map(|(block_hash, block)| block.transactions.iter().rev().map(move |tx| (block_hash, block.header.depth, tx)))
+        .filter(|(_, _, tx)| tx.header.sender == address || tx.header.receiver == address)
+        .take(limit)
+        .map(|(block_hash, depth, tx)| AccountTransaction {
+            direction: match (tx.header.sender == address, tx.header.receiver == address) {
+                (true, true) => "self",
+                (true, false) => "sent",
+                _ => "received",
+            }.to_string(),
+            block: block_hash,
+            depth,
+            confirmations: chain.depth - depth + 1,
+            transaction: TransactionResponse::from(tx),
+        })
+        .collect();
+    Json(StatusResponse::success(history))
+}
+
+#[derive(Serialize, Deserialize)]
+struct ChainBlock {
+    hash: StdByteArray,
+    depth: u64,
+    timestamp: u64,
+    transactions: usize,
+}
+
+impl ChainBlock {
+    fn new(hash: StdByteArray, block: &Block) -> Self {
+        ChainBlock { hash, depth: block.header.depth, timestamp: block.header.timestamp, transactions: block.transactions.len() }
+    }
+}
+
+/// The main chain only (no abandoned forks), tip first
+async fn handle_chain_get(
+    Query(query): Query<LimitQuery>,
+    State(state): State<AppState>,
+) -> Json<StatusResponse<Vec<ChainBlock>>> {
+    let limit = query.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT);
+    let chain = state.node.lock_chain().await;
+    let Some(chain) = chain.as_ref() else {
+        return Json(StatusResponse::error("Node has no chain".to_string()));
+    };
+    Json(StatusResponse::success(chain.main_chain().take(limit).map(|(hash, block)| ChainBlock::new(hash, block)).collect()))
+}
+
+/// The main chain's tip: compare with another node's to see whether this one is in sync
+async fn handle_tip_get(
+    State(state): State<AppState>,
+) -> Json<StatusResponse<ChainBlock>> {
+    let chain = state.node.lock_chain().await;
+    match chain.as_ref().and_then(|chain| chain.main_chain().next()) {
+        Some((hash, block)) => Json(StatusResponse::success(ChainBlock::new(hash, block))),
+        None => Json(StatusResponse::error("Node has no chain".to_string())),
+    }
+}
+
+async fn handle_init_download(
+    State(state): State<AppState>,
+) -> Json<StatusResponse<()>> {
+    tracing::info!("Triggering chain init.");
+    state.node.initialize_chain().await;
+    Json(StatusResponse { success: true, error: None, body: None })
+}
+
+pub async fn launch_node(
+    genesis: bool,
+    miner: bool,
+    wkps: Vec<Peer>,
+    ip_address: std::net::IpAddr,
+    root: std::path::PathBuf,
+    faucet_amount: Option<u64>,
+) {
+
+    let persistence_manager = PersistenceManager::new(Some(root));
+    let mut wallet = match persistence_manager.load_wallet().await.expect("Failed to access wallet on disk") {
+        Some(wallet) => {
+            tracing::info!("Loaded existing wallet from disk with address: {}", hex::encode(wallet.address));
+            wallet
+        },
+        None => {
+            tracing::info!("No existing wallet found on disk, generating new wallet.");
+            let wallet = Wallet::generate_random();
+            persistence_manager.save_wallet(&wallet).await.expect("Failed to save new wallet to disk");
+            tracing::info!("Generated new wallet with address: {}", hex::encode(wallet.address));
+            wallet
+        }
+    };
+
+    let mut node = if persistence_manager.has_node() {
+        tracing::info!("Loading existing node configuration from disk.");
+        Node::new_load(&persistence_manager).await.expect("Failed to load existing node")
+    } else {
+        tracing::info!("Creating new node configuration.");
+        Node::new(
+            wallet.address,
+            wallet.get_private_key(),
+            ip_address,
+            blockchain_core::PROTOCOL_PORT,
+            vec![],
+            genesis
+        )
+    };
+    node.ip_address = ip_address; // override ip address to bind to, as it may have changed
+
+    // The transaction pool isn't saved, so nothing this wallet sent before a restart is still
+    // pending, but the saved nonce counts it. Continue from the chain's nonce instead, or every
+    // later transaction would leave a gap and be rejected.
+    if let Some(chain) = node.inner.chain.lock().await.as_ref() {
+        let account = chain.get_state_root().and_then(|root| chain.state_manager.get_account(&wallet.address, root));
+        let chain_nonce = account.map_or(0, |account| account.nonce);
+        if *wallet.nonce_mut() != chain_nonce {
+            tracing::info!("Wallet nonce {} reset to the chain's {}", wallet.nonce(), chain_nonce);
+            *wallet.nonce_mut() = chain_nonce;
+        }
+    }
+
+    
+    for peer in &wkps {
+        tracing::info!("Configuring well-known peer: {}:{}", peer.ip_address, peer.port);
+        // we need to actually discover the peer to get its public key
+        let discovered = discover_peer(&mut node, peer.ip_address.into(), peer.port).await;
+        match discovered {
+            Ok(peer) => {
+                node.maybe_update_peer(peer).await.ok();
+                tracing::info!("Discovered peer: {}:{}", peer.ip_address, peer.port);
+            },
+            Err(e) => {
+                tracing::error!("Failed to discover peer: {}:{} - {:?}", peer.ip_address, peer.port, e);
+            }
+        }
+    }
+
+    if miner {
+        let mut miner = Miner::new(node.clone()).expect("Failed to create miner");
+        miner.serve().await;
+    }else{
+        node.serve().await;
+    }
+
+
+    let api_address = format!("{ip_address}:3000");
+    let logs_address = format!("{ip_address}:3001");
+    let state = AppState {
+        node,
+        wallet: Arc::new(RwLock::new(wallet)),
+        faucet_amount,
+        sent: SentTransactions::default(),
+    };
+    let cors = CorsLayer::new()
+        .allow_origin(Any)      // allow all origins
+        .allow_methods(Any)     // allow all HTTP methods
+        .allow_headers(Any);              // allow all headers
+    let app_api = Router::new()
+        // get
+        .route("/ws", get(ws_route))
+        .route("/peers", get(handle_peer_get))
+        .route("/transaction/{hash}", get(handle_transaction_status_get))
+        .route("/transaction/{block_hash}/{hash}", get(handle_transaction_get))
+        .route("/block/{hash}", get(handle_block_get))
+        .route("/state/{block_hash}", get(handle_state_get))
+        .route("/blocks", get(handle_block_list))
+        .route("/node", get(handle_node_get))
+        .route("/wallet", get(handle_wallet_get))
+        .route("/account/{address}", get(handle_account_get))
+        .route("/account/{address}/transactions", get(handle_account_transactions_get))
+        .route("/chain", get(handle_chain_get))
+        .route("/tip", get(handle_tip_get))
+        // post
+        .route("/peer/{public_key}", post(handle_peer_post)) // allow with public key
+        .route("/peer", post(handle_peer_post)) // allow without public key
+        .route("/peer/discover", post(handle_peer_discover)) // do peer discovery
+        .route("/init", post(handle_init_download))
+        .route("/faucet", post(handle_faucet_post))
+        .with_state(state.clone())
+        .layer(cors);
+    
+    let app_logs = Router::new().route("/logs", get(ws_logs));
+
+    let api_listener = tokio::net::TcpListener::bind(api_address.clone()).await.unwrap();
+    let logs_listener = tokio::net::TcpListener::bind(logs_address.clone()).await.unwrap();
+
+    tracing::info!("Listening on {}", api_address);
+    tracing::info!("Listening for log requests on {}", logs_address);
+
+    // registered before the first save, so a stop at any point is caught
+    let mut terminate = signal(SignalKind::terminate()).expect("Failed to listen for SIGTERM");
+    tokio::spawn(async move {
+        loop {
+            tracing::debug!("Saving...");
+            persistence_manager.save_node(&state.node).await.expect("Failed to save node state to disk");
+            persistence_manager.save_wallet(&state.wallet.read().await.clone()).await.expect("Failed to save wallet to disk");
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => {}
+                // without a save here, a stop loses everything since the last one
+                _ = terminate.recv() => break,
+                _ = tokio::signal::ctrl_c() => break,
+            }
+        }
+        tracing::info!("Stopping; saving state");
+        persistence_manager.save_node(&state.node).await.expect("Failed to save node state to disk");
+        persistence_manager.save_wallet(&state.wallet.read().await.clone()).await.expect("Failed to save wallet to disk");
+        std::process::exit(0);
+    });
+
+    let _ = tokio::join!(
+        axum::serve(api_listener, app_api),
+        axum::serve(logs_listener, app_logs),
+    );
+}

@@ -2,14 +2,14 @@
 set -euo pipefail
 trap 'echo "Error on line $LINENO: $BASH_COMMAND" >&2' ERR
 
-NETWORK="pillar"
+NETWORK="blockchain"
 SUBNET_RANGE="10.9.0.0/24"
 WORKDIR="$(pwd)/work"
 mkdir -p "$WORKDIR"
 
 # Ensure image exists
-if ! docker image inspect pillar >/dev/null 2>&1; then
-    echo "Error: Docker image 'pillar' not found." >&2
+if ! docker image inspect blockchain >/dev/null 2>&1; then
+    echo "Error: Docker image 'blockchain' not found." >&2
     exit 1
 fi
 
@@ -53,7 +53,7 @@ else
 fi
 
 # Unique container name
-CONTAINER_NAME="pillar_$(uuidgen | tr 'A-Z' 'a-z' | cut -d'-' -f1)"
+CONTAINER_NAME="blockchain_$(uuidgen | tr 'A-Z' 'a-z' | cut -d'-' -f1)"
 
 echo "Starting container: $CONTAINER_NAME ($DOCKER_IP_ARG, app $APP_IP_ARG)"
 
@@ -62,7 +62,7 @@ if ! OUT=$(docker run -d --rm --init \
     $DOCKER_IP_ARG \
     -v "$WORKDIR":/usr/local/bin/work \
     --name "$CONTAINER_NAME" \
-    pillar "$APP_IP_ARG" "$@" 2>&1); then
+    blockchain "$APP_IP_ARG" "$@" 2>&1); then
     echo "Docker run failed:"
     echo "$OUT"
     exit 1
